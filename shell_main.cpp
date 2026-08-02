@@ -22,6 +22,7 @@
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
 #include "core/command_bus.h"
+#include "core/fault_policy.h"
 
 // ─────────────────────────────── 공용 상태 ──────────────────────────────────
 static ID3D11Device*           g_dev  = nullptr;
@@ -58,51 +59,37 @@ struct LogRing {
 static LogRing g_log, g_signalLog, g_orderLog;
 
 // ─────────────────────────────── 결함 정책표 ────────────────────────────────
-enum class Fault { DeviceLost, RenderStall, WsDisconnected, WsStale,
-                   HttpRateLimited, TokenExpired, BarGap, DataCorrupt,
-                   OrderRejected, PositionMismatch, COUNT };
-enum class Action { Ignore, SoftReset, FeedReset, HardRestart, Observe };
-
-static const char* kFaultName[] = { "DeviceLost","RenderStall","WsDisconnected","WsStale",
-    "HttpRateLimited","TokenExpired","BarGap","DataCorrupt","OrderRejected","PositionMismatch" };
-static const char* kActionName[] = { "Ignore","SoftReset","FeedReset","HardRestart","Observe" };
-
-struct Policy { Action first; int window_s; int threshold; Action escalated; };
-static const Policy kPolicy[(int)Fault::COUNT] = {
-    { Action::SoftReset,   60,  3, Action::HardRestart }, // DeviceLost
-    { Action::SoftReset,   60,  5, Action::HardRestart }, // RenderStall
-    { Action::FeedReset,  300,  5, Action::HardRestart }, // WsDisconnected
-    { Action::FeedReset,  300,  3, Action::HardRestart }, // WsStale
-    { Action::Ignore,      60, 20, Action::FeedReset   }, // HttpRateLimited
-    { Action::FeedReset,  600,  3, Action::Observe     }, // TokenExpired
-    { Action::FeedReset,  300, 10, Action::HardRestart }, // BarGap
-    { Action::FeedReset,   60,  3, Action::HardRestart }, // DataCorrupt
-    { Action::Ignore,      60,  3, Action::Observe     }, // OrderRejected
-    { Action::Observe,      0,  0, Action::Observe     }, // PositionMismatch
-};
-struct FaultStat { int total = 0; int recent = 0; double windowStart = 0; Action last = Action::Ignore; };
-static FaultStat g_faultStat[(int)Fault::COUNT];
 static std::atomic<bool> g_observeMode{ false };
 
-static double NowSec() {
-    static LARGE_INTEGER f = [] { LARGE_INTEGER q; QueryPerformanceFrequency(&q); return q; }();
-    LARGE_INTEGER t; QueryPerformanceCounter(&t);
-    return (double)t.QuadPart / (double)f.QuadPart;
+static FaultPolicy g_faultPolicy(
+    &g_observeMode,
+    &g_wakeFrames,
+    [](const char* category, const char* message) {
+        g_log.Add(category, "%s", message);
+    });
+
+static void RaiseFault(
+    Fault fault,
+    const char* context)
+{
+    g_faultPolicy.Raise(fault, context);
 }
 
-// 호출 지점은 이것만 부르고 즉시 리턴한다. 판단은 전부 여기서.
-static void RaiseFault(Fault f, const char* ctx) {
-    int i = (int)f; const Policy& p = kPolicy[i]; FaultStat& s = g_faultStat[i];
-    double now = NowSec();
-    if (p.window_s > 0 && now - s.windowStart > p.window_s) { s.windowStart = now; s.recent = 0; }
-    ++s.total; ++s.recent;
-    Action a = (p.threshold > 0 && s.recent >= p.threshold) ? p.escalated : p.first;
-    s.last = a;
-    if (a == Action::Observe) g_observeMode = true;
-    g_log.Add("FAULT", "%s (%s) x%d → %s", kFaultName[i], ctx, s.recent, kActionName[(int)a]);
-    g_wakeFrames = 60;
-}
+static double NowSec()
+{
+    static LARGE_INTEGER frequency = [] {
+        LARGE_INTEGER value;
+        QueryPerformanceFrequency(&value);
+        return value;
+    }();
 
+    LARGE_INTEGER counter;
+    QueryPerformanceCounter(&counter);
+
+    return
+        static_cast<double>(counter.QuadPart) /
+        static_cast<double>(frequency.QuadPart);
+}
 // ─────────────────────────────── 커맨드 버스 인스턴스 ────────────────────────
 static CommandBus g_bus(&g_wakeFrames);
 
@@ -653,35 +640,110 @@ static void DrawLogWindow(const char* title, LogRing& ring) {
     ImGui::End();
 }
 
-static void DrawFaultWindow() {
+static void DrawFaultWindow()
+{
     ImGui::Begin("결함");
-    ImGui::TextDisabled("중앙 정책표 — 호출 지점은 신고만 하고 판단하지 않는다");
-    if (ImGui::BeginTable("ft", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
-        const char* hdr[] = { "결함","기본조치","임계","누적","최근조치" };
-        for (auto h : hdr) ImGui::TableSetupColumn(h);
-        ImGui::TableHeadersRow();
-        for (int i = 0; i < (int)Fault::COUNT; ++i) {
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn(); ImGui::TextUnformatted(kFaultName[i]);
-            ImGui::TableNextColumn(); ImGui::TextUnformatted(kActionName[(int)kPolicy[i].first]);
-            ImGui::TableNextColumn(); ImGui::Text("%d/%ds", kPolicy[i].threshold, kPolicy[i].window_s);
-            ImGui::TableNextColumn(); ImGui::Text("%d", g_faultStat[i].total);
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(g_faultStat[i].total ? kActionName[(int)g_faultStat[i].last] : "-");
+    ImGui::TextDisabled(
+        "중앙 정책표 — 호출 지점은 신고만 하고 판단하지 않는다");
+
+    if (ImGui::BeginTable(
+        "ft",
+        5,
+        ImGuiTableFlags_Borders |
+        ImGuiTableFlags_RowBg))
+    {
+        const char* headers[] = {
+            "결함",
+            "기본조치",
+            "임계",
+            "누적",
+            "최근조치"
+        };
+
+        for (const char* header : headers) {
+            ImGui::TableSetupColumn(header);
         }
+
+        ImGui::TableHeadersRow();
+
+        for (
+            int i = 0;
+            i < static_cast<int>(Fault::COUNT);
+            ++i)
+        {
+            const Fault fault =
+                static_cast<Fault>(i);
+
+            const FaultRule& rule =
+                g_faultPolicy.GetRule(fault);
+
+            const FaultStat& stat =
+                g_faultPolicy.GetStat(fault);
+
+            ImGui::TableNextRow();
+
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(
+                FaultPolicy::FaultName(fault));
+
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(
+                FaultPolicy::ActionName(rule.first));
+
+            ImGui::TableNextColumn();
+            ImGui::Text(
+                "%d/%ds",
+                rule.threshold,
+                rule.windowSeconds);
+
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", stat.total);
+
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(
+                stat.total > 0
+                    ? FaultPolicy::ActionName(stat.last)
+                    : "-");
+        }
+
         ImGui::EndTable();
     }
+
     ImGui::Separator();
-    if (ImGui::Button("WS 끊김 시뮬레이션")) RaiseFault(Fault::WsDisconnected, "simulate");
+
+    if (ImGui::Button("WS 끊김 시뮬레이션")) {
+        RaiseFault(
+            Fault::WsDisconnected,
+            "simulate");
+    }
+
     ImGui::SameLine();
-    if (ImGui::Button("유량 초과 시뮬레이션")) RaiseFault(Fault::HttpRateLimited, "simulate");
+
+    if (ImGui::Button("유량 초과 시뮬레이션")) {
+        RaiseFault(
+            Fault::HttpRateLimited,
+            "simulate");
+    }
+
     ImGui::SameLine();
-    if (ImGui::Button("포지션 불일치")) RaiseFault(Fault::PositionMismatch, "simulate");
+
+    if (ImGui::Button("포지션 불일치")) {
+        RaiseFault(
+            Fault::PositionMismatch,
+            "simulate");
+    }
+
     ImGui::SameLine();
-    if (ImGui::Button("관망 해제")) { g_observeMode = false; g_log.Add("SYS", "관망 모드 해제 (수동)"); }
+
+    if (ImGui::Button("관망 해제")) {
+        g_observeMode = false;
+        g_log.Add(
+            "SYS",
+            "관망 모드 해제 (수동)");
+    }
+
     ImGui::End();
 }
-
 // ─────────────────────────────── 엔진 스텁 ──────────────────────────────────
 static void DrainCommands() {
     Command c;

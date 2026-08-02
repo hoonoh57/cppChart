@@ -1,0 +1,5 @@
+Dear ImGui vendored dependency
+
+remote=https://github.com/ocornut/imgui.git
+commit=b48d1afbe8ee8b238e2961dc363a949dd7304e23
+vendored_at=2026-08-02

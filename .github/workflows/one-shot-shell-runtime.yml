@@ -7,6 +7,7 @@ on:
     paths:
       - scripts/migrate_shell_runtime.py
       - scripts/harden_shell_thread_handoff.py
+      - scripts/integrate_kiwoom_runtime_shell.py
       - build.bat
       - .github/workflows/one-shot-shell-runtime.yml
   pull_request:
@@ -15,6 +16,7 @@ on:
     paths:
       - scripts/migrate_shell_runtime.py
       - scripts/harden_shell_thread_handoff.py
+      - scripts/integrate_kiwoom_runtime_shell.py
       - build.bat
       - .github/workflows/one-shot-shell-runtime.yml
 
@@ -42,19 +44,22 @@ jobs:
         run: |
           python .\scripts\migrate_shell_runtime.py
           python .\scripts\harden_shell_thread_handoff.py
+          python .\scripts\integrate_kiwoom_runtime_shell.py
 
       - name: Verify migration contract
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $source = Get-Content .\shell_main.cpp -Raw
+          $winHttp = Get-Content .\platform\winhttp_transport.cpp -Raw
           $required = @(
             'CPPCHART_SHARED_RUNTIME_INTEGRATED',
             'CPPCHART_UI_THREAD_DATA_HANDOFF',
+            'CPPCHART_KIWOOM_RUNTIME_CONNECTED',
             'std::atomic<int> g_wakeFrames',
             'trading::TradingState g_tradingState',
-            'trading::EpochMillis tsClose',
-            'trading::TickCount tickCount',
+            'trading::KiwoomRuntimeEngine g_kiwoomRuntimeEngine',
+            'WinHttpKiwoomTransport',
             'g_marketDataDirty',
             'ApplyLocalFill('
           )
@@ -62,6 +67,9 @@ jobs:
             if (-not $source.Contains($marker)) {
               throw "Missing migrated marker: $marker"
             }
+          }
+          if (-not $winHttp.Contains('CPPCHART_CONTINUATION_HEADERS')) {
+            throw 'WinHTTP continuation headers are not integrated'
           }
           if ($source.Contains('struct Position {')) {
             throw 'Legacy Position structure remains'
@@ -80,7 +88,7 @@ jobs:
           if (-not $installation) { throw 'Visual Studio C++ toolchain not found' }
           "devcmd=$(Join-Path $installation 'Common7\Tools\VsDevCmd.bat')" >> $env:GITHUB_OUTPUT
 
-      - name: Build migrated shell
+      - name: Build integrated shell
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -96,7 +104,7 @@ jobs:
           & cmd.exe /d /s /c "`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && call tests\run_all.bat"
           if ($LASTEXITCODE -ne 0) { throw "tests failed, exit code=$LASTEXITCODE" }
 
-      - name: Commit migrated shell
+      - name: Commit integrated shell
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -106,6 +114,6 @@ jobs:
           }
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add shell_main.cpp
-          git commit -m 'Harden shell feed and UI thread handoff'
+          git add shell_main.cpp platform/winhttp_transport.cpp
+          git commit -m 'Connect Kiwoom runtime to trading shell'
           git push origin HEAD:p2/kiwoom-mock-gateway

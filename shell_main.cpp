@@ -14,6 +14,7 @@
 #include <atomic>
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <cstdint>
 #include <memory>
 #include <utility>

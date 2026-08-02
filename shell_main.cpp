@@ -10,7 +10,6 @@
 #include <d3dcompiler.h>
 #include <string>
 #include <vector>
-#include <deque>
 #include <mutex>
 #include <thread>
 #include <atomic>
@@ -22,6 +21,7 @@
 #include "imgui_internal.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
+#include "core/command_bus.h"
 
 // ─────────────────────────────── 공용 상태 ──────────────────────────────────
 static ID3D11Device*           g_dev  = nullptr;
@@ -103,23 +103,9 @@ static void RaiseFault(Fault f, const char* ctx) {
     g_wakeFrames = 60;
 }
 
-// ─────────────────────────────── 커맨드 버스 ────────────────────────────────
-enum class Cmd { LoadSymbol, Backfill, PromoteTarget, DemoteTarget,
-                 LiquidateAll, LiquidateSelected, ArmStrategy, DisarmStrategy,
-                 OpenMultiChart, ResetSoft, ResetFeed, ResetHard };
-struct Command { Cmd type; std::string arg; int i0 = 0; };
+// ─────────────────────────────── 커맨드 버스 인스턴스 ────────────────────────
+static CommandBus g_bus(&g_wakeFrames);
 
-struct CommandBus {
-    std::mutex mtx; std::deque<Command> q;
-    void Push(Cmd c, std::string arg = "", int i0 = 0) {
-        std::lock_guard<std::mutex> lk(mtx); q.push_back({ c, std::move(arg), i0 }); g_wakeFrames = 60;
-    }
-    bool Pop(Command& out) {
-        std::lock_guard<std::mutex> lk(mtx);
-        if (q.empty()) return false; out = q.front(); q.pop_front(); return true;
-    }
-};
-static CommandBus g_bus;
 
 // ─────────────────────────────── 파라미터 레지스트리 ────────────────────────
 enum class PType { Int, Float, Bool, Color };

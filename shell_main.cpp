@@ -32,6 +32,7 @@
 #include "core/trading_state.h"
 
 // CPPCHART_SHARED_RUNTIME_INTEGRATED
+// CPPCHART_UI_THREAD_DATA_HANDOFF
 
 // ─────────────────────────────── 공용 상태 ──────────────────────────────────
 static ID3D11Device*           g_dev  = nullptr;
@@ -217,6 +218,8 @@ static std::string g_runtimeConfigError;
 static std::atomic<std::uint64_t> g_localOrderSequence{ 1 };
 static int g_mockOrderQty = 1;
 static std::mutex g_dataMtx;
+static std::mutex g_paramMtx;
+static std::atomic<bool> g_marketDataDirty{ true };
 
 struct Health {
     std::atomic<bool> wsUp{ true };
@@ -615,11 +618,18 @@ static std::vector<int> g_targets = { 1,2,3 };
 // 캔버스를 ImGui 이미지로 배치 + 휠/드래그 상호작용
 static void ChartWidget(Canvas& cv, Series& s, View& view, ImVec2 size, bool volumePane, bool overlay) {
     cv.Ensure((int)size.x, (int)size.y);
-    if (cv.dirty) RenderChart(cv, s, view, volumePane, overlay);
+    if (cv.dirty) {
+        std::lock_guard<std::mutex> dataLock(g_dataMtx);
+        RenderChart(cv, s, view, volumePane, overlay);
+    }
     ImGui::Image((ImTextureID)(intptr_t)cv.srv, size);
     if (ImGui::IsItemHovered()) {
         ImGuiIO& io = ImGui::GetIO();
-        int n = (int)s.bars.size();
+        int n = 0;
+        {
+            std::lock_guard<std::mutex> dataLock(g_dataMtx);
+            n = static_cast<int>(s.bars.size());
+        }
         int vis = view.visible > 0 ? view.visible : P_visibleBars;
         if (io.MouseWheel != 0.f) {
             int nv = (int)(vis * (io.MouseWheel > 0 ? 0.87f : 1.15f));
@@ -783,6 +793,7 @@ static void DrawScanner() {
 
 static void DrawProperty() {
     ImGui::Begin("프로퍼티");
+    std::lock_guard<std::mutex> parameterLock(g_paramMtx);
     if (ImGui::BeginTabBar("ptabs")) {
         const char* groups[] = { "차트","전략","선별" };
         for (const char* grp : groups) {
@@ -1180,6 +1191,7 @@ static void DrainCommands()
                 }
             }
 
+            g_health.subCount = static_cast<int>(g_targets.size()) + 1;
             g_log.Add(
                 "CMD",
                 "매매대상 승격: %s",
@@ -1401,17 +1413,22 @@ static void MockFeedThread() {
             }
         }
 
-        g_mainCanvas.dirty = true;
-        for (Canvas& canvas : g_multi) canvas.dirty = true;
+        g_marketDataDirty.store(true, std::memory_order_release);
         g_health.latencyMs = 8 + static_cast<int>(rng() % 20);
         g_health.rateUsed = static_cast<int>(rng() % 45);
-        g_health.subCount = static_cast<int>(g_targets.size()) + 1;
         if (++tick % 12 == 0) {
+            int jmaFast = 0;
+            int jmaMid = 0;
+            {
+                std::lock_guard<std::mutex> parameterLock(g_paramMtx);
+                jmaFast = P_jmaFast;
+                jmaMid = P_jmaMid;
+            }
             g_signalLog.Add(
                 "SIG",
                 "JMA(%d/%d) 교차 후보 감지 — 스텁",
-                P_jmaFast,
-                P_jmaMid);
+                jmaFast,
+                jmaMid);
         }
         WakeFrames(2);
         std::this_thread::sleep_for(std::chrono::milliseconds(400));
@@ -1596,6 +1613,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     g_health.wsUp = IsLocalMock();
     MakeMockData();
+    g_health.subCount = static_cast<int>(g_targets.size()) + 1;
+    g_marketDataDirty.store(true, std::memory_order_release);
     g_health.bootMs = (NowSec() - t0) * 1000.0;
     g_log.Add(
         "SYS",
@@ -1634,6 +1653,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
         double fstart = NowSec();
         DrainCommands();
+
+        if (g_marketDataDirty.exchange(false, std::memory_order_acq_rel)) {
+            g_mainCanvas.dirty = true;
+            for (Canvas& canvas : g_multi) canvas.dirty = true;
+        }
 
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();

@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 //  Trading Shell — UI 골격 (엔진 스텁 / 목데이터)
 //  · Dear ImGui(docking) + D3D11, 단일 디바이스
 //  · 차트 = 오프스크린 RT, dirty 시에만 재렌더 → 티어별 갱신주기 설계와 일치
@@ -146,6 +146,8 @@ struct Position { std::string code, name; int qty; float avg, cur; bool sel = fa
 
 static std::vector<Series>  g_series;      // [0] = 지수
 static std::vector<Position> g_positions;
+static double g_realizedPnL = 0.0;
+static int g_mockOrderQty = 1;
 static std::mutex g_dataMtx;
 
 struct Health {
@@ -193,6 +195,32 @@ static void MakeMockData() {
         {"090710","제주반도체", 300,   62800.f,   65100.f},
         {"403870","HPSP",       120,   34900.f,   34600.f},
     };
+    // 초기 목 포지션 가격 정상화
+    int mockPositionIndex = 0;
+
+    for (auto& position : g_positions) {
+        for (const auto& series : g_series) {
+            if (
+                series.code == position.code &&
+                !series.bars.empty())
+            {
+                position.cur = series.bars.back().c;
+
+                const float basisFactor =
+                    mockPositionIndex == 0
+                        ? 0.985f
+                        : mockPositionIndex == 1
+                            ? 1.012f
+                            : 0.997f;
+
+                position.avg =
+                    position.cur * basisFactor;
+
+                ++mockPositionIndex;
+                break;
+            }
+        }
+    }
 }
 
 // ─────────────────────────────── 차트 렌더러 ────────────────────────────────
@@ -583,42 +611,236 @@ static void DrawProperty() {
     ImGui::End();
 }
 
-static void DrawDashboard() {
+static void DrawDashboard()
+{
     ImGui::Begin("대시보드");
-    std::lock_guard<std::mutex> lk(g_dataMtx);
-    double totBuy = 0, totEval = 0;
-    for (auto& p : g_positions) { totBuy += (double)p.avg * p.qty; totEval += (double)p.cur * p.qty; }
-    double pl = totEval - totBuy;
-    double rate = totBuy > 0 ? pl / totBuy * 100.0 : 0.0;
 
-    ImGui::Text("매입 %.0f원   평가 %.0f원", totBuy, totEval);
-    ImGui::SameLine();
-    ImGui::TextColored(pl >= 0 ? ImVec4(0.95f, 0.35f, 0.35f, 1) : ImVec4(0.35f, 0.6f, 1, 1),
-        "   손익 %+.0f원 (%+.2f%%)", pl, rate);
-    ImGui::SameLine();
-    if (ImGui::Button("선택 청산")) g_bus.Push(Cmd::LiquidateSelected);
-    ImGui::SameLine();
-    if (g_observeMode.load()) { if (ImGui::Button("전략 가동")) g_bus.Push(Cmd::ArmStrategy); }
-    else { if (ImGui::Button("관망 전환")) g_bus.Push(Cmd::DisarmStrategy); }
+    std::lock_guard<std::mutex> lock(g_dataMtx);
 
-    if (ImGui::BeginTable("pos", 7, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
-        const char* hdr[] = { "선택","종목","수량","평단","현재가","평가손익","수익률" };
-        for (auto h : hdr) ImGui::TableSetupColumn(h);
-        ImGui::TableHeadersRow();
-        for (auto& p : g_positions) {
-            double ppl = (double)(p.cur - p.avg) * p.qty;
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn(); ImGui::PushID(p.code.c_str()); ImGui::Checkbox("##s", &p.sel); ImGui::PopID();
-            ImGui::TableNextColumn(); ImGui::Text("%s %s", p.code.c_str(), p.name.c_str());
-            ImGui::TableNextColumn(); ImGui::Text("%d", p.qty);
-            ImGui::TableNextColumn(); ImGui::Text("%.0f", p.avg);
-            ImGui::TableNextColumn(); ImGui::Text("%.0f", p.cur);
-            ImGui::TableNextColumn();
-            ImGui::TextColored(ppl >= 0 ? ImVec4(0.95f, 0.35f, 0.35f, 1) : ImVec4(0.35f, 0.6f, 1, 1), "%+.0f", ppl);
-            ImGui::TableNextColumn(); ImGui::Text("%+.2f%%", p.avg > 0 ? (p.cur - p.avg) / p.avg * 100.f : 0.f);
+    if (g_series.empty()) {
+        ImGui::TextDisabled("종목 데이터가 없습니다.");
+        ImGui::End();
+        return;
+    }
+
+    const int selectedIndex =
+        std::clamp(
+            g_mainSel,
+            0,
+            static_cast<int>(g_series.size()) - 1);
+
+    const Series& selectedSeries =
+        g_series[selectedIndex];
+
+    ImGui::Text(
+        "선택: %s %s",
+        selectedSeries.code.c_str(),
+        selectedSeries.name.c_str());
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("| 주문수량");
+
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(80.0f);
+
+    if (ImGui::InputInt(
+        "##mock_order_qty",
+        &g_mockOrderQty,
+        1,
+        10))
+    {
+        g_mockOrderQty =
+            (std::max)(1, g_mockOrderQty);
+    }
+
+    ImGui::SameLine();
+
+    if (ImGui::Button("모의매수")) {
+        g_bus.Push(
+            Cmd::MockBuy,
+            selectedSeries.code,
+            g_mockOrderQty);
+    }
+
+    ImGui::SameLine();
+
+    if (ImGui::Button("선택 청산")) {
+        g_bus.Push(Cmd::LiquidateSelected);
+    }
+
+    ImGui::SameLine();
+
+    if (g_observeMode.load()) {
+        if (ImGui::Button("전략 가동")) {
+            g_bus.Push(Cmd::ArmStrategy);
         }
+    }
+    else {
+        if (ImGui::Button("관망 전환")) {
+            g_bus.Push(Cmd::DisarmStrategy);
+        }
+    }
+
+    double totalBuy = 0.0;
+    double totalEvaluation = 0.0;
+
+    for (const auto& position : g_positions) {
+        totalBuy +=
+            static_cast<double>(position.avg) *
+            position.qty;
+
+        totalEvaluation +=
+            static_cast<double>(position.cur) *
+            position.qty;
+    }
+
+    const double unrealizedPnL =
+        totalEvaluation - totalBuy;
+
+    const double unrealizedRate =
+        totalBuy > 0.0
+            ? unrealizedPnL / totalBuy * 100.0
+            : 0.0;
+
+    const double totalPnL =
+        unrealizedPnL + g_realizedPnL;
+
+    ImGui::Separator();
+
+    ImGui::Text(
+        "보유 %zu종목   매입 %.0f원   평가 %.0f원",
+        g_positions.size(),
+        totalBuy,
+        totalEvaluation);
+
+    ImGui::SameLine();
+
+    ImGui::TextColored(
+        unrealizedPnL >= 0.0
+            ? ImVec4(0.95f, 0.35f, 0.35f, 1.0f)
+            : ImVec4(0.35f, 0.60f, 1.00f, 1.0f),
+        "평가손익 %+.0f원 (%+.2f%%)",
+        unrealizedPnL,
+        unrealizedRate);
+
+    ImGui::SameLine();
+
+    ImGui::TextColored(
+        g_realizedPnL >= 0.0
+            ? ImVec4(0.95f, 0.35f, 0.35f, 1.0f)
+            : ImVec4(0.35f, 0.60f, 1.00f, 1.0f),
+        "실현 %+.0f원",
+        g_realizedPnL);
+
+    ImGui::SameLine();
+
+    ImGui::TextColored(
+        totalPnL >= 0.0
+            ? ImVec4(0.95f, 0.70f, 0.25f, 1.0f)
+            : ImVec4(0.40f, 0.65f, 1.00f, 1.0f),
+        "총손익 %+.0f원",
+        totalPnL);
+
+    if (g_positions.empty()) {
+        ImGui::Separator();
+        ImGui::TextDisabled(
+            "보유 포지션이 없습니다. 종목을 선택한 뒤 모의매수를 실행하십시오.");
+
+        ImGui::End();
+        return;
+    }
+
+    if (ImGui::BeginTable(
+        "pos",
+        8,
+        ImGuiTableFlags_Borders |
+        ImGuiTableFlags_RowBg |
+        ImGuiTableFlags_SizingStretchProp))
+    {
+        const char* headers[] = {
+            "선택",
+            "종목",
+            "수량",
+            "평단",
+            "현재가",
+            "평가손익",
+            "수익률",
+            "청산"
+        };
+
+        for (const char* header : headers) {
+            ImGui::TableSetupColumn(header);
+        }
+
+        ImGui::TableHeadersRow();
+
+        for (auto& position : g_positions) {
+            const double positionPnL =
+                static_cast<double>(
+                    position.cur - position.avg) *
+                position.qty;
+
+            const double positionRate =
+                position.avg > 0.0f
+                    ? static_cast<double>(
+                        position.cur - position.avg) /
+                        position.avg *
+                        100.0
+                    : 0.0;
+
+            ImGui::TableNextRow();
+            ImGui::PushID(position.code.c_str());
+
+            ImGui::TableNextColumn();
+            ImGui::Checkbox(
+                "##position_selected",
+                &position.sel);
+
+            ImGui::TableNextColumn();
+            ImGui::Text(
+                "%s %s",
+                position.code.c_str(),
+                position.name.c_str());
+
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", position.qty);
+
+            ImGui::TableNextColumn();
+            ImGui::Text("%.0f", position.avg);
+
+            ImGui::TableNextColumn();
+            ImGui::Text("%.0f", position.cur);
+
+            ImGui::TableNextColumn();
+            ImGui::TextColored(
+                positionPnL >= 0.0
+                    ? ImVec4(0.95f, 0.35f, 0.35f, 1.0f)
+                    : ImVec4(0.35f, 0.60f, 1.00f, 1.0f),
+                "%+.0f",
+                positionPnL);
+
+            ImGui::TableNextColumn();
+            ImGui::TextColored(
+                positionRate >= 0.0
+                    ? ImVec4(0.95f, 0.35f, 0.35f, 1.0f)
+                    : ImVec4(0.35f, 0.60f, 1.00f, 1.0f),
+                "%+.2f%%",
+                positionRate);
+
+            ImGui::TableNextColumn();
+
+            if (ImGui::SmallButton("개별청산")) {
+                g_bus.Push(
+                    Cmd::LiquidatePosition,
+                    position.code);
+            }
+
+            ImGui::PopID();
+        }
+
         ImGui::EndTable();
     }
+
     ImGui::End();
 }
 
@@ -745,36 +967,415 @@ static void DrawFaultWindow()
     ImGui::End();
 }
 // ─────────────────────────────── 엔진 스텁 ──────────────────────────────────
-static void DrainCommands() {
-    Command c;
-    while (g_bus.Pop(c)) {
-        switch (c.type) {
+static void DrainCommands()
+{
+    Command command;
+
+    while (g_bus.Pop(command)) {
+        switch (command.type) {
         case Cmd::LoadSymbol:
-            g_log.Add("CMD", "종목 조회 요청: %s (tf=%d)  ← 엔진 연결 지점", c.arg.c_str(), c.i0);
-            for (int i = 1; i < (int)g_series.size(); ++i)
-                if (g_series[i].code == c.arg) { g_mainSel = i; g_mainCanvas.dirty = true; }
-            break;
-        case Cmd::PromoteTarget:
-            if (std::find(g_targets.begin(), g_targets.end(), c.i0) == g_targets.end()) {
-                g_targets.push_back(c.i0);
-                if (g_targets.size() <= 6) g_multiSel[g_targets.size() - 1] = c.i0;
-                for (auto& cv : g_multi) cv.dirty = true;
+            g_log.Add(
+                "CMD",
+                "종목 조회 요청: %s (tf=%d)",
+                command.arg.c_str(),
+                command.i0);
+
+            for (
+                int index = 1;
+                index < static_cast<int>(g_series.size());
+                ++index)
+            {
+                if (g_series[index].code == command.arg) {
+                    g_mainSel = index;
+                    g_mainCanvas.dirty = true;
+                    break;
+                }
             }
-            g_log.Add("CMD", "매매대상 승격: %s", c.arg.c_str());
             break;
-        case Cmd::OpenMultiChart: g_showMulti = true; g_log.Add("CMD", "매매 멀티차트 열기"); break;
-        case Cmd::LiquidateAll:
-            g_orderLog.Add("ORDER", "전량청산 커맨드 수신 — %zu종목 시장가 매도 (스텁)", g_positions.size());
-            g_log.Add("CMD", "전량청산 실행");
+
+        case Cmd::PromoteTarget:
+            if (
+                std::find(
+                    g_targets.begin(),
+                    g_targets.end(),
+                    command.i0) ==
+                g_targets.end())
+            {
+                g_targets.push_back(command.i0);
+
+                if (g_targets.size() <= 6) {
+                    g_multiSel[
+                        g_targets.size() - 1] =
+                        command.i0;
+                }
+
+                for (auto& canvas : g_multi) {
+                    canvas.dirty = true;
+                }
+            }
+
+            g_log.Add(
+                "CMD",
+                "매매대상 승격: %s",
+                command.arg.c_str());
             break;
-        case Cmd::LiquidateSelected: {
-            int n = 0; for (auto& p : g_positions) if (p.sel) ++n;
-            g_orderLog.Add("ORDER", "선택청산 커맨드 수신 — %d종목 (스텁)", n);
+
+        case Cmd::OpenMultiChart:
+            g_showMulti = true;
+            g_log.Add(
+                "CMD",
+                "매매 멀티차트 열기");
+            break;
+
+        case Cmd::MockBuy: {
+            const int orderQty =
+                (std::max)(1, command.i0);
+
+            bool filled = false;
+            std::string filledName;
+            float filledPrice = 0.0f;
+            float resultingAverage = 0.0f;
+            int resultingQuantity = 0;
+
+            {
+                std::lock_guard<std::mutex> lock(g_dataMtx);
+
+                for (const auto& series : g_series) {
+                    if (
+                        series.code != command.arg ||
+                        series.bars.empty())
+                    {
+                        continue;
+                    }
+
+                    filledName = series.name;
+                    filledPrice = series.bars.back().c;
+
+                    Position* existingPosition = nullptr;
+
+                    for (auto& position : g_positions) {
+                        if (position.code == command.arg) {
+                            existingPosition = &position;
+                            break;
+                        }
+                    }
+
+                    if (existingPosition == nullptr) {
+                        Position position{};
+
+                        position.code = command.arg;
+                        position.name = filledName;
+                        position.qty = orderQty;
+                        position.avg = filledPrice;
+                        position.cur = filledPrice;
+                        position.sel = false;
+
+                        g_positions.push_back(position);
+
+                        resultingQuantity = orderQty;
+                        resultingAverage = filledPrice;
+                    }
+                    else {
+                        const double previousCost =
+                            static_cast<double>(
+                                existingPosition->avg) *
+                            existingPosition->qty;
+
+                        const double addedCost =
+                            static_cast<double>(
+                                filledPrice) *
+                            orderQty;
+
+                        resultingQuantity =
+                            existingPosition->qty +
+                            orderQty;
+
+                        existingPosition->avg =
+                            static_cast<float>(
+                                (previousCost + addedCost) /
+                                resultingQuantity);
+
+                        existingPosition->qty =
+                            resultingQuantity;
+
+                        existingPosition->cur =
+                            filledPrice;
+
+                        resultingAverage =
+                            existingPosition->avg;
+                    }
+
+                    filled = true;
+                    break;
+                }
+            }
+
+            if (!filled) {
+                g_orderLog.Add(
+                    "REJECT",
+                    "모의매수 거부: 종목 데이터 없음 %s",
+                    command.arg.c_str());
+            }
+            else {
+                g_orderLog.Add(
+                    "FILL",
+                    "모의매수 %s %s %d주 @ %.0f | 보유 %d주 평단 %.0f",
+                    command.arg.c_str(),
+                    filledName.c_str(),
+                    orderQty,
+                    filledPrice,
+                    resultingQuantity,
+                    resultingAverage);
+
+                g_log.Add(
+                    "TRADE",
+                    "모의매수 완료: %s %d주",
+                    command.arg.c_str(),
+                    orderQty);
+            }
+
+            g_wakeFrames = 60;
             break;
         }
-        case Cmd::ArmStrategy:    g_observeMode = false; g_log.Add("CMD", "전략 가동"); break;
-        case Cmd::DisarmStrategy: g_observeMode = true;  g_log.Add("CMD", "관망 전환"); break;
-        default: g_log.Add("CMD", "미구현 커맨드"); break;
+
+        case Cmd::LiquidatePosition: {
+            bool closed = false;
+            std::string closedName;
+            int closedQuantity = 0;
+            float closedPrice = 0.0f;
+            double realized = 0.0;
+
+            {
+                std::lock_guard<std::mutex> lock(g_dataMtx);
+
+                for (
+                    auto positionIt = g_positions.begin();
+                    positionIt != g_positions.end();
+                    ++positionIt)
+                {
+                    if (positionIt->code != command.arg) {
+                        continue;
+                    }
+
+                    closedName = positionIt->name;
+                    closedQuantity = positionIt->qty;
+                    closedPrice = positionIt->cur;
+
+                    realized =
+                        static_cast<double>(
+                            positionIt->cur -
+                            positionIt->avg) *
+                        positionIt->qty;
+
+                    g_realizedPnL += realized;
+                    g_positions.erase(positionIt);
+
+                    closed = true;
+                    break;
+                }
+            }
+
+            if (!closed) {
+                g_orderLog.Add(
+                    "REJECT",
+                    "개별청산 거부: 보유 포지션 없음 %s",
+                    command.arg.c_str());
+            }
+            else {
+                g_orderLog.Add(
+                    "FILL",
+                    "개별청산 %s %s %d주 @ %.0f | 실현손익 %+.0f원",
+                    command.arg.c_str(),
+                    closedName.c_str(),
+                    closedQuantity,
+                    closedPrice,
+                    realized);
+
+                g_log.Add(
+                    "TRADE",
+                    "개별청산 완료: %s %d주, 실현손익 %+.0f원",
+                    command.arg.c_str(),
+                    closedQuantity,
+                    realized);
+            }
+
+            g_wakeFrames = 60;
+            break;
+        }
+
+        case Cmd::LiquidateSelected: {
+            struct SelectedFill
+            {
+                std::string code;
+                std::string name;
+                int qty = 0;
+                float price = 0.0f;
+                double pnl = 0.0;
+            };
+
+            std::vector<SelectedFill> fills;
+            double totalRealized = 0.0;
+
+            {
+                std::lock_guard<std::mutex> lock(g_dataMtx);
+
+                auto positionIt =
+                    g_positions.begin();
+
+                while (positionIt != g_positions.end()) {
+                    if (!positionIt->sel) {
+                        ++positionIt;
+                        continue;
+                    }
+
+                    SelectedFill fill;
+
+                    fill.code = positionIt->code;
+                    fill.name = positionIt->name;
+                    fill.qty = positionIt->qty;
+                    fill.price = positionIt->cur;
+
+                    fill.pnl =
+                        static_cast<double>(
+                            positionIt->cur -
+                            positionIt->avg) *
+                        positionIt->qty;
+
+                    totalRealized += fill.pnl;
+                    g_realizedPnL += fill.pnl;
+
+                    fills.push_back(fill);
+
+                    positionIt =
+                        g_positions.erase(positionIt);
+                }
+            }
+
+            if (fills.empty()) {
+                g_orderLog.Add(
+                    "REJECT",
+                    "선택청산 거부: 선택된 포지션 없음");
+            }
+            else {
+                for (const auto& fill : fills) {
+                    g_orderLog.Add(
+                        "FILL",
+                        "선택청산 %s %s %d주 @ %.0f | 실현손익 %+.0f원",
+                        fill.code.c_str(),
+                        fill.name.c_str(),
+                        fill.qty,
+                        fill.price,
+                        fill.pnl);
+                }
+
+                g_orderLog.Add(
+                    "ORDER",
+                    "선택청산 완료: %zu종목, 실현손익 %+.0f원",
+                    fills.size(),
+                    totalRealized);
+
+                g_log.Add(
+                    "TRADE",
+                    "선택청산 완료: %zu종목",
+                    fills.size());
+            }
+
+            g_wakeFrames = 60;
+            break;
+        }
+
+        case Cmd::LiquidateAll: {
+            struct AllFill
+            {
+                std::string code;
+                std::string name;
+                int qty = 0;
+                float price = 0.0f;
+                double pnl = 0.0;
+            };
+
+            std::vector<AllFill> fills;
+            double totalRealized = 0.0;
+
+            {
+                std::lock_guard<std::mutex> lock(g_dataMtx);
+
+                fills.reserve(g_positions.size());
+
+                for (const auto& position : g_positions) {
+                    AllFill fill;
+
+                    fill.code = position.code;
+                    fill.name = position.name;
+                    fill.qty = position.qty;
+                    fill.price = position.cur;
+
+                    fill.pnl =
+                        static_cast<double>(
+                            position.cur -
+                            position.avg) *
+                        position.qty;
+
+                    totalRealized += fill.pnl;
+                    g_realizedPnL += fill.pnl;
+
+                    fills.push_back(fill);
+                }
+
+                g_positions.clear();
+            }
+
+            if (fills.empty()) {
+                g_orderLog.Add(
+                    "REJECT",
+                    "전량청산 거부: 보유 포지션 없음");
+            }
+            else {
+                for (const auto& fill : fills) {
+                    g_orderLog.Add(
+                        "FILL",
+                        "전량청산 %s %s %d주 @ %.0f | 실현손익 %+.0f원",
+                        fill.code.c_str(),
+                        fill.name.c_str(),
+                        fill.qty,
+                        fill.price,
+                        fill.pnl);
+                }
+
+                g_orderLog.Add(
+                    "ORDER",
+                    "전량청산 완료: %zu종목, 실현손익 %+.0f원",
+                    fills.size(),
+                    totalRealized);
+
+                g_log.Add(
+                    "CMD",
+                    "전량청산 완료: 보유 포지션 0종목");
+            }
+
+            g_wakeFrames = 60;
+            break;
+        }
+
+        case Cmd::ArmStrategy:
+            g_observeMode = false;
+            g_log.Add(
+                "CMD",
+                "전략 가동");
+            break;
+
+        case Cmd::DisarmStrategy:
+            g_observeMode = true;
+            g_log.Add(
+                "CMD",
+                "관망 전환");
+            break;
+
+        default:
+            g_log.Add(
+                "CMD",
+                "미구현 커맨드");
+            break;
         }
     }
 }

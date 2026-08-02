@@ -12,6 +12,8 @@ enum class Cmd
     DemoteTarget,
     LiquidateAll,
     LiquidateSelected,
+    MockBuy,
+    LiquidatePosition,
     ArmStrategy,
     DisarmStrategy,
     OpenMultiChart,

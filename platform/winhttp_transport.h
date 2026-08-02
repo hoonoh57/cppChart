@@ -2,6 +2,7 @@
 
 #include "../core/kiwoom_protocol.h"
 
+#include <map>
 #include <memory>
 #include <string>
 
@@ -11,6 +12,7 @@ namespace trading::platform
     {
         bool transportOk = false;
         unsigned long statusCode = 0;
+        std::map<std::string, std::string> headers;
         std::string body;
         std::string error;
     };

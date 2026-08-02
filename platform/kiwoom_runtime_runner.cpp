@@ -238,6 +238,13 @@ namespace trading::platform
             RuntimeReceiveResult received =
                 transport_->ReceiveWebSocket();
 
+            if (
+                !running_.load(std::memory_order_acquire) ||
+                !receiverRunning_.load(std::memory_order_acquire))
+            {
+                break;
+            }
+
             if (received.kind == RuntimeReceiveKind::Text) {
                 Enqueue(engine_.OnWebSocketMessage(received.text));
                 WakeUi();

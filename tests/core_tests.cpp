@@ -98,7 +98,7 @@ namespace
         std::vector<std::thread> workers;
 
         for (int threadIndex = 0; threadIndex < kThreadCount; ++threadIndex) {
-            workers.emplace_back([&policy] {
+            workers.emplace_back([&policy, kRaisesPerThread] {
                 for (int index = 0; index < kRaisesPerThread; ++index) {
                     policy.Raise(Fault::WsDisconnected, "concurrent-test");
                 }

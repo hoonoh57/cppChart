@@ -1,0 +1,99 @@
+name: One-shot shell runtime migration
+
+on:
+  push:
+    branches:
+      - p2/kiwoom-mock-gateway
+    paths:
+      - scripts/migrate_shell_runtime.ps1
+      - build.bat
+      - .github/workflows/one-shot-shell-runtime.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: one-shot-shell-runtime
+  cancel-in-progress: true
+
+jobs:
+  migrate-build-commit:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: p2/kiwoom-mock-gateway
+          fetch-depth: 0
+
+      - name: Apply deterministic migration
+        shell: pwsh
+        run: .\scripts\migrate_shell_runtime.ps1
+
+      - name: Verify migration contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Get-Content .\shell_main.cpp -Raw
+          $required = @(
+            'CPPCHART_SHARED_RUNTIME_INTEGRATED',
+            'std::atomic<int> g_wakeFrames',
+            'trading::TradingState g_tradingState',
+            'trading::EpochMillis tsClose',
+            'trading::TickCount tickCount',
+            'RuntimeModeLabel()',
+            'ApplyLocalFill('
+          )
+          foreach ($marker in $required) {
+            if (-not $source.Contains($marker)) {
+              throw "Missing migrated marker: $marker"
+            }
+          }
+          if ($source.Contains('struct Position {')) {
+            throw 'Legacy float Position structure remains'
+          }
+          if ($source.Contains('static double g_realizedPnL')) {
+            throw 'Legacy floating realized PnL remains'
+          }
+
+      - name: Locate MSVC toolchain
+        id: msvc
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installation) { throw 'Visual Studio C++ toolchain not found' }
+          "devcmd=$(Join-Path $installation 'Common7\Tools\VsDevCmd.bat')" >> $env:GITHUB_OUTPUT
+
+      - name: Build migrated shell
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $devCmd = '${{ steps.msvc.outputs.devcmd }}'
+          & cmd.exe /d /s /c "`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && call build.bat"
+          if ($LASTEXITCODE -ne 0) { throw "build failed, exit code=$LASTEXITCODE" }
+
+      - name: Run all headless tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $devCmd = '${{ steps.msvc.outputs.devcmd }}'
+          & cmd.exe /d /s /c "`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && call tests\run_all.bat"
+          if ($LASTEXITCODE -ne 0) { throw "tests failed, exit code=$LASTEXITCODE" }
+
+      - name: Commit migrated shell
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (git status --porcelain)) {
+            Write-Host 'No migration changes to commit'
+            exit 0
+          }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add shell_main.cpp
+          git commit -m 'Integrate exact shared trading state into shell'
+          git push origin HEAD:p2/kiwoom-mock-gateway

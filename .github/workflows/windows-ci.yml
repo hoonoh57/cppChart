@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   build-and-test:
-    name: MSVC build and core tests
+    name: MSVC build and headless tests
     runs-on: windows-latest
     timeout-minutes: 20
 
@@ -50,7 +50,8 @@ jobs:
             throw "Tracked secret configuration files:`n$($trackedSecrets -join "`n")"
           }
 
-      - name: Build trading shell
+      - name: Locate MSVC toolchain
+        id: msvc
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -67,6 +68,13 @@ jobs:
           }
 
           $devCmd = Join-Path $installation 'Common7\Tools\VsDevCmd.bat'
+          "devcmd=$devCmd" >> $env:GITHUB_OUTPUT
+
+      - name: Build trading shell
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $devCmd = '${{ steps.msvc.outputs.devcmd }}'
           $command = "`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && call build.bat"
 
           & cmd.exe /d /s /c $command
@@ -78,35 +86,16 @@ jobs:
             throw 'shell.exe was not produced'
           }
 
-      - name: Build and run core tests
+      - name: Build and run headless tests
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $devCmd = '${{ steps.msvc.outputs.devcmd }}'
+          $command = "`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && call tests\run_all.bat"
 
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          $installation = & $vswhere `
-            -latest `
-            -products '*' `
-            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-            -property installationPath
-
-          $devCmd = Join-Path $installation 'Common7\Tools\VsDevCmd.bat'
-          $coreCommand = @"
-          `"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc tests\core_tests.cpp core\command_bus.cpp core\fault_policy.cpp core\json_lite.cpp core\parameter_store.cpp core\trading_state.cpp /Fe:core_tests.exe && core_tests.exe
-          "@
-
-          & cmd.exe /d /s /c $coreCommand.Trim()
+          & cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) {
-            throw "core tests failed, exit code=$LASTEXITCODE"
-          }
-
-          $protocolCommand = @"
-          `"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc tests\kiwoom_protocol_tests.cpp core\json_lite.cpp core\kiwoom_protocol.cpp /Fe:kiwoom_protocol_tests.exe && kiwoom_protocol_tests.exe
-          "@
-
-          & cmd.exe /d /s /c $protocolCommand.Trim()
-          if ($LASTEXITCODE -ne 0) {
-            throw "Kiwoom protocol tests failed, exit code=$LASTEXITCODE"
+            throw "headless tests failed, exit code=$LASTEXITCODE"
           }
 
       - name: Publish verified executable

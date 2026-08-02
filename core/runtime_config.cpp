@@ -289,17 +289,13 @@ namespace trading
         const std::string mode =
             FindValue(values, "TRADING_MODE");
 
-        if (mode.empty() || mode == "LOCAL_MOCK") {
-            result.config.mode = RuntimeMode::LocalMock;
-        }
-        else if (mode == "KIWOOM_MOCK") {
-            result.config.mode = RuntimeMode::KiwoomMock;
-        }
-        else {
-            result.error = "TRADING_MODE must be LOCAL_MOCK or KIWOOM_MOCK";
+        if (mode != "KIWOOM_MOCK") {
+            result.error =
+                "TRADING_MODE=KIWOOM_MOCK is required; synthetic LOCAL_MOCK was removed";
             return result;
         }
 
+        result.config.mode = RuntimeMode::KiwoomMock;
         result.config.appKey =
             FindValue(
                 values,
@@ -327,21 +323,10 @@ namespace trading
             result.config.webSocketUrl = webSocket;
         }
 
-        if (
-            result.config.mode == RuntimeMode::KiwoomMock &&
-            !result.config.HasKiwoomCredentials())
-        {
+        if (!result.config.HasKiwoomCredentials()) {
             result.error =
                 "KIWOOM_MOCK mode requires an App Key and App Secret";
             return result;
-        }
-
-        if (
-            result.config.mode == RuntimeMode::LocalMock &&
-            result.config.HasKiwoomCredentials())
-        {
-            result.warnings.push_back(
-                "Kiwoom credentials are present but LOCAL_MOCK is active");
         }
 
         result.ok = true;

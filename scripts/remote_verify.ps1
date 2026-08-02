@@ -34,8 +34,17 @@ if (-not (Test-Path ".\shell.exe")) {
     throw "shell.exe was not produced"
 }
 
+$coreSources = @(
+    "tests\core_tests.cpp",
+    "core\command_bus.cpp",
+    "core\fault_policy.cpp",
+    "core\json_lite.cpp",
+    "core\parameter_store.cpp",
+    "core\trading_state.cpp"
+) -join " "
+
 $testCommand = @"
-`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc tests\core_tests.cpp core\command_bus.cpp core\fault_policy.cpp /Fe:core_tests.exe && core_tests.exe
+`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc $coreSources /Fe:core_tests.exe && core_tests.exe
 "@
 
 & cmd.exe /d /s /c $testCommand.Trim()

@@ -1,0 +1,109 @@
+name: Windows CI
+
+on:
+  push:
+    branches:
+      - main
+      - p1/modularize-shell
+      - 'p2/**'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: MSVC build and core tests
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify repository policy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          git diff --check
+          if ($LASTEXITCODE -ne 0) {
+            throw 'git diff --check failed'
+          }
+
+          $trackedSecrets = @(
+            git ls-files |
+              Where-Object {
+                $_ -match '(^|/)\.env($|\.)' -and
+                $_ -notmatch '(\.example|\.sample|\.template)$'
+              }
+          )
+
+          if ($trackedSecrets.Count -gt 0) {
+            throw "Tracked secret configuration files:`n$($trackedSecrets -join "`n")"
+          }
+
+      - name: Build trading shell
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $installation = & $vswhere `
+            -latest `
+            -products '*' `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+
+          if (-not $installation) {
+            throw 'Visual Studio C++ toolchain not found'
+          }
+
+          $devCmd = Join-Path $installation 'Common7\Tools\VsDevCmd.bat'
+          $command = "`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && call build.bat"
+
+          & cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) {
+            throw "build.bat failed, exit code=$LASTEXITCODE"
+          }
+
+          if (-not (Test-Path '.\shell.exe')) {
+            throw 'shell.exe was not produced'
+          }
+
+      - name: Build and run core tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $installation = & $vswhere `
+            -latest `
+            -products '*' `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+
+          $devCmd = Join-Path $installation 'Common7\Tools\VsDevCmd.bat'
+          $command = @"
+          `"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc tests\core_tests.cpp core\command_bus.cpp core\fault_policy.cpp /Fe:core_tests.exe && core_tests.exe
+          "@
+
+          & cmd.exe /d /s /c $command.Trim()
+          if ($LASTEXITCODE -ne 0) {
+            throw "core tests failed, exit code=$LASTEXITCODE"
+          }
+
+      - name: Publish verified executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: cppChart-${{ github.sha }}
+          path: shell.exe
+          if-no-files-found: error
+          retention-days: 7

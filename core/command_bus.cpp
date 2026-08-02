@@ -5,7 +5,15 @@
 CommandBus::CommandBus(
     int* wakeFrames,
     int wakeValue) noexcept
-    : wakeFrames_(wakeFrames),
+    : legacyWakeFrames_(wakeFrames),
+      wakeValue_(wakeValue)
+{
+}
+
+CommandBus::CommandBus(
+    std::atomic<int>* wakeFrames,
+    int wakeValue) noexcept
+    : atomicWakeFrames_(wakeFrames),
       wakeValue_(wakeValue)
 {
 }
@@ -26,9 +34,7 @@ void CommandBus::Push(
             });
     }
 
-    if (wakeFrames_ != nullptr) {
-        *wakeFrames_ = wakeValue_;
-    }
+    Wake();
 }
 
 bool CommandBus::Pop(Command& out)
@@ -43,4 +49,26 @@ bool CommandBus::Pop(Command& out)
     queue_.pop_front();
 
     return true;
+}
+
+void CommandBus::Wake() noexcept
+{
+    if (atomicWakeFrames_ != nullptr) {
+        int current = atomicWakeFrames_->load(std::memory_order_relaxed);
+
+        while (
+            current < wakeValue_ &&
+            !atomicWakeFrames_->compare_exchange_weak(
+                current,
+                wakeValue_,
+                std::memory_order_relaxed,
+                std::memory_order_relaxed))
+        {
+        }
+        return;
+    }
+
+    if (legacyWakeFrames_ != nullptr) {
+        *legacyWakeFrames_ = wakeValue_;
+    }
 }

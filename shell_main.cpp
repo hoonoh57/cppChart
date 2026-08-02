@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 //  Trading Shell — UI 골격 (엔진 스텁 / 목데이터)
 //  · Dear ImGui(docking) + D3D11, 단일 디바이스
 //  · 차트 = 오프스크린 RT, dirty 시에만 재렌더 → 티어별 갱신주기 설계와 일치
@@ -16,6 +16,10 @@
 #include <random>
 #include <algorithm>
 #include <cstdio>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <utility>
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -23,6 +27,11 @@
 #include "imgui_impl_dx11.h"
 #include "core/command_bus.h"
 #include "core/fault_policy.h"
+#include "core/market_types.h"
+#include "core/runtime_config.h"
+#include "core/trading_state.h"
+
+// CPPCHART_SHARED_RUNTIME_INTEGRATED
 
 // ─────────────────────────────── 공용 상태 ──────────────────────────────────
 static ID3D11Device*           g_dev  = nullptr;
@@ -30,30 +39,77 @@ static ID3D11DeviceContext*    g_ctx  = nullptr;
 static IDXGISwapChain*         g_swap = nullptr;
 static ID3D11RenderTargetView* g_mainRTV = nullptr;
 static UINT g_resizeW = 0, g_resizeH = 0;
-static int  g_wakeFrames = 60;          // 입력/데이터 변화 시 60프레임 활성
+static std::atomic<int> g_wakeFrames{ 60 }; // 입력/데이터 변화 시 활성 프레임
+
+static void WakeFrames(int requested) noexcept
+{
+    int current = g_wakeFrames.load(std::memory_order_relaxed);
+    while (
+        current < requested &&
+        !g_wakeFrames.compare_exchange_weak(
+            current,
+            requested,
+            std::memory_order_release,
+            std::memory_order_relaxed))
+    {
+    }
+}
+
+static bool ConsumeWakeFrame() noexcept
+{
+    int current = g_wakeFrames.load(std::memory_order_acquire);
+    while (current > 0) {
+        if (g_wakeFrames.compare_exchange_weak(
+                current,
+                current - 1,
+                std::memory_order_acq_rel,
+                std::memory_order_acquire))
+        {
+            return true;
+        }
+    }
+    return false;
+}
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
 // ─────────────────────────────── 로그 (고정 링버퍼) ─────────────────────────
 struct LogLine { char cat[12]; char msg[220]; };
 struct LogRing {
-    std::mutex mtx; std::vector<LogLine> buf; size_t head = 0, count = 0;
+    mutable std::mutex mtx;
+    std::vector<LogLine> buf;
+    size_t head = 0;
+    size_t count = 0;
+
     LogRing() { buf.resize(4000); }
+
     void Add(const char* cat, const char* fmt, ...) {
-        std::lock_guard<std::mutex> lk(mtx);
-        LogLine& l = buf[head];
-        snprintf(l.cat, sizeof(l.cat), "%s", cat);
-        va_list ap; va_start(ap, fmt);
-        vsnprintf(l.msg, sizeof(l.msg), fmt, ap);
-        va_end(ap);
+        std::lock_guard<std::mutex> lock(mtx);
+        LogLine& line = buf[head];
+        snprintf(line.cat, sizeof(line.cat), "%s", cat);
+        va_list arguments;
+        va_start(arguments, fmt);
+        vsnprintf(line.msg, sizeof(line.msg), fmt, arguments);
+        va_end(arguments);
         head = (head + 1) % buf.size();
         if (count < buf.size()) ++count;
     }
-    size_t Size() { return count; }
-    LogLine Get(size_t i) {  // 0 = 가장 오래된 것
-        std::lock_guard<std::mutex> lk(mtx);
-        size_t start = (head + buf.size() - count) % buf.size();
-        return buf[(start + i) % buf.size()];
+
+    std::vector<LogLine> Snapshot() const {
+        std::lock_guard<std::mutex> lock(mtx);
+        std::vector<LogLine> result;
+        result.reserve(count);
+        const size_t start = (head + buf.size() - count) % buf.size();
+        for (size_t index = 0; index < count; ++index) {
+            result.push_back(buf[(start + index) % buf.size()]);
+        }
+        return result;
+    }
+
+    void Clear() {
+        std::lock_guard<std::mutex> lock(mtx);
+        count = 0;
+        head = 0;
     }
 };
 static LogRing g_log, g_signalLog, g_orderLog;
@@ -135,18 +191,30 @@ static void RegisterParams() {
     Reg("선별", "전종목 갱신주기(초)", PType::Int, &P_universeRefreshSec, 10, 300);
 }
 
-// ─────────────────────────────── 목 데이터 ──────────────────────────────────
-struct Bar { float o, h, l, c, vol; };
+// ─────────────────────────────── 목 데이터 / 공용 매매 상태 ─────────────────
+struct Bar {
+    trading::PriceWon o = 0;
+    trading::PriceWon h = 0;
+    trading::PriceWon l = 0;
+    trading::PriceWon c = 0;
+    trading::Volume vol = 0;
+    trading::EpochMillis tsClose = 0;
+    trading::TickCount tickCount = 0;
+};
+
 struct Series {
     std::string code, name;
     std::vector<Bar> bars;
-    float beta = 1.0f, corr = 0.5f, turnover = 10.f; int lag = 1; float score = 0;
+    float beta = 1.0f, corr = 0.5f, turnover = 10.f;
+    int lag = 1;
+    float score = 0;
 };
-struct Position { std::string code, name; int qty; float avg, cur; bool sel = false; };
 
-static std::vector<Series>  g_series;      // [0] = 지수
-static std::vector<Position> g_positions;
-static double g_realizedPnL = 0.0;
+static std::vector<Series> g_series;      // [0] = 지수
+static trading::TradingState g_tradingState;
+static trading::RuntimeConfig g_runtimeConfig;
+static std::string g_runtimeConfigError;
+static std::atomic<std::uint64_t> g_localOrderSequence{ 1 };
 static int g_mockOrderQty = 1;
 static std::mutex g_dataMtx;
 
@@ -161,6 +229,83 @@ struct Health {
 };
 static Health g_health;
 
+static bool IsLocalMock() noexcept
+{
+    return g_runtimeConfig.mode == trading::RuntimeMode::LocalMock;
+}
+
+static const char* RuntimeModeLabel() noexcept
+{
+    return IsLocalMock() ? "LOCAL MOCK" : "KIWOOM MOCK";
+}
+
+static trading::EpochMillis UnixMillisNow() noexcept
+{
+    return static_cast<trading::EpochMillis>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+}
+
+static std::string NextLocalOrderId(const char* prefix)
+{
+    const std::uint64_t sequence =
+        g_localOrderSequence.fetch_add(1, std::memory_order_relaxed);
+    return std::string(prefix) + "-" + std::to_string(sequence);
+}
+
+static bool TryGetLatestQuote(
+    const std::string& code,
+    std::string& name,
+    trading::PriceWon& price)
+{
+    std::lock_guard<std::mutex> lock(g_dataMtx);
+    for (const Series& series : g_series) {
+        if (series.code == code && !series.bars.empty()) {
+            name = series.name;
+            price = series.bars.back().c;
+            return trading::IsValidPrice(price);
+        }
+    }
+    return false;
+}
+
+static trading::ApplyFillResult ApplyLocalFill(
+    const std::string& code,
+    const std::string& name,
+    trading::OrderSide side,
+    trading::Quantity quantity,
+    trading::PriceWon price)
+{
+    const std::string orderId = NextLocalOrderId(
+        side == trading::OrderSide::Buy ? "LOCAL-BUY" : "LOCAL-SELL");
+
+    trading::CumulativeFill fill;
+    fill.orderId = orderId;
+    fill.executionId = orderId + "-EXEC";
+    fill.code = code;
+    fill.name = name;
+    fill.side = side;
+    fill.cumulativeQuantity = quantity;
+    fill.fillPriceWon = price;
+    fill.executionTimestampMs = UnixMillisNow();
+    return g_tradingState.ApplyCumulativeFill(fill);
+}
+
+static bool FindPosition(
+    const std::string& code,
+    trading::PositionSnapshot& result)
+{
+    const std::vector<trading::PositionSnapshot> positions =
+        g_tradingState.SnapshotPositions();
+    for (const trading::PositionSnapshot& position : positions) {
+        if (position.code == code) {
+            result = position;
+            return true;
+        }
+    }
+    return false;
+}
+
 static void MakeMockData() {
     static const char* names[][2] = {
         {"KOSPI","종합(KOSPI)"},{"097230","효성중공업"},{"090710","제주반도체"},
@@ -168,57 +313,106 @@ static void MakeMockData() {
         {"000660","SK하이닉스"},{"005930","삼성전자"},{"042700","한미반도체"},
         {"095340","ISC"},{"166090","하나머티리얼즈"},{"036930","주성엔지니어링"}
     };
+
+    g_series.clear();
+    g_tradingState.Reset();
+    g_localOrderSequence.store(1, std::memory_order_relaxed);
+
     std::mt19937 rng(20260802);
-    std::normal_distribution<float> nd(0.f, 1.f);
-    for (auto& n : names) {
-        Series s; s.code = n[0]; s.name = n[1];
-        float px = 10000.f + (rng() % 90000);
-        s.bars.reserve(3000);
-        for (int i = 0; i < 3000; ++i) {
-            float drift = std::sin(i * 0.004f) * 0.0012f;
-            float o = px;
-            px *= (1.f + drift + nd(rng) * 0.0016f);
-            float c = px;
-            float hi = (std::max)(o, c) * (1.f + std::fabs(nd(rng)) * 0.0008f);
-            float lo = (std::min)(o, c) * (1.f - std::fabs(nd(rng)) * 0.0008f);
-            s.bars.push_back({ o, hi, lo, c, 1000.f + std::fabs(nd(rng)) * 4000.f });
+    std::normal_distribution<double> normal(0.0, 1.0);
+    const trading::EpochMillis firstClose =
+        UnixMillisNow() - 2999LL * 60000LL;
+
+    for (const auto& item : names) {
+        Series series;
+        series.code = item[0];
+        series.name = item[1];
+        trading::PriceWon price =
+            static_cast<trading::PriceWon>(10000 + (rng() % 90000));
+        series.bars.reserve(3000);
+
+        for (int index = 0; index < 3000; ++index) {
+            const double drift = std::sin(index * 0.004) * 0.0012;
+            const trading::PriceWon open = price;
+            const double next =
+                static_cast<double>(price) *
+                (1.0 + drift + normal(rng) * 0.0016);
+            const trading::PriceWon close =
+                (std::max)(1, static_cast<int>(std::llround(next)));
+            const trading::PriceWon high =
+                (std::max)(open, close) +
+                static_cast<trading::PriceWon>(
+                    std::llround(
+                        (std::max)(open, close) *
+                        std::fabs(normal(rng)) * 0.0008));
+            const trading::PriceWon low =
+                (std::max)(
+                    1,
+                    (std::min)(open, close) -
+                    static_cast<trading::PriceWon>(
+                        std::llround(
+                            (std::min)(open, close) *
+                            std::fabs(normal(rng)) * 0.0008)));
+
+            Bar bar;
+            bar.o = open;
+            bar.h = high;
+            bar.l = low;
+            bar.c = close;
+            bar.vol = static_cast<trading::Volume>(
+                1000 + std::llround(std::fabs(normal(rng)) * 4000.0));
+            bar.tsClose =
+                firstClose + static_cast<trading::EpochMillis>(index) * 60000LL;
+            bar.tickCount =
+                static_cast<trading::TickCount>(100 + rng() % 900);
+            series.bars.push_back(bar);
+            price = close;
         }
-        s.beta = 0.7f + (rng() % 160) / 100.0f;
-        s.corr = 0.35f + (rng() % 60) / 100.0f;
-        s.lag = (int)(rng() % 4);
-        s.turnover = 3.f + (rng() % 400);
-        s.score = s.beta * s.corr * 100.f;
-        g_series.push_back(std::move(s));
+
+        series.beta = 0.7f + (rng() % 160) / 100.0f;
+        series.corr = 0.35f + (rng() % 60) / 100.0f;
+        series.lag = static_cast<int>(rng() % 4);
+        series.turnover = 3.f + static_cast<float>(rng() % 400);
+        series.score = series.beta * series.corr * 100.f;
+        g_series.push_back(std::move(series));
     }
-    g_positions = {
-        {"097230","효성중공업",  10, 2418000.f, 2431000.f},
-        {"090710","제주반도체", 300,   62800.f,   65100.f},
-        {"403870","HPSP",       120,   34900.f,   34600.f},
+
+    if (!IsLocalMock()) return;
+
+    struct SeedPosition {
+        const char* code;
+        trading::Quantity quantity;
+        double basisFactor;
     };
-    // 초기 목 포지션 가격 정상화
-    int mockPositionIndex = 0;
 
-    for (auto& position : g_positions) {
-        for (const auto& series : g_series) {
-            if (
-                series.code == position.code &&
-                !series.bars.empty())
-            {
-                position.cur = series.bars.back().c;
+    const SeedPosition seeds[] = {
+        { "097230", 10, 0.985 },
+        { "090710", 300, 1.012 },
+        { "403870", 120, 0.997 }
+    };
 
-                const float basisFactor =
-                    mockPositionIndex == 0
-                        ? 0.985f
-                        : mockPositionIndex == 1
-                            ? 1.012f
-                            : 0.997f;
+    for (const SeedPosition& seed : seeds) {
+        std::string name;
+        trading::PriceWon current = 0;
+        if (!TryGetLatestQuote(seed.code, name, current)) continue;
 
-                position.avg =
-                    position.cur * basisFactor;
+        trading::PositionSnapshot position;
+        position.code = seed.code;
+        position.name = name;
+        position.quantity = seed.quantity;
+        position.currentPriceWon = current;
+        const trading::PriceWon average =
+            (std::max)(
+                1,
+                static_cast<int>(std::llround(
+                    static_cast<double>(current) * seed.basisFactor)));
+        position.costBasisWon =
+            static_cast<trading::MoneyWon>(average) *
+            static_cast<trading::MoneyWon>(position.quantity);
 
-                ++mockPositionIndex;
-                break;
-            }
+        std::string error;
+        if (!g_tradingState.ReconcilePosition(position, error)) {
+            g_log.Add("FAULT", "초기 포지션 구성 실패: %s", error.c_str());
         }
     }
 }
@@ -325,8 +519,9 @@ static void RenderChart(Canvas& cv, const Series& s, View& view, bool volumePane
 
     float lo = 1e30f, hi = -1e30f, vmax = 1.f;
     for (int i = off; i < off + vis; ++i) {
-        lo = (std::min)(lo, s.bars[i].l); hi = (std::max)(hi, s.bars[i].h);
-        vmax = (std::max)(vmax, s.bars[i].vol);
+        lo = (std::min)(lo, static_cast<float>(s.bars[i].l));
+        hi = (std::max)(hi, static_cast<float>(s.bars[i].h));
+        vmax = (std::max)(vmax, static_cast<float>(s.bars[i].vol));
     }
     float pad = (hi - lo) * 0.05f; if (pad <= 0) pad = 1.f; lo -= pad; hi += pad;
     float rng = hi - lo;
@@ -429,7 +624,7 @@ static void ChartWidget(Canvas& cv, Series& s, View& view, ImVec2 size, bool vol
         if (io.MouseWheel != 0.f) {
             int nv = (int)(vis * (io.MouseWheel > 0 ? 0.87f : 1.15f));
             view.visible = std::clamp(nv == vis ? vis - (int)io.MouseWheel * 5 : nv, 10, n);
-            cv.dirty = true; g_wakeFrames = 30;
+            cv.dirty = true; WakeFrames(30);
         }
         if (ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
             float perBar = size.x / (float)(view.visible > 0 ? view.visible : P_visibleBars);
@@ -437,7 +632,7 @@ static void ChartWidget(Canvas& cv, Series& s, View& view, ImVec2 size, bool vol
             if (d != 0) {
                 int cur = view.offset < 0 ? n - (view.visible > 0 ? view.visible : P_visibleBars) : view.offset;
                 view.offset = std::clamp(cur - d, 0, (std::max)(0, n - 10));
-                cv.dirty = true; g_wakeFrames = 30;
+                cv.dirty = true; WakeFrames(30);
             }
         }
         if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) { view.offset = -1; view.visible = 0; cv.dirty = true; }
@@ -459,7 +654,16 @@ static void DrawToolbar() {
     if (ImGui::Button("매매 멀티차트")) g_bus.Push(Cmd::OpenMultiChart);
     ImGui::SameLine(); ImGui::TextUnformatted("|"); ImGui::SameLine();
 
-    bool ws = g_health.wsUp.load();
+    const bool localMock = IsLocalMock();
+    ImGui::TextColored(
+        localMock
+            ? ImVec4(0.35f, 0.85f, 0.45f, 1.0f)
+            : ImVec4(0.95f, 0.72f, 0.25f, 1.0f),
+        "[%s]",
+        RuntimeModeLabel());
+    ImGui::SameLine();
+
+    const bool ws = localMock ? true : g_health.wsUp.load();
     ImGui::TextColored(ws ? ImVec4(0.3f, 0.9f, 0.4f, 1) : ImVec4(0.95f, 0.3f, 0.3f, 1), ws ? "WS●" : "WS○");
     ImGui::SameLine();
     ImGui::Text("지연 %dms   유량 %d/%d   구독 %d   부팅 %.0fms   %.1ffps",
@@ -615,8 +819,7 @@ static void DrawDashboard()
 {
     ImGui::Begin("대시보드");
 
-    std::lock_guard<std::mutex> lock(g_dataMtx);
-
+    std::lock_guard<std::mutex> dataLock(g_dataMtx);
     if (g_series.empty()) {
         ImGui::TextDisabled("종목 데이터가 없습니다.");
         ImGui::End();
@@ -624,201 +827,150 @@ static void DrawDashboard()
     }
 
     const int selectedIndex =
-        std::clamp(
-            g_mainSel,
-            0,
-            static_cast<int>(g_series.size()) - 1);
+        std::clamp(g_mainSel, 0, static_cast<int>(g_series.size()) - 1);
+    const Series& selectedSeries = g_series[selectedIndex];
 
-    const Series& selectedSeries =
-        g_series[selectedIndex];
-
-    ImGui::Text(
-        "선택: %s %s",
-        selectedSeries.code.c_str(),
-        selectedSeries.name.c_str());
-
+    ImGui::Text("선택: %s %s", selectedSeries.code.c_str(), selectedSeries.name.c_str());
     ImGui::SameLine();
     ImGui::TextDisabled("| 주문수량");
-
     ImGui::SameLine();
     ImGui::SetNextItemWidth(80.0f);
-
-    if (ImGui::InputInt(
-        "##mock_order_qty",
-        &g_mockOrderQty,
-        1,
-        10))
-    {
-        g_mockOrderQty =
-            (std::max)(1, g_mockOrderQty);
+    if (ImGui::InputInt("##mock_order_qty", &g_mockOrderQty, 1, 10)) {
+        g_mockOrderQty = (std::max)(1, g_mockOrderQty);
     }
 
     ImGui::SameLine();
-
-    if (ImGui::Button("모의매수")) {
-        g_bus.Push(
-            Cmd::MockBuy,
-            selectedSeries.code,
-            g_mockOrderQty);
-    }
-
-    ImGui::SameLine();
-
-    if (ImGui::Button("선택 청산")) {
-        g_bus.Push(Cmd::LiquidateSelected);
-    }
-
-    ImGui::SameLine();
-
-    if (g_observeMode.load()) {
-        if (ImGui::Button("전략 가동")) {
-            g_bus.Push(Cmd::ArmStrategy);
+    if (IsLocalMock()) {
+        if (ImGui::Button("모의매수")) {
+            g_bus.Push(Cmd::MockBuy, selectedSeries.code, g_mockOrderQty);
         }
     }
     else {
-        if (ImGui::Button("관망 전환")) {
-            g_bus.Push(Cmd::DisarmStrategy);
-        }
+        ImGui::BeginDisabled();
+        ImGui::Button("키움매수 (연결 대기)");
+        ImGui::EndDisabled();
     }
-
-    double totalBuy = 0.0;
-    double totalEvaluation = 0.0;
-
-    for (const auto& position : g_positions) {
-        totalBuy +=
-            static_cast<double>(position.avg) *
-            position.qty;
-
-        totalEvaluation +=
-            static_cast<double>(position.cur) *
-            position.qty;
-    }
-
-    const double unrealizedPnL =
-        totalEvaluation - totalBuy;
-
-    const double unrealizedRate =
-        totalBuy > 0.0
-            ? unrealizedPnL / totalBuy * 100.0
-            : 0.0;
-
-    const double totalPnL =
-        unrealizedPnL + g_realizedPnL;
-
-    ImGui::Separator();
-
-    ImGui::Text(
-        "보유 %zu종목   매입 %.0f원   평가 %.0f원",
-        g_positions.size(),
-        totalBuy,
-        totalEvaluation);
 
     ImGui::SameLine();
+    if (IsLocalMock()) {
+        if (ImGui::Button("선택 청산")) g_bus.Push(Cmd::LiquidateSelected);
+    }
+    else {
+        ImGui::BeginDisabled();
+        ImGui::Button("선택 청산 (연결 대기)");
+        ImGui::EndDisabled();
+    }
 
+    ImGui::SameLine();
+    if (g_observeMode.load()) {
+        if (ImGui::Button("전략 가동")) g_bus.Push(Cmd::ArmStrategy);
+    }
+    else {
+        if (ImGui::Button("관망 전환")) g_bus.Push(Cmd::DisarmStrategy);
+    }
+
+    const std::vector<trading::PositionSnapshot> positions =
+        g_tradingState.SnapshotPositions();
+
+    trading::MoneyWon totalBuy = 0;
+    trading::MoneyWon totalEvaluation = 0;
+    for (const trading::PositionSnapshot& position : positions) {
+        totalBuy += position.costBasisWon;
+        totalEvaluation += position.EvaluationWon();
+    }
+
+    const trading::MoneyWon unrealizedPnl = totalEvaluation - totalBuy;
+    const double unrealizedRate =
+        totalBuy > 0
+            ? static_cast<double>(unrealizedPnl) /
+                static_cast<double>(totalBuy) * 100.0
+            : 0.0;
+    const trading::MoneyWon realizedPnl = g_tradingState.RealizedPnlWon();
+    const trading::MoneyWon totalPnl = unrealizedPnl + realizedPnl;
+
+    ImGui::Separator();
+    ImGui::Text(
+        "보유 %zu종목   매입 %lld원   평가 %lld원",
+        positions.size(),
+        static_cast<long long>(totalBuy),
+        static_cast<long long>(totalEvaluation));
+    ImGui::SameLine();
     ImGui::TextColored(
-        unrealizedPnL >= 0.0
+        unrealizedPnl >= 0
             ? ImVec4(0.95f, 0.35f, 0.35f, 1.0f)
             : ImVec4(0.35f, 0.60f, 1.00f, 1.0f),
         "평가손익 %+.0f원 (%+.2f%%)",
-        unrealizedPnL,
+        static_cast<double>(unrealizedPnl),
         unrealizedRate);
-
     ImGui::SameLine();
-
     ImGui::TextColored(
-        g_realizedPnL >= 0.0
+        realizedPnl >= 0
             ? ImVec4(0.95f, 0.35f, 0.35f, 1.0f)
             : ImVec4(0.35f, 0.60f, 1.00f, 1.0f),
         "실현 %+.0f원",
-        g_realizedPnL);
-
+        static_cast<double>(realizedPnl));
     ImGui::SameLine();
-
     ImGui::TextColored(
-        totalPnL >= 0.0
+        totalPnl >= 0
             ? ImVec4(0.95f, 0.70f, 0.25f, 1.0f)
             : ImVec4(0.40f, 0.65f, 1.00f, 1.0f),
         "총손익 %+.0f원",
-        totalPnL);
+        static_cast<double>(totalPnl));
 
-    if (g_positions.empty()) {
+    if (positions.empty()) {
         ImGui::Separator();
         ImGui::TextDisabled(
-            "보유 포지션이 없습니다. 종목을 선택한 뒤 모의매수를 실행하십시오.");
-
+            IsLocalMock()
+                ? "보유 포지션이 없습니다. 종목을 선택한 뒤 모의매수를 실행하십시오."
+                : "키움 잔고 대조가 완료되면 실제 모의계좌 포지션이 표시됩니다.");
         ImGui::End();
         return;
     }
 
     if (ImGui::BeginTable(
-        "pos",
-        8,
-        ImGuiTableFlags_Borders |
-        ImGuiTableFlags_RowBg |
-        ImGuiTableFlags_SizingStretchProp))
+            "pos",
+            8,
+            ImGuiTableFlags_Borders |
+                ImGuiTableFlags_RowBg |
+                ImGuiTableFlags_SizingStretchProp))
     {
         const char* headers[] = {
-            "선택",
-            "종목",
-            "수량",
-            "평단",
-            "현재가",
-            "평가손익",
-            "수익률",
-            "청산"
+            "선택", "종목", "수량", "평단", "현재가",
+            "평가손익", "수익률", "청산"
         };
-
-        for (const char* header : headers) {
-            ImGui::TableSetupColumn(header);
-        }
-
+        for (const char* header : headers) ImGui::TableSetupColumn(header);
         ImGui::TableHeadersRow();
 
-        for (auto& position : g_positions) {
-            const double positionPnL =
-                static_cast<double>(
-                    position.cur - position.avg) *
-                position.qty;
-
+        for (const trading::PositionSnapshot& position : positions) {
+            const trading::MoneyWon positionPnl = position.UnrealizedPnlWon();
             const double positionRate =
-                position.avg > 0.0f
-                    ? static_cast<double>(
-                        position.cur - position.avg) /
-                        position.avg *
-                        100.0
+                position.costBasisWon > 0
+                    ? static_cast<double>(positionPnl) /
+                        static_cast<double>(position.costBasisWon) * 100.0
                     : 0.0;
 
             ImGui::TableNextRow();
             ImGui::PushID(position.code.c_str());
-
             ImGui::TableNextColumn();
-            ImGui::Checkbox(
-                "##position_selected",
-                &position.sel);
-
+            bool selected = position.selected;
+            if (ImGui::Checkbox("##position_selected", &selected)) {
+                g_tradingState.SetSelected(position.code, selected);
+            }
             ImGui::TableNextColumn();
-            ImGui::Text(
-                "%s %s",
-                position.code.c_str(),
-                position.name.c_str());
-
+            ImGui::Text("%s %s", position.code.c_str(), position.name.c_str());
             ImGui::TableNextColumn();
-            ImGui::Text("%d", position.qty);
-
+            ImGui::Text("%d", position.quantity);
             ImGui::TableNextColumn();
-            ImGui::Text("%.0f", position.avg);
-
+            ImGui::Text("%.2f", position.AveragePriceWon());
             ImGui::TableNextColumn();
-            ImGui::Text("%.0f", position.cur);
-
+            ImGui::Text("%d", position.currentPriceWon);
             ImGui::TableNextColumn();
             ImGui::TextColored(
-                positionPnL >= 0.0
+                positionPnl >= 0
                     ? ImVec4(0.95f, 0.35f, 0.35f, 1.0f)
                     : ImVec4(0.35f, 0.60f, 1.00f, 1.0f),
                 "%+.0f",
-                positionPnL);
-
+                static_cast<double>(positionPnl));
             ImGui::TableNextColumn();
             ImGui::TextColored(
                 positionRate >= 0.0
@@ -826,18 +978,19 @@ static void DrawDashboard()
                     : ImVec4(0.35f, 0.60f, 1.00f, 1.0f),
                 "%+.2f%%",
                 positionRate);
-
             ImGui::TableNextColumn();
-
-            if (ImGui::SmallButton("개별청산")) {
-                g_bus.Push(
-                    Cmd::LiquidatePosition,
-                    position.code);
+            if (IsLocalMock()) {
+                if (ImGui::SmallButton("개별청산")) {
+                    g_bus.Push(Cmd::LiquidatePosition, position.code);
+                }
             }
-
+            else {
+                ImGui::BeginDisabled();
+                ImGui::SmallButton("연결 대기");
+                ImGui::EndDisabled();
+            }
             ImGui::PopID();
         }
-
         ImGui::EndTable();
     }
 
@@ -846,18 +999,31 @@ static void DrawDashboard()
 
 static void DrawLogWindow(const char* title, LogRing& ring) {
     ImGui::Begin(title);
-    if (ImGui::Button("지우기")) { std::lock_guard<std::mutex> lk(ring.mtx); ring.count = 0; ring.head = 0; }
-    ImGui::SameLine(); ImGui::TextDisabled("%zu 줄", ring.Size());
+    if (ImGui::Button("지우기")) ring.Clear();
+
+    const std::vector<LogLine> lines = ring.Snapshot();
+    ImGui::SameLine();
+    ImGui::TextDisabled("%zu 줄", lines.size());
     ImGui::Separator();
-    ImGui::BeginChild("body", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
-    size_t n = ring.Size();
-    ImGuiListClipper clip; clip.Begin((int)n);
-    while (clip.Step())
-        for (int i = clip.DisplayStart; i < clip.DisplayEnd; ++i) {
-            LogLine l = ring.Get((size_t)i);
-            ImGui::TextDisabled("[%s]", l.cat); ImGui::SameLine(); ImGui::TextUnformatted(l.msg);
+    ImGui::BeginChild(
+        "body",
+        ImVec2(0, 0),
+        false,
+        ImGuiWindowFlags_HorizontalScrollbar);
+
+    ImGuiListClipper clip;
+    clip.Begin(static_cast<int>(lines.size()));
+    while (clip.Step()) {
+        for (int index = clip.DisplayStart; index < clip.DisplayEnd; ++index) {
+            const LogLine& line = lines[static_cast<size_t>(index)];
+            ImGui::TextDisabled("[%s]", line.cat);
+            ImGui::SameLine();
+            ImGui::TextUnformatted(line.msg);
         }
-    if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4) ImGui::SetScrollHereY(1.f);
+    }
+    if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4) {
+        ImGui::SetScrollHereY(1.f);
+    }
     ImGui::EndChild();
     ImGui::End();
 }
@@ -899,7 +1065,7 @@ static void DrawFaultWindow()
             const FaultRule& rule =
                 g_faultPolicy.GetRule(fault);
 
-            const FaultStat& stat =
+            const FaultStat stat =
                 g_faultPolicy.GetStat(fault);
 
             ImGui::TableNextRow();
@@ -1028,332 +1194,153 @@ static void DrainCommands()
             break;
 
         case Cmd::MockBuy: {
-            const int orderQty =
-                (std::max)(1, command.i0);
-
-            bool filled = false;
-            std::string filledName;
-            float filledPrice = 0.0f;
-            float resultingAverage = 0.0f;
-            int resultingQuantity = 0;
-
-            {
-                std::lock_guard<std::mutex> lock(g_dataMtx);
-
-                for (const auto& series : g_series) {
-                    if (
-                        series.code != command.arg ||
-                        series.bars.empty())
-                    {
-                        continue;
-                    }
-
-                    filledName = series.name;
-                    filledPrice = series.bars.back().c;
-
-                    Position* existingPosition = nullptr;
-
-                    for (auto& position : g_positions) {
-                        if (position.code == command.arg) {
-                            existingPosition = &position;
-                            break;
-                        }
-                    }
-
-                    if (existingPosition == nullptr) {
-                        Position position{};
-
-                        position.code = command.arg;
-                        position.name = filledName;
-                        position.qty = orderQty;
-                        position.avg = filledPrice;
-                        position.cur = filledPrice;
-                        position.sel = false;
-
-                        g_positions.push_back(position);
-
-                        resultingQuantity = orderQty;
-                        resultingAverage = filledPrice;
-                    }
-                    else {
-                        const double previousCost =
-                            static_cast<double>(
-                                existingPosition->avg) *
-                            existingPosition->qty;
-
-                        const double addedCost =
-                            static_cast<double>(
-                                filledPrice) *
-                            orderQty;
-
-                        resultingQuantity =
-                            existingPosition->qty +
-                            orderQty;
-
-                        existingPosition->avg =
-                            static_cast<float>(
-                                (previousCost + addedCost) /
-                                resultingQuantity);
-
-                        existingPosition->qty =
-                            resultingQuantity;
-
-                        existingPosition->cur =
-                            filledPrice;
-
-                        resultingAverage =
-                            existingPosition->avg;
-                    }
-
-                    filled = true;
-                    break;
-                }
+            if (!IsLocalMock()) {
+                g_orderLog.Add("REJECT", "키움 모의투자 연결 완료 전에는 주문할 수 없습니다.");
+                break;
             }
 
-            if (!filled) {
+            const trading::Quantity orderQuantity = (std::max)(1, command.i0);
+            std::string name;
+            trading::PriceWon price = 0;
+            if (!TryGetLatestQuote(command.arg, name, price)) {
                 g_orderLog.Add(
                     "REJECT",
                     "모의매수 거부: 종목 데이터 없음 %s",
                     command.arg.c_str());
+                break;
             }
-            else {
+
+            const trading::ApplyFillResult result = ApplyLocalFill(
+                command.arg,
+                name,
+                trading::OrderSide::Buy,
+                orderQuantity,
+                price);
+            trading::PositionSnapshot position;
+            if (
+                result.status != trading::ApplyFillStatus::Applied ||
+                !FindPosition(command.arg, position))
+            {
                 g_orderLog.Add(
-                    "FILL",
-                    "모의매수 %s %s %d주 @ %.0f | 보유 %d주 평단 %.0f",
-                    command.arg.c_str(),
-                    filledName.c_str(),
-                    orderQty,
-                    filledPrice,
-                    resultingQuantity,
-                    resultingAverage);
-
-                g_log.Add(
-                    "TRADE",
-                    "모의매수 완료: %s %d주",
-                    command.arg.c_str(),
-                    orderQty);
+                    "REJECT",
+                    "모의매수 실패: %s",
+                    result.error.empty() ? "포지션 반영 실패" : result.error.c_str());
+                break;
             }
 
-            g_wakeFrames = 60;
+            g_orderLog.Add(
+                "FILL",
+                "모의매수 %s %s %d주 @ %d | 보유 %d주 평단 %.2f",
+                command.arg.c_str(),
+                name.c_str(),
+                orderQuantity,
+                price,
+                position.quantity,
+                position.AveragePriceWon());
+            g_log.Add("TRADE", "모의매수 완료: %s %d주", command.arg.c_str(), orderQuantity);
+            WakeFrames(60);
             break;
         }
 
         case Cmd::LiquidatePosition: {
-            bool closed = false;
-            std::string closedName;
-            int closedQuantity = 0;
-            float closedPrice = 0.0f;
-            double realized = 0.0;
-
-            {
-                std::lock_guard<std::mutex> lock(g_dataMtx);
-
-                for (
-                    auto positionIt = g_positions.begin();
-                    positionIt != g_positions.end();
-                    ++positionIt)
-                {
-                    if (positionIt->code != command.arg) {
-                        continue;
-                    }
-
-                    closedName = positionIt->name;
-                    closedQuantity = positionIt->qty;
-                    closedPrice = positionIt->cur;
-
-                    realized =
-                        static_cast<double>(
-                            positionIt->cur -
-                            positionIt->avg) *
-                        positionIt->qty;
-
-                    g_realizedPnL += realized;
-                    g_positions.erase(positionIt);
-
-                    closed = true;
-                    break;
-                }
+            if (!IsLocalMock()) {
+                g_orderLog.Add("REJECT", "키움 모의투자 연결 완료 전에는 청산할 수 없습니다.");
+                break;
             }
 
-            if (!closed) {
+            trading::PositionSnapshot position;
+            if (!FindPosition(command.arg, position)) {
                 g_orderLog.Add(
                     "REJECT",
                     "개별청산 거부: 보유 포지션 없음 %s",
                     command.arg.c_str());
+                break;
             }
-            else {
+
+            const trading::ApplyFillResult result = ApplyLocalFill(
+                position.code,
+                position.name,
+                trading::OrderSide::Sell,
+                position.quantity,
+                position.currentPriceWon);
+            if (result.status != trading::ApplyFillStatus::Applied) {
+                g_orderLog.Add("REJECT", "개별청산 실패: %s", result.error.c_str());
+                break;
+            }
+
+            g_orderLog.Add(
+                "FILL",
+                "개별청산 %s %s %d주 @ %d | 실현손익 %+.0f원",
+                position.code.c_str(),
+                position.name.c_str(),
+                position.quantity,
+                position.currentPriceWon,
+                static_cast<double>(result.realizedPnlWon));
+            g_log.Add("TRADE", "개별청산 완료: %s %d주", position.code.c_str(), position.quantity);
+            WakeFrames(60);
+            break;
+        }
+
+        case Cmd::LiquidateSelected:
+        case Cmd::LiquidateAll: {
+            if (!IsLocalMock()) {
+                g_orderLog.Add("REJECT", "키움 모의투자 연결 완료 전에는 청산할 수 없습니다.");
+                break;
+            }
+
+            const bool selectedOnly = command.type == Cmd::LiquidateSelected;
+            const std::vector<trading::LiquidationOrder> plan =
+                g_tradingState.BuildLiquidationPlan(selectedOnly);
+            if (plan.empty()) {
+                g_orderLog.Add(
+                    "REJECT",
+                    selectedOnly
+                        ? "선택청산 거부: 선택된 포지션 없음"
+                        : "전량청산 거부: 보유 포지션 없음");
+                break;
+            }
+
+            size_t completed = 0;
+            trading::MoneyWon totalRealized = 0;
+            for (const trading::LiquidationOrder& order : plan) {
+                trading::PositionSnapshot position;
+                if (!FindPosition(order.code, position)) continue;
+                const trading::ApplyFillResult result = ApplyLocalFill(
+                    position.code,
+                    position.name,
+                    trading::OrderSide::Sell,
+                    order.quantity,
+                    position.currentPriceWon);
+                if (result.status != trading::ApplyFillStatus::Applied) {
+                    g_orderLog.Add("REJECT", "청산 실패 %s: %s", order.code.c_str(), result.error.c_str());
+                    continue;
+                }
+
+                ++completed;
+                totalRealized += result.realizedPnlWon;
                 g_orderLog.Add(
                     "FILL",
-                    "개별청산 %s %s %d주 @ %.0f | 실현손익 %+.0f원",
-                    command.arg.c_str(),
-                    closedName.c_str(),
-                    closedQuantity,
-                    closedPrice,
-                    realized);
-
-                g_log.Add(
-                    "TRADE",
-                    "개별청산 완료: %s %d주, 실현손익 %+.0f원",
-                    command.arg.c_str(),
-                    closedQuantity,
-                    realized);
+                    "%s %s %s %d주 @ %d | 실현손익 %+.0f원",
+                    selectedOnly ? "선택청산" : "전량청산",
+                    position.code.c_str(),
+                    position.name.c_str(),
+                    order.quantity,
+                    position.currentPriceWon,
+                    static_cast<double>(result.realizedPnlWon));
             }
 
-            g_wakeFrames = 60;
-            break;
-        }
-
-        case Cmd::LiquidateSelected: {
-            struct SelectedFill
-            {
-                std::string code;
-                std::string name;
-                int qty = 0;
-                float price = 0.0f;
-                double pnl = 0.0;
-            };
-
-            std::vector<SelectedFill> fills;
-            double totalRealized = 0.0;
-
-            {
-                std::lock_guard<std::mutex> lock(g_dataMtx);
-
-                auto positionIt =
-                    g_positions.begin();
-
-                while (positionIt != g_positions.end()) {
-                    if (!positionIt->sel) {
-                        ++positionIt;
-                        continue;
-                    }
-
-                    SelectedFill fill;
-
-                    fill.code = positionIt->code;
-                    fill.name = positionIt->name;
-                    fill.qty = positionIt->qty;
-                    fill.price = positionIt->cur;
-
-                    fill.pnl =
-                        static_cast<double>(
-                            positionIt->cur -
-                            positionIt->avg) *
-                        positionIt->qty;
-
-                    totalRealized += fill.pnl;
-                    g_realizedPnL += fill.pnl;
-
-                    fills.push_back(fill);
-
-                    positionIt =
-                        g_positions.erase(positionIt);
-                }
-            }
-
-            if (fills.empty()) {
-                g_orderLog.Add(
-                    "REJECT",
-                    "선택청산 거부: 선택된 포지션 없음");
-            }
-            else {
-                for (const auto& fill : fills) {
-                    g_orderLog.Add(
-                        "FILL",
-                        "선택청산 %s %s %d주 @ %.0f | 실현손익 %+.0f원",
-                        fill.code.c_str(),
-                        fill.name.c_str(),
-                        fill.qty,
-                        fill.price,
-                        fill.pnl);
-                }
-
-                g_orderLog.Add(
-                    "ORDER",
-                    "선택청산 완료: %zu종목, 실현손익 %+.0f원",
-                    fills.size(),
-                    totalRealized);
-
-                g_log.Add(
-                    "TRADE",
-                    "선택청산 완료: %zu종목",
-                    fills.size());
-            }
-
-            g_wakeFrames = 60;
-            break;
-        }
-
-        case Cmd::LiquidateAll: {
-            struct AllFill
-            {
-                std::string code;
-                std::string name;
-                int qty = 0;
-                float price = 0.0f;
-                double pnl = 0.0;
-            };
-
-            std::vector<AllFill> fills;
-            double totalRealized = 0.0;
-
-            {
-                std::lock_guard<std::mutex> lock(g_dataMtx);
-
-                fills.reserve(g_positions.size());
-
-                for (const auto& position : g_positions) {
-                    AllFill fill;
-
-                    fill.code = position.code;
-                    fill.name = position.name;
-                    fill.qty = position.qty;
-                    fill.price = position.cur;
-
-                    fill.pnl =
-                        static_cast<double>(
-                            position.cur -
-                            position.avg) *
-                        position.qty;
-
-                    totalRealized += fill.pnl;
-                    g_realizedPnL += fill.pnl;
-
-                    fills.push_back(fill);
-                }
-
-                g_positions.clear();
-            }
-
-            if (fills.empty()) {
-                g_orderLog.Add(
-                    "REJECT",
-                    "전량청산 거부: 보유 포지션 없음");
-            }
-            else {
-                for (const auto& fill : fills) {
-                    g_orderLog.Add(
-                        "FILL",
-                        "전량청산 %s %s %d주 @ %.0f | 실현손익 %+.0f원",
-                        fill.code.c_str(),
-                        fill.name.c_str(),
-                        fill.qty,
-                        fill.price,
-                        fill.pnl);
-                }
-
-                g_orderLog.Add(
-                    "ORDER",
-                    "전량청산 완료: %zu종목, 실현손익 %+.0f원",
-                    fills.size(),
-                    totalRealized);
-
-                g_log.Add(
-                    "CMD",
-                    "전량청산 완료: 보유 포지션 0종목");
-            }
-
-            g_wakeFrames = 60;
+            g_orderLog.Add(
+                "ORDER",
+                "%s 완료: %zu종목, 실현손익 %+.0f원",
+                selectedOnly ? "선택청산" : "전량청산",
+                completed,
+                static_cast<double>(totalRealized));
+            g_log.Add(
+                "TRADE",
+                "%s 완료: %zu종목",
+                selectedOnly ? "선택청산" : "전량청산",
+                completed);
+            WakeFrames(60);
             break;
         }
 
@@ -1383,28 +1370,50 @@ static void DrainCommands()
 static std::atomic<bool> g_feedRun{ true };
 static void MockFeedThread() {
     std::mt19937 rng(1234);
-    std::normal_distribution<float> nd(0.f, 1.f);
+    std::normal_distribution<double> normal(0.0, 1.0);
     int tick = 0;
+
     while (g_feedRun.load()) {
+        std::vector<std::pair<std::string, trading::PriceWon>> prices;
         {
-            std::lock_guard<std::mutex> lk(g_dataMtx);
-            for (auto& s : g_series) {                     // 마지막 봉만 갱신
-                Bar& b = s.bars.back();
-                b.c *= (1.f + nd(rng) * 0.0006f);
-                b.h = (std::max)(b.h, b.c); b.l = (std::min)(b.l, b.c);
-                b.vol += std::fabs(nd(rng)) * 40.f;
+            std::lock_guard<std::mutex> lock(g_dataMtx);
+            prices.reserve(g_series.size());
+            for (Series& series : g_series) {
+                if (series.bars.empty()) continue;
+                Bar& bar = series.bars.back();
+                const double next =
+                    static_cast<double>(bar.c) *
+                    (1.0 + normal(rng) * 0.0006);
+                bar.c = (std::max)(1, static_cast<int>(std::llround(next)));
+                bar.h = (std::max)(bar.h, bar.c);
+                bar.l = (std::min)(bar.l, bar.c);
+                bar.vol += static_cast<trading::Volume>(
+                    std::llround(std::fabs(normal(rng)) * 40.0));
+                ++bar.tickCount;
+                bar.tsClose = UnixMillisNow();
+                prices.emplace_back(series.code, bar.c);
             }
-            for (auto& p : g_positions)
-                for (auto& s : g_series)
-                    if (s.code == p.code) p.cur = s.bars.back().c;
         }
+
+        if (IsLocalMock()) {
+            for (const auto& entry : prices) {
+                g_tradingState.UpdateCurrentPrice(entry.first, entry.second);
+            }
+        }
+
         g_mainCanvas.dirty = true;
-        for (auto& c : g_multi) c.dirty = true;
-        g_health.latencyMs = 8 + (int)(rng() % 20);
-        g_health.rateUsed = (int)(rng() % 45);
-        g_health.subCount = (int)g_targets.size() + 1;
-        if (++tick % 12 == 0) g_signalLog.Add("SIG", "JMA(%d/%d) 교차 후보 감지 — 스텁", P_jmaFast, P_jmaMid);
-        g_wakeFrames = (std::max)(g_wakeFrames, 2);
+        for (Canvas& canvas : g_multi) canvas.dirty = true;
+        g_health.latencyMs = 8 + static_cast<int>(rng() % 20);
+        g_health.rateUsed = static_cast<int>(rng() % 45);
+        g_health.subCount = static_cast<int>(g_targets.size()) + 1;
+        if (++tick % 12 == 0) {
+            g_signalLog.Add(
+                "SIG",
+                "JMA(%d/%d) 교차 후보 감지 — 스텁",
+                P_jmaFast,
+                P_jmaMid);
+        }
+        WakeFrames(2);
         std::this_thread::sleep_for(std::chrono::milliseconds(400));
     }
 }
@@ -1463,13 +1472,13 @@ static void CleanupDeviceD3D() {
 }
 
 static LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wP, LPARAM lP) {
-    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wP, lP)) { g_wakeFrames = 60; return true; }
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wP, lP)) { WakeFrames(60); return true; }
     switch (msg) {
     case WM_SIZE:
-        if (wP != SIZE_MINIMIZED) { g_resizeW = LOWORD(lP); g_resizeH = HIWORD(lP); g_wakeFrames = 60; }
+        if (wP != SIZE_MINIMIZED) { g_resizeW = LOWORD(lP); g_resizeH = HIWORD(lP); WakeFrames(60); }
         return 0;
     case WM_MOUSEMOVE: case WM_KEYDOWN: case WM_LBUTTONDOWN: case WM_MOUSEWHEEL:
-        g_wakeFrames = 60; break;
+        WakeFrames(60); break;
     case WM_SYSCOMMAND: if ((wP & 0xfff0) == SC_KEYMENU) return 0; break;
     case WM_DESTROY: PostQuitMessage(0); return 0;
     }
@@ -1574,9 +1583,35 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         return 2;
     }
     RegisterParams();
+
+    const trading::ConfigLoadResult configLoad = trading::LoadRuntimeConfig(".");
+    if (configLoad.ok) {
+        g_runtimeConfig = configLoad.config;
+    }
+    else {
+        g_runtimeConfig = trading::RuntimeConfig{};
+        g_runtimeConfigError = configLoad.error;
+        g_observeMode = true;
+    }
+
+    g_health.wsUp = IsLocalMock();
     MakeMockData();
     g_health.bootMs = (NowSec() - t0) * 1000.0;
-    g_log.Add("SYS", "셸 기동 완료 (%.0fms). 데이터는 목(mock)이며 엔진은 스텁입니다.", g_health.bootMs.load());
+    g_log.Add(
+        "SYS",
+        "셸 기동 완료 (%.0fms), 모드=%s, 정수 원화 공용 매매상태 사용",
+        g_health.bootMs.load(),
+        RuntimeModeLabel());
+
+    if (!g_runtimeConfigError.empty()) {
+        g_log.Add(
+            "FAULT",
+            "환경설정 오류로 LOCAL MOCK 관망 상태로 시작: %s",
+            g_runtimeConfigError.c_str());
+    }
+    else if (!IsLocalMock()) {
+        g_log.Add("SYS", "KIWOOM MOCK 선택됨: 연결 런타임 준비 전까지 주문 잠금");
+    }
 
     std::thread feed(MockFeedThread);
     bool firstLayout = true;
@@ -1673,8 +1708,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         g_health.frameMs = (NowSec() - fstart) * 1000.0;
 
         // ── 유휴 절전: 입력/데이터 변화 없으면 15fps로 낮춰 대기
-        if (g_wakeFrames > 0) --g_wakeFrames;
-        else MsgWaitForMultipleObjectsEx(0, nullptr, 60, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        if (!ConsumeWakeFrame()) {
+            MsgWaitForMultipleObjectsEx(
+                0,
+                nullptr,
+                60,
+                QS_ALLINPUT,
+                MWMO_INPUTAVAILABLE);
+        }
     }
 
     g_feedRun = false; feed.join();

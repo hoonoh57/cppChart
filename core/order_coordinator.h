@@ -134,6 +134,9 @@ namespace trading
         static std::map<std::string, PositionSnapshot> IndexPositions(
             const std::vector<PositionSnapshot>& positions);
 
+        Quantity ReservedSellQuantityLocked(
+            const std::string& code) const noexcept;
+
         void ReleaseOutstandingSellReservationLocked(
             const OrderRecord& order);
 

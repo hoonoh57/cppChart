@@ -1,4 +1,4 @@
-#include "kiwoom_runtime_runner.h"
+﻿#include "kiwoom_runtime_runner.h"
 
 #include <algorithm>
 #include <cctype>
@@ -411,7 +411,9 @@ namespace trading::platform
 
     void KiwoomRuntimeRunner::StartReceiver()
     {
-        StopReceiver();
+        if (receiverThread_.joinable()) {
+            receiverThread_.join();
+        }
         receiverRunning_.store(true, std::memory_order_release);
         receiverThread_ =
             std::thread(&KiwoomRuntimeRunner::ReceiverLoop, this);

@@ -1,4 +1,4 @@
-#ifndef _WIN32_WINNT
+﻿#ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0602
 #endif
 
@@ -415,6 +415,38 @@ namespace trading::platform
             }
 
             response.statusCode = statusCode;
+
+            // CPPCHART_CONTINUATION_HEADERS
+            const auto readResponseHeader = [&](const wchar_t* headerName,
+                                                const char* resultName) {
+                DWORD bytes = 0;
+                WinHttpQueryHeaders(
+                    request.Get(),
+                    WINHTTP_QUERY_CUSTOM,
+                    const_cast<wchar_t*>(headerName),
+                    WINHTTP_NO_OUTPUT_BUFFER,
+                    &bytes,
+                    WINHTTP_NO_HEADER_INDEX);
+
+                if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || bytes == 0) {
+                    return;
+                }
+
+                std::vector<wchar_t> value(bytes / sizeof(wchar_t) + 1, L'\0');
+                if (WinHttpQueryHeaders(
+                        request.Get(),
+                        WINHTTP_QUERY_CUSTOM,
+                        const_cast<wchar_t*>(headerName),
+                        value.data(),
+                        &bytes,
+                        WINHTTP_NO_HEADER_INDEX))
+                {
+                    response.headers[resultName] = WideToUtf8(value.data());
+                }
+            };
+
+            readResponseHeader(L"cont-yn", "cont-yn");
+            readResponseHeader(L"next-key", "next-key");
 
             for (;;) {
                 DWORD available = 0;

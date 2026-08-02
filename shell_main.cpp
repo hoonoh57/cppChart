@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdint>
 #include <utility>
+#include <memory>
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -30,9 +31,16 @@
 #include "core/market_types.h"
 #include "core/runtime_config.h"
 #include "core/trading_state.h"
+#include "core/order_coordinator.h"
+#include "core/kiwoom_gateway_core.h"
+#include "core/safe_liquidation.h"
+#include "core/kiwoom_runtime_engine.h"
+#include "platform/kiwoom_runtime_runner.h"
+#include "platform/winhttp_kiwoom_transport.h"
 
 // CPPCHART_SHARED_RUNTIME_INTEGRATED
 // CPPCHART_UI_THREAD_DATA_HANDOFF
+// CPPCHART_KIWOOM_RUNTIME_CONNECTED
 
 // ─────────────────────────────── 공용 상태 ──────────────────────────────────
 static ID3D11Device*           g_dev  = nullptr;
@@ -213,6 +221,17 @@ struct Series {
 
 static std::vector<Series> g_series;      // [0] = 지수
 static trading::TradingState g_tradingState;
+static trading::OrderCoordinator g_orderCoordinator(g_tradingState);
+static trading::KiwoomGatewayCore g_kiwoomGatewayCore(
+    g_tradingState,
+    g_orderCoordinator);
+static trading::BrokerOpenOrderRegistry g_brokerOpenOrders;
+static trading::KiwoomRuntimeEngine g_kiwoomRuntimeEngine(
+    g_tradingState,
+    g_orderCoordinator,
+    g_kiwoomGatewayCore,
+    g_brokerOpenOrders);
+static std::unique_ptr<trading::platform::KiwoomRuntimeRunner> g_kiwoomRunner;
 static trading::RuntimeConfig g_runtimeConfig;
 static std::string g_runtimeConfigError;
 static std::atomic<std::uint64_t> g_localOrderSequence{ 1 };
@@ -240,6 +259,39 @@ static bool IsLocalMock() noexcept
 static const char* RuntimeModeLabel() noexcept
 {
     return IsLocalMock() ? "LOCAL MOCK" : "KIWOOM MOCK";
+}
+
+static const char* KiwoomSessionLabel(
+    trading::KiwoomSessionState state) noexcept
+{
+    switch (state) {
+    case trading::KiwoomSessionState::TokenRequestPending: return "토큰";
+    case trading::KiwoomSessionState::SocketConnectPending: return "WS 연결";
+    case trading::KiwoomSessionState::LoginPending: return "로그인";
+    case trading::KiwoomSessionState::RegistrationPending: return "실시간 등록";
+    case trading::KiwoomSessionState::ReconciliationPending: return "계좌 대조";
+    case trading::KiwoomSessionState::Ready: return "주문 가능";
+    case trading::KiwoomSessionState::ReconnectWaiting: return "재연결 대기";
+    case trading::KiwoomSessionState::Faulted: return "장애";
+    case trading::KiwoomSessionState::ConfigurationError: return "설정 오류";
+    default: return "정지";
+    }
+}
+
+static trading::KiwoomRuntimeSnapshot KiwoomSnapshot()
+{
+    return g_kiwoomRunner
+        ? g_kiwoomRunner->Snapshot()
+        : trading::KiwoomRuntimeSnapshot{};
+}
+
+static bool CanSubmitOrders()
+{
+    return
+        IsLocalMock() ||
+        (g_kiwoomRunner &&
+         g_kiwoomRunner->Snapshot().orderSubmissionAllowed &&
+         !g_observeMode.load(std::memory_order_acquire));
 }
 
 static trading::EpochMillis UnixMillisNow() noexcept
@@ -673,9 +725,25 @@ static void DrawToolbar() {
         RuntimeModeLabel());
     ImGui::SameLine();
 
-    const bool ws = localMock ? true : g_health.wsUp.load();
-    ImGui::TextColored(ws ? ImVec4(0.3f, 0.9f, 0.4f, 1) : ImVec4(0.95f, 0.3f, 0.3f, 1), ws ? "WS●" : "WS○");
+    const trading::KiwoomRuntimeSnapshot runtime = KiwoomSnapshot();
+    const bool ws = localMock ||
+        runtime.sessionState == trading::KiwoomSessionState::LoginPending ||
+        runtime.sessionState == trading::KiwoomSessionState::RegistrationPending ||
+        runtime.sessionState == trading::KiwoomSessionState::ReconciliationPending ||
+        runtime.sessionState == trading::KiwoomSessionState::Ready;
+    ImGui::TextColored(
+        ws ? ImVec4(0.3f, 0.9f, 0.4f, 1) : ImVec4(0.95f, 0.3f, 0.3f, 1),
+        ws ? "WS●" : "WS○");
     ImGui::SameLine();
+    if (!localMock) {
+        ImGui::TextColored(
+            runtime.orderSubmissionAllowed
+                ? ImVec4(0.35f, 0.95f, 0.45f, 1.0f)
+                : ImVec4(0.95f, 0.72f, 0.25f, 1.0f),
+            "%s | ",
+            KiwoomSessionLabel(runtime.sessionState));
+        ImGui::SameLine();
+    }
     ImGui::Text("지연 %dms   유량 %d/%d   구독 %d   부팅 %.0fms   %.1ffps",
         g_health.latencyMs.load(), g_health.rateUsed.load(), g_health.rateCap.load(),
         g_health.subCount.load(), g_health.bootMs.load(), ImGui::GetIO().Framerate);
@@ -690,7 +758,10 @@ static void DrawToolbar() {
     ImGui::SameLine(ImGui::GetWindowWidth() - btnW - 16.f);
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.72f, 0.12f, 0.12f, 1));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.88f, 0.18f, 0.18f, 1));
+    const bool canLiquidate = CanSubmitOrders();
+    if (!canLiquidate) ImGui::BeginDisabled();
     bool panic = ImGui::Button("전량청산", ImVec2(btnW, 0));
+    if (!canLiquidate) ImGui::EndDisabled();
     ImGui::PopStyleColor(2);
     if (panic || (ImGui::GetIO().KeyCtrl && ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_L, false)))
         ImGui::OpenPopup("confirm_liq_all");
@@ -851,26 +922,17 @@ static void DrawDashboard()
     }
 
     ImGui::SameLine();
-    if (IsLocalMock()) {
-        if (ImGui::Button("모의매수")) {
-            g_bus.Push(Cmd::MockBuy, selectedSeries.code, g_mockOrderQty);
-        }
+    const bool canSubmit = CanSubmitOrders();
+    if (!canSubmit) ImGui::BeginDisabled();
+    if (ImGui::Button(IsLocalMock() ? "모의매수" : "키움 모의매수")) {
+        g_bus.Push(Cmd::MockBuy, selectedSeries.code, g_mockOrderQty);
     }
-    else {
-        ImGui::BeginDisabled();
-        ImGui::Button("키움매수 (연결 대기)");
-        ImGui::EndDisabled();
-    }
+    if (!canSubmit) ImGui::EndDisabled();
 
     ImGui::SameLine();
-    if (IsLocalMock()) {
-        if (ImGui::Button("선택 청산")) g_bus.Push(Cmd::LiquidateSelected);
-    }
-    else {
-        ImGui::BeginDisabled();
-        ImGui::Button("선택 청산 (연결 대기)");
-        ImGui::EndDisabled();
-    }
+    if (!canSubmit) ImGui::BeginDisabled();
+    if (ImGui::Button("선택 청산")) g_bus.Push(Cmd::LiquidateSelected);
+    if (!canSubmit) ImGui::EndDisabled();
 
     ImGui::SameLine();
     if (g_observeMode.load()) {
@@ -990,16 +1052,12 @@ static void DrawDashboard()
                 "%+.2f%%",
                 positionRate);
             ImGui::TableNextColumn();
-            if (IsLocalMock()) {
-                if (ImGui::SmallButton("개별청산")) {
-                    g_bus.Push(Cmd::LiquidatePosition, position.code);
-                }
+            const bool canClosePosition = CanSubmitOrders();
+            if (!canClosePosition) ImGui::BeginDisabled();
+            if (ImGui::SmallButton("개별청산")) {
+                g_bus.Push(Cmd::LiquidatePosition, position.code);
             }
-            else {
-                ImGui::BeginDisabled();
-                ImGui::SmallButton("연결 대기");
-                ImGui::EndDisabled();
-            }
+            if (!canClosePosition) ImGui::EndDisabled();
             ImGui::PopID();
         }
         ImGui::EndTable();
@@ -1206,22 +1264,39 @@ static void DrainCommands()
             break;
 
         case Cmd::MockBuy: {
-            if (!IsLocalMock()) {
-                g_orderLog.Add("REJECT", "키움 모의투자 연결 완료 전에는 주문할 수 없습니다.");
-                break;
-            }
-
             const trading::Quantity orderQuantity = (std::max)(1, command.i0);
             std::string name;
             trading::PriceWon price = 0;
             if (!TryGetLatestQuote(command.arg, name, price)) {
                 g_orderLog.Add(
                     "REJECT",
-                    "모의매수 거부: 종목 데이터 없음 %s",
+                    "매수 거부: 종목 데이터 없음 %s",
                     command.arg.c_str());
                 break;
             }
 
+            if (!IsLocalMock()) {
+                trading::OrderIntent intent;
+                intent.code = command.arg;
+                intent.name = name;
+                intent.side = trading::StockOrderSide::Buy;
+                intent.type = trading::StockOrderType::Market;
+                intent.quantity = orderQuantity;
+
+                std::string error;
+                if (!g_kiwoomRunner || !g_kiwoomRunner->SubmitOrder(intent, error)) {
+                    g_orderLog.Add("REJECT", "키움 모의매수 거부: %s", error.c_str());
+                }
+                else {
+                    g_orderLog.Add(
+                        "ORDER",
+                        "키움 모의매수 전송 %s %s %d주 시장가",
+                        command.arg.c_str(),
+                        name.c_str(),
+                        orderQuantity);
+                }
+                break;
+            }
             const trading::ApplyFillResult result = ApplyLocalFill(
                 command.arg,
                 name,
@@ -1255,17 +1330,34 @@ static void DrainCommands()
         }
 
         case Cmd::LiquidatePosition: {
-            if (!IsLocalMock()) {
-                g_orderLog.Add("REJECT", "키움 모의투자 연결 완료 전에는 청산할 수 없습니다.");
-                break;
-            }
-
             trading::PositionSnapshot position;
             if (!FindPosition(command.arg, position)) {
                 g_orderLog.Add(
                     "REJECT",
                     "개별청산 거부: 보유 포지션 없음 %s",
                     command.arg.c_str());
+                break;
+            }
+
+            if (!IsLocalMock()) {
+                trading::OrderIntent intent;
+                intent.code = position.code;
+                intent.name = position.name;
+                intent.side = trading::StockOrderSide::Sell;
+                intent.type = trading::StockOrderType::Market;
+                intent.quantity = position.quantity;
+
+                std::string error;
+                if (!g_kiwoomRunner || !g_kiwoomRunner->SubmitOrder(intent, error)) {
+                    g_orderLog.Add("REJECT", "개별청산 주문 거부: %s", error.c_str());
+                }
+                else {
+                    g_orderLog.Add(
+                        "ORDER",
+                        "개별청산 주문 전송 %s %d주 시장가",
+                        position.code.c_str(),
+                        position.quantity);
+                }
                 break;
             }
 
@@ -1295,12 +1387,27 @@ static void DrainCommands()
 
         case Cmd::LiquidateSelected:
         case Cmd::LiquidateAll: {
+            const bool selectedOnly = command.type == Cmd::LiquidateSelected;
             if (!IsLocalMock()) {
-                g_orderLog.Add("REJECT", "키움 모의투자 연결 완료 전에는 청산할 수 없습니다.");
+                std::string error;
+                if (!g_kiwoomRunner ||
+                    !g_kiwoomRunner->SubmitLiquidation(selectedOnly, error))
+                {
+                    g_orderLog.Add(
+                        "REJECT",
+                        "%s 주문 거부: %s",
+                        selectedOnly ? "선택청산" : "전량청산",
+                        error.c_str());
+                }
+                else {
+                    g_orderLog.Add(
+                        "ORDER",
+                        "%s 주문 전송",
+                        selectedOnly ? "선택청산" : "전량청산");
+                }
                 break;
             }
 
-            const bool selectedOnly = command.type == Cmd::LiquidateSelected;
             const std::vector<trading::LiquidationOrder> plan =
                 g_tradingState.BuildLiquidationPlan(selectedOnly);
             if (plan.empty()) {
@@ -1629,7 +1736,45 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             g_runtimeConfigError.c_str());
     }
     else if (!IsLocalMock()) {
-        g_log.Add("SYS", "KIWOOM MOCK 선택됨: 연결 런타임 준비 전까지 주문 잠금");
+        trading::platform::KiwoomRunnerCallbacks callbacks;
+        callbacks.log = [](const char* category, const std::string& message) {
+            if (
+                strcmp(category, "ORDER") == 0 ||
+                strcmp(category, "REJECT") == 0)
+            {
+                g_orderLog.Add(category, "%s", message.c_str());
+            }
+            else {
+                g_log.Add(category, "%s", message.c_str());
+            }
+        };
+        callbacks.wakeUi = [] {
+            g_marketDataDirty.store(true, std::memory_order_release);
+            WakeFrames(60);
+        };
+        callbacks.setObserveMode = [](bool enabled) {
+            g_observeMode.store(enabled, std::memory_order_release);
+        };
+
+        g_kiwoomRunner =
+            std::make_unique<trading::platform::KiwoomRuntimeRunner>(
+                g_kiwoomRuntimeEngine,
+                std::make_unique<trading::platform::WinHttpKiwoomTransport>(),
+                std::move(callbacks));
+
+        std::string runtimeError;
+        if (!g_kiwoomRunner->Start(g_runtimeConfig, runtimeError)) {
+            g_observeMode = true;
+            g_log.Add(
+                "FAULT",
+                "키움 모의투자 런타임 시작 실패: %s",
+                runtimeError.c_str());
+        }
+        else {
+            g_log.Add(
+                "SYS",
+                "키움 모의투자 연결 시작: 토큰 → WS → 00/04 → 계좌대조");
+        }
     }
 
     std::thread feed(MockFeedThread);
@@ -1742,6 +1887,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         }
     }
 
+    if (g_kiwoomRunner) {
+        g_kiwoomRunner->Stop();
+        g_kiwoomRunner.reset();
+    }
     g_feedRun = false; feed.join();
     g_mainCanvas.Release(); for (auto& c : g_multi) c.Release();
     ReleaseDeviceObjects();

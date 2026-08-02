@@ -31,6 +31,17 @@ if errorlevel 1 exit /b 1
 runtime_config_tests.exe
 if errorlevel 1 exit /b 1
 
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
+  tests\kiwoom_session_tests.cpp ^
+  core\json_lite.cpp ^
+  core\kiwoom_protocol.cpp ^
+  core\runtime_config.cpp ^
+  core\kiwoom_session.cpp ^
+  /Fe:kiwoom_session_tests.exe
+if errorlevel 1 exit /b 1
+kiwoom_session_tests.exe
+if errorlevel 1 exit /b 1
+
 echo.
 echo *** ALL HEADLESS TESTS PASSED ***
 exit /b 0

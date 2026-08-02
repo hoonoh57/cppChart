@@ -82,7 +82,7 @@ namespace trading
             if (selectedOnly && !position.selected) continue;
 
             const Quantity reserved =
-                ReservedSellQuantity(position.code);
+                ReservedSellQuantityLocked(position.code);
 
             const Quantity available =
                 position.quantity > reserved
@@ -185,13 +185,9 @@ namespace trading
             return false;
         }
 
-        order.brokerOrderNumber = brokerOrderNumber;
-        order.lifecycle = OrderLifecycle::Accepted;
-        brokerToClient_[brokerOrderNumber] = clientIntentId;
-
         const auto orphan = orphanByBroker_.find(brokerOrderNumber);
         if (orphan != orphanByBroker_.end()) {
-            const OrderRecord orphanRecord = orphan->second;
+            const OrderRecord& orphanRecord = orphan->second;
 
             if (
                 orphanRecord.code != order.code ||
@@ -208,7 +204,14 @@ namespace trading
                 error = "broker cumulative fill exceeds requested quantity";
                 return false;
             }
+        }
 
+        order.brokerOrderNumber = brokerOrderNumber;
+        order.lifecycle = OrderLifecycle::Accepted;
+        brokerToClient_[brokerOrderNumber] = clientIntentId;
+
+        if (orphan != orphanByBroker_.end()) {
+            const OrderRecord orphanRecord = orphan->second;
             order.cumulativeFilledQuantity =
                 orphanRecord.cumulativeFilledQuantity;
 
@@ -406,10 +409,8 @@ namespace trading
     Quantity OrderCoordinator::ReservedSellQuantity(
         const std::string& code) const
     {
-        const auto found = reservedSellQuantity_.find(code);
-        return found == reservedSellQuantity_.end()
-            ? 0
-            : found->second;
+        std::lock_guard<std::mutex> lock(mutex_);
+        return ReservedSellQuantityLocked(code);
     }
 
     void OrderCoordinator::Reset()
@@ -473,7 +474,7 @@ namespace trading
             }
 
             const Quantity reserved =
-                ReservedSellQuantity(intent.code);
+                ReservedSellQuantityLocked(intent.code);
 
             const Quantity available =
                 position->second.quantity > reserved
@@ -527,6 +528,15 @@ namespace trading
         }
 
         return result;
+    }
+
+    Quantity OrderCoordinator::ReservedSellQuantityLocked(
+        const std::string& code) const noexcept
+    {
+        const auto found = reservedSellQuantity_.find(code);
+        return found == reservedSellQuantity_.end()
+            ? 0
+            : found->second;
     }
 
     void OrderCoordinator::ReleaseOutstandingSellReservationLocked(

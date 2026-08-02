@@ -50,6 +50,10 @@ jobs:
             throw "Tracked secret configuration files:`n$($trackedSecrets -join "`n")"
           }
 
+      - name: Verify core dependency boundary
+        shell: pwsh
+        run: .\scripts\verify_core_boundary.ps1
+
       - name: Locate MSVC toolchain
         id: msvc
         shell: pwsh

@@ -107,6 +107,24 @@ if errorlevel 1 exit /b 1
 safe_liquidation_tests.exe
 if errorlevel 1 exit /b 1
 
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
+  tests\kiwoom_runtime_engine_tests.cpp ^
+  core\json_lite.cpp ^
+  core\kiwoom_protocol.cpp ^
+  core\runtime_config.cpp ^
+  core\kiwoom_session.cpp ^
+  core\trading_state.cpp ^
+  core\order_coordinator.cpp ^
+  core\kiwoom_events.cpp ^
+  core\kiwoom_gateway_core.cpp ^
+  core\kiwoom_reconciliation.cpp ^
+  core\safe_liquidation.cpp ^
+  core\kiwoom_runtime_engine.cpp ^
+  /Fe:kiwoom_runtime_engine_tests.exe
+if errorlevel 1 exit /b 1
+kiwoom_runtime_engine_tests.exe
+if errorlevel 1 exit /b 1
+
 echo.
 echo *** ALL HEADLESS TESTS PASSED ***
 exit /b 0

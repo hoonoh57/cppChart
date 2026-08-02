@@ -8,13 +8,13 @@ namespace trading
 {
     enum class RuntimeMode
     {
-        LocalMock,
+        Unconfigured,
         KiwoomMock
     };
 
     struct RuntimeConfig final
     {
-        RuntimeMode mode = RuntimeMode::LocalMock;
+        RuntimeMode mode = RuntimeMode::Unconfigured;
         std::string sourcePath;
         std::string appKey;
         std::string secretKey;

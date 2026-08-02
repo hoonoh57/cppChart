@@ -1,10 +1,17 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$Branch = "main",
     [switch]$Launch
 )
 
 $ErrorActionPreference = "Stop"
+
+# Windows PowerShell 5.1은 BOM 없는 UTF-8 스크립트를 시스템 ANSI로 해석할 수 있다.
+# 이 파일은 UTF-8 BOM으로 저장하며, 자식 프로세스와 콘솔 출력도 UTF-8로 고정한다.
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+[Console]::InputEncoding = $utf8
+[Console]::OutputEncoding = $utf8
+$OutputEncoding = $utf8
 
 function Assert-NativeSuccess {
     param([string]$Operation)

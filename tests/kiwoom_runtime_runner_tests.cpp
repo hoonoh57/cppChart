@@ -285,9 +285,18 @@ namespace
         Check(wakeCount.load(std::memory_order_relaxed) > 0,
               "runtime callbacks must wake the UI");
 
+        const int connectCountBeforeStop = fake->ConnectCount();
         runner.Stop();
         Check(!runner.IsRunning(),
               "runner must stop cleanly");
+        Check(
+            runner.Snapshot().sessionState ==
+                trading::KiwoomSessionState::Stopped,
+            "runner stop must leave the session stopped");
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+        Check(fake->ConnectCount() == connectCountBeforeStop,
+              "stop-induced socket close must not schedule a reconnect");
     }
 }
 

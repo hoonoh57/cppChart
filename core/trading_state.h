@@ -67,6 +67,13 @@ namespace trading
             const PositionSnapshot& brokerPosition,
             std::string& error);
 
+        bool ReconcileOrderProgress(
+            const std::string& orderId,
+            const std::string& code,
+            OrderSide side,
+            Quantity cumulativeApplied,
+            std::string& error);
+
         bool UpdateCurrentPrice(
             const std::string& code,
             PriceWon priceWon);

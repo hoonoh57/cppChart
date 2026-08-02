@@ -15,14 +15,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-ci-${{ github.ref }}
+  group: windows-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-and-test:
     name: MSVC build and headless tests
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -53,6 +53,50 @@ jobs:
       - name: Verify core dependency boundary
         shell: pwsh
         run: .\scripts\verify_core_boundary.ps1
+
+      - name: Verify integrated runtime contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Get-Content .\shell_main.cpp -Raw
+          $runner = Get-Content .\platform\kiwoom_runtime_runner.cpp -Raw
+          $transport = Get-Content .\platform\winhttp_transport.cpp -Raw
+          $required = @(
+            'CPPCHART_SHARED_RUNTIME_INTEGRATED',
+            'CPPCHART_UI_THREAD_DATA_HANDOFF',
+            'CPPCHART_KIWOOM_RUNTIME_CONNECTED',
+            'std::atomic<int> g_wakeFrames',
+            'trading::TradingState g_tradingState',
+            'trading::KiwoomRuntimeEngine g_kiwoomRuntimeEngine',
+            'WinHttpKiwoomTransport',
+            'g_marketDataDirty',
+            'ApplyLocalFill('
+          )
+          foreach ($marker in $required) {
+            if (-not $source.Contains($marker)) {
+              throw "Missing integrated runtime marker: $marker"
+            }
+          }
+
+          if (-not $transport.Contains('CPPCHART_CONTINUATION_HEADERS')) {
+            throw 'WinHTTP continuation response headers are not integrated'
+          }
+
+          if ($runner.Contains("StartReceiver()`r`n    {`r`n        StopReceiver();") -or
+              $runner.Contains("StartReceiver()`n    {`n        StopReceiver();")) {
+            throw 'Receiver startup closes the newly connected socket'
+          }
+
+          $forbidden = @(
+            'struct Position {',
+            'static double g_realizedPnL',
+            'static int  g_wakeFrames'
+          )
+          foreach ($marker in $forbidden) {
+            if ($source.Contains($marker)) {
+              throw "Legacy shell state remains: $marker"
+            }
+          }
 
       - name: Locate MSVC toolchain
         id: msvc
@@ -100,6 +144,15 @@ jobs:
           & cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) {
             throw "headless tests failed, exit code=$LASTEXITCODE"
+          }
+
+      - name: Verify clean source tree after build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $changes = @(git status --porcelain)
+          if ($changes.Count -gt 0) {
+            throw "Build or tests modified tracked files:`n$($changes -join "`n")"
           }
 
       - name: Publish verified executable

@@ -53,6 +53,17 @@ if errorlevel 1 exit /b 1
 order_coordinator_tests.exe
 if errorlevel 1 exit /b 1
 
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc /D_WIN32_WINNT=0x0602 ^
+  tests\winhttp_transport_tests.cpp ^
+  core\json_lite.cpp ^
+  core\kiwoom_protocol.cpp ^
+  platform\winhttp_transport.cpp ^
+  /Fe:winhttp_transport_tests.exe ^
+  /link winhttp.lib
+if errorlevel 1 exit /b 1
+winhttp_transport_tests.exe
+if errorlevel 1 exit /b 1
+
 echo.
 echo *** ALL HEADLESS TESTS PASSED ***
 exit /b 0

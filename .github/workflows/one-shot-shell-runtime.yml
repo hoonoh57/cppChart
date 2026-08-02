@@ -8,6 +8,13 @@ on:
       - scripts/migrate_shell_runtime.py
       - build.bat
       - .github/workflows/one-shot-shell-runtime.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/migrate_shell_runtime.py
+      - build.bat
+      - .github/workflows/one-shot-shell-runtime.yml
 
 permissions:
   contents: write

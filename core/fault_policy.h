@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstddef>
 #include <functional>
+#include <mutex>
 
 enum class Fault
 {
@@ -59,6 +60,12 @@ public:
         LogCallback logger,
         int wakeValue = 60);
 
+    FaultPolicy(
+        std::atomic<bool>* observeMode,
+        std::atomic<int>* wakeFrames,
+        LogCallback logger,
+        int wakeValue = 60);
+
     FaultPolicy(const FaultPolicy&) = delete;
     FaultPolicy& operator=(const FaultPolicy&) = delete;
 
@@ -69,7 +76,7 @@ public:
     const FaultRule& GetRule(
         Fault fault) const noexcept;
 
-    const FaultStat& GetStat(
+    FaultStat GetStat(
         Fault fault) const noexcept;
 
     static const char* FaultName(
@@ -80,13 +87,17 @@ public:
 
 private:
     static double NowSeconds() noexcept;
+    void Wake() noexcept;
+
+    mutable std::mutex statsMutex_;
 
     std::array<
         FaultStat,
         static_cast<std::size_t>(Fault::COUNT)> stats_{};
 
     std::atomic<bool>* observeMode_ = nullptr;
-    int* wakeFrames_ = nullptr;
+    int* legacyWakeFrames_ = nullptr;
+    std::atomic<int>* atomicWakeFrames_ = nullptr;
     LogCallback logger_;
     int wakeValue_ = 60;
 };

@@ -6,6 +6,7 @@ on:
       - p2/kiwoom-mock-gateway
     paths:
       - scripts/migrate_shell_runtime.py
+      - scripts/harden_shell_thread_handoff.py
       - build.bat
       - .github/workflows/one-shot-shell-runtime.yml
   pull_request:
@@ -13,6 +14,7 @@ on:
       - main
     paths:
       - scripts/migrate_shell_runtime.py
+      - scripts/harden_shell_thread_handoff.py
       - build.bat
       - .github/workflows/one-shot-shell-runtime.yml
 
@@ -35,9 +37,11 @@ jobs:
           ref: p2/kiwoom-mock-gateway
           fetch-depth: 0
 
-      - name: Apply deterministic migration
+      - name: Apply deterministic migrations
         shell: pwsh
-        run: python .\scripts\migrate_shell_runtime.py
+        run: |
+          python .\scripts\migrate_shell_runtime.py
+          python .\scripts\harden_shell_thread_handoff.py
 
       - name: Verify migration contract
         shell: pwsh
@@ -46,11 +50,12 @@ jobs:
           $source = Get-Content .\shell_main.cpp -Raw
           $required = @(
             'CPPCHART_SHARED_RUNTIME_INTEGRATED',
+            'CPPCHART_UI_THREAD_DATA_HANDOFF',
             'std::atomic<int> g_wakeFrames',
             'trading::TradingState g_tradingState',
             'trading::EpochMillis tsClose',
             'trading::TickCount tickCount',
-            'RuntimeModeLabel()',
+            'g_marketDataDirty',
             'ApplyLocalFill('
           )
           foreach ($marker in $required) {
@@ -102,5 +107,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add shell_main.cpp
-          git commit -m 'Integrate exact shared trading state into shell'
+          git commit -m 'Harden shell feed and UI thread handoff'
           git push origin HEAD:p2/kiwoom-mock-gateway

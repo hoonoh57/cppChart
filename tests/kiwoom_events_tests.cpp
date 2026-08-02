@@ -95,6 +95,68 @@ namespace
               "accepted but unfilled order update must not become a fill");
     }
 
+    void TestSignedCommaWhitespaceAndLowercaseAliases()
+    {
+        trading::RealTimeRecord record;
+        record.type = "00";
+        record.values["order_no"] = " 90001 ";
+        record.values["code"] = " a005930 ";
+        record.values["name"] = " 삼성전자 ";
+        record.values["order_side"] = " buy ";
+        record.values["order_qty"] = " 1,000 ";
+        record.values["unfilled_qty"] = " 250 ";
+        record.values["fill_qty"] = " 250 ";
+        record.values["fill_price"] = " -71,500 ";
+        record.values["execution_time"] = "09:31:02.456";
+
+        const trading::OrderExecutionDecodeResult decoded =
+            trading::DecodeKiwoomOrderExecution(record, 5000);
+
+        Check(decoded.status == trading::EventDecodeStatus::Decoded,
+              "signed comma-delimited alias payload must decode");
+        Check(decoded.event.code == "005930",
+              "lowercase A prefix and whitespace must normalize");
+        Check(decoded.event.orderedQuantity == 1000,
+              "comma-delimited order quantity mismatch");
+        Check(decoded.event.unfilledQuantity == 250,
+              "whitespace unfilled quantity mismatch");
+        Check(decoded.event.cumulativeQuantity == 750,
+              "derived cumulative quantity mismatch");
+        Check(decoded.event.fillPriceWon == 71500,
+              "signed comma-delimited fill price mismatch");
+        Check(decoded.event.executionId == "90001:750",
+              "fallback execution key must use normalized order number");
+        Check(
+            decoded.event.executionTimestampMs ==
+                5000 +
+                9LL * 60 * 60 * 1000 +
+                31LL * 60 * 1000 +
+                2LL * 1000 +
+                456,
+            "punctuated execution time mismatch");
+    }
+
+    void TestOrderExecutionRejectsImpossibleQuantities()
+    {
+        trading::RealTimeRecord record;
+        record.type = "00";
+        record.values["ord_no"] = "IMPOSSIBLE";
+        record.values["stk_cd"] = "005930";
+        record.values["io_tp_nm"] = "매수";
+        record.values["ord_qty"] = "10";
+        record.values["oso_qty"] = "11";
+        record.values["cntr_pric"] = "71000";
+        record.values["cntr_qty"] = "1";
+
+        const trading::OrderExecutionDecodeResult decoded =
+            trading::DecodeKiwoomOrderExecution(record);
+
+        Check(decoded.status == trading::EventDecodeStatus::Invalid,
+              "unfilled quantity larger than order must be rejected");
+        Check(!decoded.error.empty(),
+              "invalid order quantity relationship must explain the error");
+    }
+
     void TestBalanceUpdate()
     {
         trading::RealTimeRecord record;
@@ -128,6 +190,54 @@ namespace
               "balance to position conversion mismatch");
     }
 
+    void TestBalanceAliasesAndCostBasisFallback()
+    {
+        trading::RealTimeRecord record;
+        record.type = "04";
+        record.values["code"] = " a000660 ";
+        record.values["name"] = " SK하이닉스 ";
+        record.values["quantity"] = " 1,200 ";
+        record.values["available_qty"] = " 1,100 ";
+        record.values["average_price"] = " -70,000 ";
+        record.values["current_price"] = " +71,000 ";
+
+        const trading::BalanceDecodeResult decoded =
+            trading::DecodeKiwoomBalanceUpdate(record);
+
+        Check(decoded.status == trading::EventDecodeStatus::Decoded,
+              "balance aliases with signed comma values must decode");
+        Check(decoded.event.code == "000660",
+              "balance lowercase A-prefix normalization mismatch");
+        Check(decoded.event.quantity == 1200,
+              "balance comma quantity mismatch");
+        Check(decoded.event.availableQuantity == 1100,
+              "balance comma available quantity mismatch");
+        Check(decoded.event.averagePriceWon == 70000,
+              "signed average price normalization mismatch");
+        Check(decoded.event.currentPriceWon == 71000,
+              "signed current price normalization mismatch");
+        Check(decoded.event.costBasisWon == 84000000,
+              "missing cost basis must derive from exact price times quantity");
+    }
+
+    void TestBalanceRejectsAvailableQuantityOverflow()
+    {
+        trading::RealTimeRecord record;
+        record.type = "04";
+        record.values["stk_cd"] = "005930";
+        record.values["rmnd_qty"] = "10";
+        record.values["trde_able_qty"] = "11";
+        record.values["pur_pric"] = "70000";
+
+        const trading::BalanceDecodeResult decoded =
+            trading::DecodeKiwoomBalanceUpdate(record);
+
+        Check(decoded.status == trading::EventDecodeStatus::Invalid,
+              "available quantity above held quantity must be rejected");
+        Check(!decoded.error.empty(),
+              "invalid available quantity must explain the error");
+    }
+
     void TestZeroBalanceRemovesPosition()
     {
         trading::RealTimeRecord record;
@@ -150,7 +260,11 @@ int main()
 {
     TestOrderExecution();
     TestGeneratedExecutionIdAndNoFill();
+    TestSignedCommaWhitespaceAndLowercaseAliases();
+    TestOrderExecutionRejectsImpossibleQuantities();
     TestBalanceUpdate();
+    TestBalanceAliasesAndCostBasisFallback();
+    TestBalanceRejectsAvailableQuantityOverflow();
     TestZeroBalanceRemovesPosition();
 
     std::puts("[PASS] kiwoom_events_tests");

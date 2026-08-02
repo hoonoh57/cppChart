@@ -13,6 +13,8 @@ function Assert-NativeSuccess {
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $RepoRoot
 
+& (Join-Path $PSScriptRoot "verify_core_boundary.ps1")
+
 $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
 $installation = & $vswhere `
     -latest `

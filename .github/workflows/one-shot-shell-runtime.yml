@@ -8,6 +8,7 @@ on:
       - scripts/migrate_shell_runtime.py
       - scripts/harden_shell_thread_handoff.py
       - scripts/integrate_kiwoom_runtime_shell.py
+      - scripts/fix_runtime_receiver.py
       - build.bat
       - .github/workflows/one-shot-shell-runtime.yml
   pull_request:
@@ -17,6 +18,7 @@ on:
       - scripts/migrate_shell_runtime.py
       - scripts/harden_shell_thread_handoff.py
       - scripts/integrate_kiwoom_runtime_shell.py
+      - scripts/fix_runtime_receiver.py
       - build.bat
       - .github/workflows/one-shot-shell-runtime.yml
 
@@ -45,6 +47,7 @@ jobs:
           python .\scripts\migrate_shell_runtime.py
           python .\scripts\harden_shell_thread_handoff.py
           python .\scripts\integrate_kiwoom_runtime_shell.py
+          python .\scripts\fix_runtime_receiver.py
 
       - name: Verify migration contract
         shell: pwsh
@@ -52,6 +55,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $source = Get-Content .\shell_main.cpp -Raw
           $winHttp = Get-Content .\platform\winhttp_transport.cpp -Raw
+          $runner = Get-Content .\platform\kiwoom_runtime_runner.cpp -Raw
           $required = @(
             'CPPCHART_SHARED_RUNTIME_INTEGRATED',
             'CPPCHART_UI_THREAD_DATA_HANDOFF',
@@ -70,6 +74,10 @@ jobs:
           }
           if (-not $winHttp.Contains('CPPCHART_CONTINUATION_HEADERS')) {
             throw 'WinHTTP continuation headers are not integrated'
+          }
+          if ($runner.Contains("StartReceiver()`r`n    {`r`n        StopReceiver();") -or
+              $runner.Contains("StartReceiver()`n    {`n        StopReceiver();")) {
+            throw 'Receiver startup still closes the newly connected socket'
           }
           if ($source.Contains('struct Position {')) {
             throw 'Legacy Position structure remains'
@@ -114,6 +122,6 @@ jobs:
           }
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add shell_main.cpp platform/winhttp_transport.cpp
+          git add shell_main.cpp platform/winhttp_transport.cpp platform/kiwoom_runtime_runner.cpp
           git commit -m 'Connect Kiwoom runtime to trading shell'
           git push origin HEAD:p2/kiwoom-mock-gateway

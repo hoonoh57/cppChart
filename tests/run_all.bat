@@ -81,6 +81,19 @@ if errorlevel 1 exit /b 1
 kiwoom_reconciliation_tests.exe
 if errorlevel 1 exit /b 1
 
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
+  tests\kiwoom_gateway_core_tests.cpp ^
+  core\json_lite.cpp ^
+  core\kiwoom_protocol.cpp ^
+  core\trading_state.cpp ^
+  core\order_coordinator.cpp ^
+  core\kiwoom_events.cpp ^
+  core\kiwoom_gateway_core.cpp ^
+  /Fe:kiwoom_gateway_core_tests.exe
+if errorlevel 1 exit /b 1
+kiwoom_gateway_core_tests.exe
+if errorlevel 1 exit /b 1
+
 echo.
 echo *** ALL HEADLESS TESTS PASSED ***
 exit /b 0

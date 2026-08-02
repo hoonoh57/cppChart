@@ -222,6 +222,53 @@ namespace trading
         return true;
     }
 
+    bool TradingState::ReconcileOrderProgress(
+        const std::string& orderId,
+        const std::string& code,
+        OrderSide side,
+        Quantity cumulativeApplied,
+        std::string& error)
+    {
+        if (orderId.empty()) {
+            error = "order id is required";
+            return false;
+        }
+        if (code.empty()) {
+            error = "symbol code is required";
+            return false;
+        }
+        if (cumulativeApplied < 0) {
+            error = "cumulative quantity cannot be negative";
+            return false;
+        }
+
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto found = orderProgress_.find(orderId);
+
+        if (found == orderProgress_.end()) {
+            OrderProgress progress;
+            progress.code = code;
+            progress.side = side;
+            progress.cumulativeApplied = cumulativeApplied;
+            orderProgress_.emplace(orderId, std::move(progress));
+            error.clear();
+            return true;
+        }
+
+        OrderProgress& progress = found->second;
+        if (progress.code != code || progress.side != side) {
+            error = "reconciled order metadata conflicts with existing progress";
+            return false;
+        }
+
+        if (cumulativeApplied > progress.cumulativeApplied) {
+            progress.cumulativeApplied = cumulativeApplied;
+        }
+
+        error.clear();
+        return true;
+    }
+
     bool TradingState::UpdateCurrentPrice(
         const std::string& code,
         PriceWon priceWon)

@@ -5,7 +5,7 @@ on:
     branches:
       - p2/kiwoom-mock-gateway
     paths:
-      - scripts/migrate_shell_runtime.ps1
+      - scripts/migrate_shell_runtime.py
       - build.bat
       - .github/workflows/one-shot-shell-runtime.yml
 
@@ -30,7 +30,7 @@ jobs:
 
       - name: Apply deterministic migration
         shell: pwsh
-        run: .\scripts\migrate_shell_runtime.ps1
+        run: python .\scripts\migrate_shell_runtime.py
 
       - name: Verify migration contract
         shell: pwsh
@@ -52,7 +52,7 @@ jobs:
             }
           }
           if ($source.Contains('struct Position {')) {
-            throw 'Legacy float Position structure remains'
+            throw 'Legacy Position structure remains'
           }
           if ($source.Contains('static double g_realizedPnL')) {
             throw 'Legacy floating realized PnL remains'

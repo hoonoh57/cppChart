@@ -42,6 +42,17 @@ if errorlevel 1 exit /b 1
 kiwoom_session_tests.exe
 if errorlevel 1 exit /b 1
 
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
+  tests\order_coordinator_tests.cpp ^
+  core\json_lite.cpp ^
+  core\kiwoom_protocol.cpp ^
+  core\trading_state.cpp ^
+  core\order_coordinator.cpp ^
+  /Fe:order_coordinator_tests.exe
+if errorlevel 1 exit /b 1
+order_coordinator_tests.exe
+if errorlevel 1 exit /b 1
+
 echo.
 echo *** ALL HEADLESS TESTS PASSED ***
 exit /b 0

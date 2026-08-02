@@ -34,34 +34,9 @@ if (-not (Test-Path ".\shell.exe")) {
     throw "shell.exe was not produced"
 }
 
-$coreSources = @(
-    "tests\core_tests.cpp",
-    "core\command_bus.cpp",
-    "core\fault_policy.cpp",
-    "core\json_lite.cpp",
-    "core\parameter_store.cpp",
-    "core\trading_state.cpp"
-) -join " "
-
-$coreTestCommand = @"
-`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc $coreSources /Fe:core_tests.exe && core_tests.exe
-"@
-
-& cmd.exe /d /s /c $coreTestCommand.Trim()
-Assert-NativeSuccess "Core tests"
-
-$protocolSources = @(
-    "tests\kiwoom_protocol_tests.cpp",
-    "core\json_lite.cpp",
-    "core\kiwoom_protocol.cpp"
-) -join " "
-
-$protocolTestCommand = @"
-`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc $protocolSources /Fe:kiwoom_protocol_tests.exe && kiwoom_protocol_tests.exe
-"@
-
-& cmd.exe /d /s /c $protocolTestCommand.Trim()
-Assert-NativeSuccess "Kiwoom protocol tests"
+$testCommand = "`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && call tests\run_all.bat"
+& cmd.exe /d /s /c $testCommand
+Assert-NativeSuccess "Headless tests"
 
 git diff --check
 Assert-NativeSuccess "git diff --check"

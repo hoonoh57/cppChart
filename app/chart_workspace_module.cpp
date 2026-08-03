@@ -1,6 +1,6 @@
 ﻿#include "chart_workspace_module.h"
 
-#include "indicator_render_contributor.h"
+#include "indicator_render_adapter.h"
 #include "../render/market_chart_builder.h"
 
 #include <utility>
@@ -65,11 +65,12 @@ namespace trading::app
         const ChartMarketSource& source,
         std::string& error)
     {
-        return UpdateMarketChart(
+        return UpdateMarketChartCore(
             workspaceId,
             title,
             seriesId,
             source,
+            nullptr,
             nullptr,
             error);
     }
@@ -79,7 +80,27 @@ namespace trading::app
         const std::string& title,
         const std::string& seriesId,
         const ChartMarketSource& source,
+        const IndicatorModuleSnapshot& indicatorSnapshot,
+        IndicatorRenderAdapter& indicatorAdapter,
+        std::string& error)
+    {
+        return UpdateMarketChartCore(
+            workspaceId,
+            title,
+            seriesId,
+            source,
+            &indicatorSnapshot,
+            &indicatorAdapter,
+            error);
+    }
+
+    bool ChartWorkspaceModule::UpdateMarketChartCore(
+        const std::string& workspaceId,
+        const std::string& title,
+        const std::string& seriesId,
+        const ChartMarketSource& source,
         const IndicatorModuleSnapshot* indicatorSnapshot,
+        IndicatorRenderAdapter* indicatorAdapter,
         std::string& error)
     {
         if (workspaceId.empty()) {
@@ -98,10 +119,19 @@ namespace trading::app
             error = "chart completed-bar history is missing";
             return false;
         }
+        if (
+            (indicatorSnapshot == nullptr) !=
+            (indicatorAdapter == nullptr))
+        {
+            error = "indicator snapshot and adapter must be supplied together";
+            return false;
+        }
 
         const std::uint64_t nextIndicatorRevision =
             indicatorSnapshot != nullptr
-                ? indicatorSnapshot->calculationRevision
+                ? IndicatorCompositeRevision(
+                    *indicatorSnapshot,
+                    *indicatorAdapter)
                 : 0;
         std::uint64_t nextDocumentRevision = 0;
         std::shared_ptr<const std::vector<render::HistogramPoint>>
@@ -153,13 +183,14 @@ namespace trading::app
                 renderSource,
                 nextDocumentRevision);
 
-        if (indicatorSnapshot != nullptr) {
-            IndicatorRenderContributionStats stats;
+        if (
+            indicatorSnapshot != nullptr &&
+            IsVisibleLevel(indicatorSnapshot->level))
+        {
             std::string contributionError;
-            if (!AppendIndicatorRenderContributions(
+            if (!indicatorAdapter->Apply(
                     *indicatorSnapshot,
                     candidate,
-                    stats,
                     contributionError))
             {
                 SetError(
@@ -270,6 +301,18 @@ namespace trading::app
         }
     }
 
+    std::uint64_t ChartWorkspaceModule::IndicatorCompositeRevision(
+        const IndicatorModuleSnapshot& snapshot,
+        const IndicatorRenderAdapter& adapter) noexcept
+    {
+        std::uint64_t seed = snapshot.calculationRevision;
+        const std::uint64_t value = adapter.PlanRevision();
+        seed ^=
+            value + 0x9e3779b97f4a7c15ULL +
+            (seed << 6U) + (seed >> 2U);
+        return seed;
+    }
+
     std::size_t ChartWorkspaceModule::CountSeries(
         const render::RenderDocument& document) noexcept
     {
@@ -311,7 +354,7 @@ namespace trading::app
             for (const render::LineSeries& series : pane.lines) {
                 result += DynamicStringBytes(series.id);
                 result += DynamicStringBytes(series.label);
-                result += series.points.capacity() * sizeof(render::LinePoint);
+                result += series.points.RetainedBytes();
             }
             for (const render::HistogramSeries& series : pane.histograms) {
                 result += DynamicStringBytes(series.id);

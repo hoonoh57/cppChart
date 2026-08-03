@@ -141,6 +141,18 @@ namespace
         slope.label = "Slope";
         plan.bindings.push_back(slope);
 
+        IndicatorReferenceBinding zero;
+        zero.paneId = "jma.slope";
+        zero.paneTitle = "JMA Slope";
+        zero.paneHeightWeight = 0.25f;
+        zero.paneValueScale =
+            trading::render::PaneValueScale::Symmetric;
+        zero.referenceId = "jma.slope.zero";
+        zero.label = "Zero";
+        zero.value = 0.0;
+        zero.width = 1.0f;
+        plan.references.push_back(zero);
+
         return plan;
     }
 }
@@ -155,6 +167,11 @@ int main()
     std::string error;
     Check(!invalid.Configure(invalidPlan, error),
           "duplicate render series ids must fail closed");
+
+    IndicatorRenderPlan duplicateReference = Plan();
+    duplicateReference.references[0].referenceId = "jma.up";
+    Check(!invalid.Configure(duplicateReference, error),
+          "reference-line id must not collide with a series id");
 
     IndicatorRenderAdapter adapter;
     Check(adapter.Configure(Plan(), error),
@@ -188,6 +205,12 @@ int main()
           "histogram must share completed points plus live tail");
     Check(first.panes[1].histograms[0].points.HasLiveTail(),
           "histogram live tail contract is missing");
+    Check(first.panes[1].referenceLines.size() == 1U,
+          "generic indicator reference-line contribution is missing");
+    Check(first.panes[1].referenceLines[0].id == "jma.slope.zero",
+          "indicator reference-line id mismatch");
+    Check(first.panes[1].referenceLines[0].value == 0.0,
+          "indicator reference-line value mismatch");
 
     const auto firstLinePrefix =
         first.panes[0].lines[1].points.SharedPrefix();
@@ -218,6 +241,8 @@ int main()
           "line live-tail replacement value mismatch");
     Check(second.panes[1].histograms[0].points.LiveTail().value == 3.0,
           "histogram live-tail replacement value mismatch");
+    Check(second.panes[1].referenceLines.size() == 1U,
+          "reference line must remain stable on live-only updates");
 
     IndicatorRenderPlan missingPlan = Plan();
     missingPlan.bindings[0].indicatorId = "missing";

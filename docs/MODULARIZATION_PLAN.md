@@ -129,11 +129,18 @@ Implemented on the generic renderer contract:
 - time and value axes;
 - headless viewport state tests registered in the complete test suite.
 
+Completed performance structure:
+
+- completed candle history is immutable shared storage;
+- the current live candle is a separate small tail value;
+- same-minute `0B` events update only the live tail and document metadata;
+- completed volume history is rebuilt only when a new minute promotes the prior live candle;
+- full loaded history remains available for zoom and pan without a per-tick full-vector copy.
+
 Remaining before the local visual acceptance request:
 
 - session/date boundary rendering;
-- immutable completed-history plus mutable live-tail sharing so `0B` does not rebuild or copy the complete history on every tick;
-- final Windows CI verification after the live-tail split;
+- final Windows CI verification;
 - one focused visual/GPU test covering zoom, pan, crosshair, latest-bar follow, feature levels, and real `0B` updates.
 
 ## Milestone M7 — reusable indicator engine

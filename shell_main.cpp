@@ -688,23 +688,27 @@ static void DrawMarketDataPanel()
 
     ImGui::Separator();
     const ImVec2 available = ImGui::GetContentRegionAvail();
-    const std::size_t visibleLimit = snapshot.barCount;
+    const trading::app::MarketDataSeriesSnapshot marketSeries =
+        g_marketDataModule.SeriesSnapshot();
 
     const double started = NowSeconds();
-    if (g_chartWorkspaceModule.NeedsUpdate(
-            snapshot.revision,
-            visibleLimit))
+    if (g_chartWorkspaceModule.NeedsUpdate(marketSeries.revision))
     {
-        const std::vector<trading::Bar> visibleBars =
-            g_marketDataModule.CopyVisibleBars(visibleLimit);
+        trading::app::ChartMarketSource chartSource;
+        chartSource.completedBars = marketSeries.completedBars;
+        chartSource.liveBar = marketSeries.liveBar;
+        chartSource.hasLiveBar = marketSeries.hasLiveBar;
+        chartSource.barCount = marketSeries.barCount;
+        chartSource.revision = marketSeries.revision;
+        chartSource.completedRevision = marketSeries.completedRevision;
+        chartSource.liveRevision = marketSeries.liveRevision;
+
         std::string chartError;
         if (!g_chartWorkspaceModule.UpdateMarketChart(
                 "main-market-chart",
                 snapshot.code,
                 snapshot.code,
-                visibleBars,
-                snapshot.revision,
-                visibleLimit,
+                chartSource,
                 chartError))
         {
             g_log.Add(

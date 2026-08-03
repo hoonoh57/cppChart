@@ -61,13 +61,18 @@ Implemented:
 - same-frame synchronized vertical crosshair across panes
 - full loaded history available for viewport navigation
 
+Completed after the first M6 checkpoint:
+
+- completed immutable history is separate from the mutable live bar;
+- render documents share completed candle and volume history;
+- same-minute `0B` updates do not copy the complete loaded history;
+- a new minute promotes the old live bar and rebuilds completed volume history once.
+
 Still required before asking the user to test:
 
-1. split completed immutable history from the mutable live bar;
-2. share completed history into render documents without copying on every `0B`;
-3. add session/date boundary rendering;
-4. run Windows MSVC build and the complete headless suite;
-5. record the verified HEAD and CI run below.
+1. add session/date boundary rendering;
+2. run Windows MSVC build and the complete headless suite;
+3. record the verified HEAD and CI run below.
 
 ## User-test policy
 

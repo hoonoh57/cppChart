@@ -46,7 +46,9 @@ $forbiddenShellMarkers = @(
     'static void ApplyStockTradeTick(',
     'static void ApplyMinuteBars(',
     'static void DrawRealCandles(',
-    'static trading::render::RenderDocument g_mainRenderDocument'
+    'static trading::render::RenderDocument g_mainRenderDocument',
+    'CopyVisibleBars(visibleLimit)',
+    'const std::vector<trading::Bar> visibleBars'
 )
 foreach ($marker in $forbiddenShellMarkers) {
     if ($shell.Contains($marker)) {
@@ -87,4 +89,30 @@ foreach ($marker in $forbiddenContractMarkers) {
     }
 }
 
-Write-Host 'Major-feature modules and generic renderer boundary verified.'
+$requiredSharedTailMarkers = @(
+    'class SharedTailSeries final',
+    'SetShared(',
+    'SharedPrefix()',
+    'HasLiveTail()'
+)
+foreach ($marker in $requiredSharedTailMarkers) {
+    if (-not $renderContract.Contains($marker)) {
+        throw "Shared immutable history/live-tail render contract is missing: $marker"
+    }
+}
+
+$marketModule = Get-Content '.\app\market_data_module.cpp' -Raw
+$requiredMarketMarkers = @(
+    'completedBars_',
+    'liveBar_',
+    'completedRevision_',
+    'SeriesSnapshot()',
+    'liveWindow.reserve(2)'
+)
+foreach ($marker in $requiredMarketMarkers) {
+    if (-not $marketModule.Contains($marker)) {
+        throw "MarketDataModule live-tail split is missing: $marker"
+    }
+}
+
+Write-Host 'Major-feature modules, generic renderer, and immutable-history live-tail boundary verified.'

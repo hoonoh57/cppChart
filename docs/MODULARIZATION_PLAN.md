@@ -86,6 +86,7 @@ Status: complete for the current production features.
 Registered production features:
 
 - market data
+- indicators
 - chart workspace
 - trading/account
 - diagnostics
@@ -97,8 +98,8 @@ Execution levels:
 - `Visible`
 - `Active`
 
-The indicator feature is the next production registration required by M7 runtime
-wiring.
+The indicator feature depends on market data. `Off` releases calculation and render
+caches; `Visible` and `Active` perform calculation and chart contribution.
 
 ## Milestone M5 — application coordinator and thin shell
 
@@ -109,6 +110,7 @@ Completed:
 - normalized modules and immutable snapshot flow
 - generic chart workspace
 - headless-tested market and order coordination
+- indicator calculation and render contribution kept outside the renderer
 
 Remaining long-term cleanup:
 
@@ -147,9 +149,9 @@ remains.
 
 ## Milestone M7 — reusable indicator engine
 
-Status: core calculation, module lifecycle, generic render contribution, workspace
-composition, and coordinator are complete and verified. Production shell wiring and
-one focused real-screen indicator acceptance remain.
+Status: calculation engine, data contract, application modules, generic render
+contribution, production shell wiring, architecture gates, MSVC build, and complete
+headless regression are complete. One focused actual-screen acceptance remains.
 
 ### Verified core
 
@@ -189,19 +191,35 @@ Initial indicators:
 - standard pane IDs `price` and `volume` prevent duplicate price panes
 - adding/removing indicators requires no change to renderer source
 
-### Remaining M7 production acceptance
+### Verified production wiring
 
-1. Register `indicators` in `FeatureRegistry`, depending on `market-data`.
-2. Configure initial specs once during startup.
-3. Wire indicator execution levels and cache release.
-4. Feed the shared completed bars and live tail into `IndicatorModule`.
-5. Use the indicator-aware ChartWorkspace composition overload.
-6. Publish indicator metrics and health to diagnostics.
-7. Link all required indicator/module/default-plan sources into `build.bat`.
-8. Add a shell-integration architecture gate.
-9. Pass the existing Windows CI.
-10. Run one actual `ka10080 + 0B` visual acceptance covering overlays, lower panes,
-    references, crosshair alignment, viewport stability, and live-tail updates.
+- `indicators` is registered with `market-data` dependency
+- initial specs and render plan are configured once during startup
+- the shared completed bars and live tail feed `IndicatorMarketSource`
+- calculation runs only at `Visible` or `Active`
+- the indicator-aware workspace overload publishes one immutable combined document
+- diagnostics receives indicator timing, memory, events, symbols, series, readiness,
+  and fault state
+- `Off` releases calculation and adapter caches
+- indicator failure retains a real market-only chart and exposes the fault
+- all indicator sources are linked into the production `shell.exe`
+- the renderer remains feature-agnostic
+
+Windows CI `30855098423` (`#829`) passed the production M7 shell gate, MSVC build,
+complete headless suite, clean-tree verification, and artifact publication.
+
+### Remaining M7 acceptance
+
+Run one actual `ka10080 + 0B` screen test and confirm:
+
+1. SMA/JMA/VWAP overlay the existing price pane without a duplicate pane.
+2. JMA Slope, OBV, and ADX render in lower panes.
+3. ADX 20/25 and JMA slope zero references render correctly.
+4. time crosshair and bar alignment remain synchronized across panes.
+5. manual pan/zoom remains stable during live-tail replacement.
+6. Indicators Off removes work/contributions and Visible or Active restores them.
+
+After that focused acceptance, M7 can be marked complete.
 
 ## Milestone M8 — index and multi-symbol comparison
 

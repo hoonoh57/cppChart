@@ -54,6 +54,10 @@ jobs:
         shell: pwsh
         run: .\scripts\verify_core_boundary.ps1
 
+      - name: Verify real-data-only production runtime
+        shell: pwsh
+        run: .\scripts\verify_real_data_only.ps1
+
       - name: Verify integrated runtime contract
         shell: pwsh
         run: |
@@ -65,12 +69,13 @@ jobs:
             'CPPCHART_SHARED_RUNTIME_INTEGRATED',
             'CPPCHART_UI_THREAD_DATA_HANDOFF',
             'CPPCHART_KIWOOM_RUNTIME_CONNECTED',
+            'CPPCHART_REAL_DATA_ONLY',
             'std::atomic<int> g_wakeFrames',
             'trading::TradingState g_tradingState',
-            'trading::KiwoomRuntimeEngine g_kiwoomRuntimeEngine',
+            'trading::KiwoomRuntimeEngine g_runtimeEngine',
             'WinHttpKiwoomTransport',
-            'g_marketDataDirty',
-            'ApplyLocalFill('
+            'CanSubmitEntryOrders',
+            'CanSubmitLiquidationOrders'
           )
           foreach ($marker in $required) {
             if (-not $source.Contains($marker)) {
@@ -90,11 +95,18 @@ jobs:
           $forbidden = @(
             'struct Position {',
             'static double g_realizedPnL',
-            'static int  g_wakeFrames'
+            'static int  g_wakeFrames',
+            'MakeMockData',
+            'MockFeedThread',
+            'std::mt19937',
+            'normal_distribution',
+            'ApplyLocalFill',
+            'RuntimeMode::LocalMock',
+            '[LOCAL MOCK]'
           )
           foreach ($marker in $forbidden) {
             if ($source.Contains($marker)) {
-              throw "Legacy shell state remains: $marker"
+              throw "Synthetic or legacy shell state remains: $marker"
             }
           }
 

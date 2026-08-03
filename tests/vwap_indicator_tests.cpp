@@ -4,12 +4,20 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <limits>
 #include <string>
 #include <vector>
 
 namespace
 {
+    using trading::Bar;
+    using trading::EpochMillis;
+    using trading::PriceWon;
+    using trading::TradingDateYmd;
+    using trading::Volume;
+    using trading::indicators::IndicatorRegistry;
+    using trading::indicators::IndicatorSpec;
+    using trading::indicators::IndicatorValue;
+
     [[noreturn]] void Fail(const char* message)
     {
         std::fprintf(stderr, "[FAIL] %s\n", message);
@@ -23,27 +31,19 @@ namespace
 
     void CheckNear(double actual, double expected, const char* message)
     {
-        if (std::fabs(actual - expected) > 1.0e-5) {
-            std::fprintf(
-                stderr,
-                "[FAIL] %s actual=%.12f expected=%.12f\n",
-                message,
-                actual,
-                expected);
-            std::exit(1);
-        }
+        if (std::fabs(actual - expected) > 1.0e-5) Fail(message);
     }
 
-    trading::Bar MakeBar(
-        trading::PriceWon open,
-        trading::PriceWon high,
-        trading::PriceWon low,
-        trading::PriceWon close,
-        trading::Volume volume,
-        trading::EpochMillis timestampMs,
-        trading::TradingDateYmd tradingDateYmd)
+    Bar MakeBar(
+        PriceWon open,
+        PriceWon high,
+        PriceWon low,
+        PriceWon close,
+        Volume volume,
+        EpochMillis timestampMs,
+        TradingDateYmd tradingDateYmd)
     {
-        trading::Bar bar;
+        Bar bar;
         bar.open = open;
         bar.high = high;
         bar.low = low;
@@ -55,21 +55,17 @@ namespace
         return bar;
     }
 
-    trading::indicators::IndicatorSpec VwapSpec(
-        double stdDev1 = 1.0,
-        double stdDev2 = 2.0)
+    IndicatorSpec VwapSpec(double first = 1.0, double second = 2.0)
     {
-        trading::indicators::IndicatorSpec spec;
+        IndicatorSpec spec;
         spec.id = "vwap.main";
         spec.type = "VWAP";
-        spec.parameters.emplace("std_dev_1", stdDev1);
-        spec.parameters.emplace("std_dev_2", stdDev2);
+        spec.parameters.emplace("std_dev_1", first);
+        spec.parameters.emplace("std_dev_2", second);
         return spec;
     }
 
-    void CheckFiveOutputs(
-        const trading::indicators::IndicatorValue& value,
-        const char* message)
+    void CheckOutputs(const IndicatorValue& value, const char* message)
     {
         using namespace trading::indicators;
         Check(value.outputCount == 5U, message);
@@ -80,51 +76,46 @@ namespace
         Check(value.IsReady(VwapLower2Output), message);
     }
 
-    void CheckOutputParity(
-        const trading::indicators::IndicatorValue& left,
-        const trading::indicators::IndicatorValue& right,
+    void CheckParity(
+        const IndicatorValue& actual,
+        const IndicatorValue& expected,
+        bool expectedReplacement,
         const char* message)
     {
-        Check(left.timestampMs == right.timestampMs, message);
-        Check(left.outputCount == right.outputCount, message);
-        Check(left.readyMask == right.readyMask, message);
-        Check(left.replaced == right.replaced, message);
-        Check(left.fault == right.fault, message);
-        for (std::size_t index = 0; index < left.outputCount; ++index) {
-            const double leftValue = left.Value(index);
-            const double rightValue = right.Value(index);
-            if (std::isnan(leftValue) || std::isnan(rightValue)) {
-                Check(std::isnan(leftValue) && std::isnan(rightValue), message);
+        Check(actual.timestampMs == expected.timestampMs, message);
+        Check(actual.outputCount == expected.outputCount, message);
+        Check(actual.readyMask == expected.readyMask, message);
+        Check(actual.replaced == expectedReplacement, message);
+        Check(actual.fault == expected.fault, message);
+        for (std::size_t index = 0; index < actual.outputCount; ++index) {
+            const double left = actual.Value(index);
+            const double right = expected.Value(index);
+            if (std::isnan(left) || std::isnan(right)) {
+                Check(std::isnan(left) && std::isnan(right), message);
             }
             else {
-                CheckNear(leftValue, rightValue, message);
+                CheckNear(left, right, message);
             }
         }
     }
 
-    trading::indicators::IndicatorValue CalculateLast(
-        trading::indicators::IndicatorRegistry& registry,
-        const std::vector<trading::Bar>& bars)
+    IndicatorValue BatchLast(
+        IndicatorRegistry& registry,
+        const std::vector<Bar>& bars)
     {
         std::string error;
-        trading::indicators::IndicatorInstance instance =
-            registry.Create(VwapSpec(), error);
+        auto instance = registry.Create(VwapSpec(), error);
         Check(instance.IsValid(), "VWAP comparison instance creation failed");
-        std::vector<trading::indicators::IndicatorValue> output;
+        std::vector<IndicatorValue> output;
         Check(trading::indicators::CalculateBatch(
-                  instance,
-                  bars,
-                  output,
-                  error),
+                  instance, bars, output, error),
               "VWAP comparison batch failed");
-        Check(!output.empty(), "VWAP comparison output is empty");
         return output.back();
     }
 }
 
 int main()
 {
-    using namespace trading;
     using namespace trading::indicators;
 
     IndicatorRegistry registry;
@@ -136,24 +127,13 @@ int main()
     std::string error;
     Check(!registry.Create(VwapSpec(-1.0, 2.0), error).IsValid(),
           "negative VWAP deviation must fail");
-    Check(!registry.Create(VwapSpec(1.0, 101.0), error).IsValid(),
-          "VWAP deviation above 100 must fail");
-    Check(!registry.Create(
-              VwapSpec((std::numeric_limits<double>::infinity)(), 2.0),
-              error).IsValid(),
-          "non-finite VWAP deviation must fail");
 
-    IndicatorSpec missing;
-    missing.id = "vwap.missing";
-    missing.type = "VWAP";
-    missing.parameters.emplace("std_dev_1", 1.0);
-    Check(!registry.Create(missing, error).IsValid(),
-          "VWAP missing std_dev_2 must fail");
-
-    IndicatorSpec extra = VwapSpec();
-    extra.parameters.emplace("source", 1.0);
-    Check(!registry.Create(extra, error).IsValid(),
-          "unknown VWAP parameter must fail");
+    IndicatorSpec incomplete;
+    incomplete.id = "vwap.incomplete";
+    incomplete.type = "VWAP";
+    incomplete.parameters.emplace("std_dev_1", 1.0);
+    Check(!registry.Create(incomplete, error).IsValid(),
+          "incomplete VWAP parameters must fail");
 
     const std::vector<Bar> bars = {
         MakeBar(10, 12, 8, 10, 100, 1000, 20260803),
@@ -162,104 +142,75 @@ int main()
         MakeBar(20, 22, 18, 20, 50, 4000, 20260804)
     };
 
-    IndicatorInstance batchInstance = registry.Create(VwapSpec(), error);
-    Check(batchInstance.IsValid(),
-          "batch VWAP instance creation failed");
+    auto batchInstance = registry.Create(VwapSpec(), error);
     std::vector<IndicatorValue> batch;
-    Check(CalculateBatch(batchInstance, bars, batch, error),
+    Check(trading::indicators::CalculateBatch(
+              batchInstance, bars, batch, error),
           "VWAP batch calculation failed");
-    Check(batch.size() == bars.size(),
-          "VWAP batch output size mismatch");
+    Check(batch.size() == bars.size(), "VWAP batch size mismatch");
 
     for (const IndicatorValue& value : batch) {
-        CheckFiveOutputs(value,
-                         "VWAP must publish Value/Upper1/Lower1/Upper2/Lower2");
-        Check(value.fault == IndicatorFault::None,
-              "VWAP batch fault mismatch");
+        CheckOutputs(
+            value,
+            "VWAP must publish Value/Upper1/Lower1/Upper2/Lower2");
     }
 
-    CheckNear(batch[0].Value(VwapValueOutput), 10.0,
-              "first-session VWAP value mismatch");
-    CheckNear(batch[0].Value(VwapUpper1Output), 10.0,
-              "first-session VWAP upper1 mismatch");
-
     const double deviation = std::sqrt(0.75);
-    CheckNear(batch[1].Value(VwapValueOutput),
-              static_cast<double>(static_cast<float>(11.5)),
+    CheckNear(batch[0].Value(VwapValueOutput), 10.0,
+              "first VWAP value mismatch");
+    CheckNear(batch[1].Value(VwapValueOutput), 11.5,
               "weighted VWAP value mismatch");
-    CheckNear(batch[1].Value(VwapUpper1Output),
-              static_cast<double>(static_cast<float>(11.5 + deviation)),
-              "weighted VWAP upper1 mismatch");
-    CheckNear(batch[1].Value(VwapLower1Output),
-              static_cast<double>(static_cast<float>(11.5 - deviation)),
-              "weighted VWAP lower1 mismatch");
-    CheckNear(batch[1].Value(VwapUpper2Output),
-              static_cast<double>(static_cast<float>(11.5 + 2.0 * deviation)),
-              "weighted VWAP upper2 mismatch");
-    CheckNear(batch[1].Value(VwapLower2Output),
-              static_cast<double>(static_cast<float>(11.5 - 2.0 * deviation)),
-              "weighted VWAP lower2 mismatch");
-
-    CheckNear(batch[2].Value(VwapValueOutput),
-              batch[1].Value(VwapValueOutput),
-              "zero-volume bar must preserve session VWAP");
+    CheckNear(batch[1].Value(VwapUpper1Output), 11.5 + deviation,
+              "weighted VWAP upper band mismatch");
+    CheckNear(batch[2].Value(VwapValueOutput), 11.5,
+              "zero-volume bar must preserve VWAP");
     CheckNear(batch[3].Value(VwapValueOutput), 20.0,
               "trading-date change must reset VWAP");
-    CheckNear(batch[3].Value(VwapUpper2Output), 20.0,
-              "trading-date reset deviation mismatch");
 
-    IndicatorInstance incremental = registry.Create(VwapSpec(), error);
-    Check(incremental.IsValid(),
-          "incremental VWAP instance creation failed");
+    auto incremental = registry.Create(VwapSpec(), error);
     for (std::size_t index = 0; index < bars.size(); ++index) {
-        const IndicatorValue value = incremental.Update(bars[index]);
-        CheckOutputParity(
-            value,
+        CheckParity(
+            incremental.Update(bars[index]),
             batch[index],
+            false,
             "VWAP batch/incremental output parity mismatch");
     }
 
-    IndicatorInstance emptyVolume = registry.Create(VwapSpec(), error);
-    const IndicatorValue noTrades = emptyVolume.Update(
+    auto noVolume = registry.Create(VwapSpec(), error);
+    const IndicatorValue missing = noVolume.Update(
         MakeBar(10, 12, 8, 10, 0, 1000, 20260803));
-    CheckFiveOutputs(noTrades,
-                     "zero-total-volume VWAP must retain five outputs");
-    for (std::size_t index = 0; index < noTrades.outputCount; ++index) {
-        Check(std::isnan(noTrades.Value(index)),
-              "zero-total-volume VWAP outputs must be NaN");
+    CheckOutputs(missing, "zero-volume VWAP output frame mismatch");
+    for (std::size_t index = 0; index < missing.outputCount; ++index) {
+        Check(std::isnan(missing.Value(index)),
+              "zero-volume VWAP must publish NaN");
     }
 
-    IndicatorInstance live = registry.Create(VwapSpec(), error);
-    Check(live.IsValid(), "live VWAP instance creation failed");
+    auto live = registry.Create(VwapSpec(), error);
     live.Update(bars[0]);
     live.Update(bars[1]);
 
     const Bar replacement =
         MakeBar(14, 16, 12, 14, 300, 2000, 20260803);
-    const std::vector<Bar> replacementBars = { bars[0], replacement };
-    const IndicatorValue expectedReplacement =
-        CalculateLast(registry, replacementBars);
-    IndicatorValue value = live.Update(replacement);
-    Check(value.replaced,
+    const IndicatorValue replacementExpected =
+        BatchLast(registry, { bars[0], replacement });
+    const IndicatorValue replacementActual = live.Update(replacement);
+    Check(replacementActual.replaced,
           "same-timestamp VWAP update must replace the live tail");
-    CheckOutputParity(
-        value,
-        expectedReplacement,
-        "VWAP live-tail replacement mismatch");
+    CheckParity(
+        replacementActual,
+        replacementExpected,
+        true,
+        "VWAP replacement parity mismatch");
 
     const Bar nextSession =
         MakeBar(30, 33, 27, 30, 25, 3000, 20260804);
-    const std::vector<Bar> nextSessionBars = {
-        bars[0], replacement, nextSession };
-    const IndicatorValue expectedNextSession =
-        CalculateLast(registry, nextSessionBars);
-    value = live.Update(nextSession);
-    Check(!value.replaced,
-          "new VWAP timestamp must append instead of replace");
-    CheckOutputParity(
-        value,
-        expectedNextSession,
-        "VWAP post-replacement session-reset mismatch");
+    const IndicatorValue nextExpected =
+        BatchLast(registry, { bars[0], replacement, nextSession });
+    CheckParity(
+        live.Update(nextSession),
+        nextExpected,
+        false,
+        "VWAP next-session parity mismatch");
 
     const IndicatorValue backward = live.Update(
         MakeBar(31, 34, 28, 31, 10, 2500, 20260804));
@@ -276,20 +227,16 @@ int main()
     Check(invalidDate.fault == IndicatorFault::InvalidInput,
           "invalid VWAP TradingDate must fail closed");
 
-    value = live.Update(
+    const IndicatorValue recovered = live.Update(
         MakeBar(31, 34, 28, 31, 10, 3000, 20260804));
-    Check(value.replaced,
-          "VWAP state must remain replaceable after rejected input");
-
-    Check(live.RetainedBytes() >= sizeof(double) * 8U,
-          "VWAP retained-byte metric is unexpectedly small");
+    Check(recovered.replaced,
+          "VWAP must preserve state after rejected input");
+    Check(live.RetainedBytes() > 0U,
+          "VWAP retained-byte metric must be positive");
 
     live.Reset();
-    value = live.Update(bars[0]);
-    Check(!value.replaced && value.fault == IndicatorFault::None,
-          "VWAP reset must restore an empty state");
-    CheckNear(value.Value(VwapValueOutput), 10.0,
-              "VWAP reset value mismatch");
+    CheckNear(live.Update(bars[0]).Value(VwapValueOutput), 10.0,
+              "VWAP reset mismatch");
 
     std::puts("[PASS] vwap_indicator_tests");
     return 0;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "kiwoom_gateway_core.h"
+#include "kiwoom_market_data.h"
 #include "kiwoom_reconciliation.h"
 #include "kiwoom_session.h"
 #include "order_coordinator.h"
@@ -22,6 +23,8 @@ namespace trading
         RequestOpenOrders,
         RequestExecutions,
         RequestAccountBalance,
+        RequestStockMinuteBars,
+        RequestIndexMinuteBars,
         SubmitOrderHttp,
         ScheduleReconnect,
         EnterObserveMode
@@ -34,6 +37,11 @@ namespace trading
         RestRequest request;
         std::string text;
         std::string clientIntentId;
+        MinuteBarInstrument marketInstrument =
+            MinuteBarInstrument::Stock;
+        std::string marketCode;
+        int minuteUnit = 1;
+        Continuation continuation;
         int delayMilliseconds = 0;
         bool sensitive = false;
     };
@@ -108,6 +116,18 @@ namespace trading
             const Continuation& responseContinuation = {},
             const std::string& transportError = {});
 
+        std::vector<KiwoomRuntimeAction> RequestStockMinuteBars(
+            const std::string& stockCode,
+            int minuteUnit,
+            const Continuation& continuation,
+            std::string& error);
+
+        std::vector<KiwoomRuntimeAction> RequestIndexMinuteBars(
+            const std::string& indexCode,
+            int minuteUnit,
+            const Continuation& continuation,
+            std::string& error);
+
         std::vector<KiwoomRuntimeAction> SubmitOrder(
             const OrderIntent& intent,
             std::string& error);
@@ -154,6 +174,13 @@ namespace trading
             KiwoomRuntimeActionType type,
             RestRequest request,
             const std::string& clientIntentId = {}) const;
+
+        std::vector<KiwoomRuntimeAction> RequestMinuteBarsLocked(
+            MinuteBarInstrument instrument,
+            const std::string& code,
+            int minuteUnit,
+            const Continuation& continuation,
+            std::string& error);
 
         TradingState& tradingState_;
         OrderCoordinator& orderCoordinator_;

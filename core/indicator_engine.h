@@ -2,7 +2,9 @@
 
 #include "market_types.h"
 
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <string>
@@ -10,6 +12,8 @@
 
 namespace trading::indicators
 {
+    constexpr std::size_t MaxIndicatorOutputs = 8;
+
     enum class IndicatorFault
     {
         None,
@@ -21,10 +25,45 @@ namespace trading::indicators
     struct IndicatorValue final
     {
         EpochMillis timestampMs = 0;
-        double value = 0.0;
-        bool ready = false;
+        std::array<double, MaxIndicatorOutputs> values{};
+        std::uint8_t outputCount = 0;
+        std::uint8_t readyMask = 0;
         bool replaced = false;
         IndicatorFault fault = IndicatorFault::None;
+
+        bool IsReady(std::size_t index) const noexcept
+        {
+            return
+                index < outputCount &&
+                index < MaxIndicatorOutputs &&
+                (readyMask & static_cast<std::uint8_t>(1U << index)) != 0;
+        }
+
+        double Value(std::size_t index) const noexcept
+        {
+            return index < outputCount && index < MaxIndicatorOutputs
+                ? values[index]
+                : 0.0;
+        }
+
+        void SetOutput(
+            std::size_t index,
+            double value,
+            bool ready = true) noexcept
+        {
+            if (index >= MaxIndicatorOutputs) return;
+
+            values[index] = value;
+            const std::size_t requiredCount = index + 1U;
+            if (requiredCount > outputCount) {
+                outputCount = static_cast<std::uint8_t>(requiredCount);
+            }
+
+            const std::uint8_t bit =
+                static_cast<std::uint8_t>(1U << index);
+            if (ready) readyMask = static_cast<std::uint8_t>(readyMask | bit);
+            else readyMask = static_cast<std::uint8_t>(readyMask & ~bit);
+        }
     };
 
     struct IndicatorSpec final

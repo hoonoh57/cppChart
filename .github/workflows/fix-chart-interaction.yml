@@ -77,3 +77,5 @@ jobs:
             git commit -m 'Fix chart pan, aligned volume width, and pane crosshair'
             git push origin HEAD:p2/kiwoom-mock-gateway
           }
+
+# Triggered after the workflow became available on the branch.

@@ -2,29 +2,30 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 
 namespace trading::render
 {
     namespace
     {
-        EpochMillis SafeDataSpan(
-            EpochMillis dataStartMs,
-            EpochMillis dataEndMs) noexcept
+        AxisCoordinate SafeDataSpan(
+            AxisCoordinate dataStart,
+            AxisCoordinate dataEnd) noexcept
         {
-            return dataEndMs > dataStartMs
-                ? dataEndMs - dataStartMs
-                : 0;
+            return
+                std::isfinite(dataStart) &&
+                std::isfinite(dataEnd) &&
+                dataEnd > dataStart
+                    ? dataEnd - dataStart
+                    : 0.0;
         }
 
-        EpochMillis ClampSpan(
-            EpochMillis requested,
-            EpochMillis dataSpan,
-            EpochMillis minimumSpanMs) noexcept
+        AxisCoordinate ClampSpan(
+            AxisCoordinate requested,
+            AxisCoordinate dataSpan,
+            AxisCoordinate minimumSpan) noexcept
         {
-            if (dataSpan <= 0) return 0;
-            const EpochMillis safeMinimum =
-                (std::max)(static_cast<EpochMillis>(1), minimumSpanMs);
+            if (dataSpan <= 0.0) return 0.0;
+            const AxisCoordinate safeMinimum = (std::max)(0.001, minimumSpan);
             return (std::max)(
                 (std::min)(requested, dataSpan),
                 (std::min)(safeMinimum, dataSpan));
@@ -33,172 +34,165 @@ namespace trading::render
 
     void ResetViewport(
         ChartViewport& viewport,
-        EpochMillis dataStartMs,
-        EpochMillis dataEndMs) noexcept
+        AxisCoordinate dataStart,
+        AxisCoordinate dataEnd,
+        AxisCoordinate preferredSpan) noexcept
     {
-        const EpochMillis dataSpan =
-            SafeDataSpan(dataStartMs, dataEndMs);
-        if (dataSpan <= 0) {
+        const AxisCoordinate dataSpan = SafeDataSpan(dataStart, dataEnd);
+        if (dataSpan <= 0.0) {
             viewport = {};
             return;
         }
 
-        viewport.visibleStartMs = dataStartMs;
-        viewport.visibleEndMs = dataEndMs;
+        const AxisCoordinate span =
+            preferredSpan > 0.0
+                ? ClampSpan(preferredSpan, dataSpan, 0.001)
+                : dataSpan;
+        viewport.visibleEnd = dataEnd;
+        viewport.visibleStart = dataEnd - span;
         viewport.initialized = true;
         viewport.autoScroll = true;
     }
 
     void FollowLatest(
         ChartViewport& viewport,
-        EpochMillis dataStartMs,
-        EpochMillis dataEndMs) noexcept
+        AxisCoordinate dataStart,
+        AxisCoordinate dataEnd) noexcept
     {
-        const EpochMillis dataSpan =
-            SafeDataSpan(dataStartMs, dataEndMs);
-        if (dataSpan <= 0) {
+        const AxisCoordinate dataSpan = SafeDataSpan(dataStart, dataEnd);
+        if (dataSpan <= 0.0) {
             viewport = {};
             return;
         }
         if (!viewport.initialized) {
-            ResetViewport(viewport, dataStartMs, dataEndMs);
+            ResetViewport(viewport, dataStart, dataEnd);
             return;
         }
         if (!viewport.autoScroll) {
-            ClampViewport(viewport, dataStartMs, dataEndMs, 1);
+            ClampViewport(viewport, dataStart, dataEnd, 0.001);
             return;
         }
 
-        const EpochMillis span = ClampSpan(
-            viewport.SpanMs(),
+        const AxisCoordinate span = ClampSpan(
+            viewport.Span(),
             dataSpan,
-            1);
-        viewport.visibleEndMs = dataEndMs;
-        viewport.visibleStartMs = dataEndMs - span;
-        if (viewport.visibleStartMs < dataStartMs) {
-            viewport.visibleStartMs = dataStartMs;
-        }
+            0.001);
+        viewport.visibleEnd = dataEnd;
+        viewport.visibleStart = dataEnd - span;
         viewport.initialized = true;
     }
 
     void ClampViewport(
         ChartViewport& viewport,
-        EpochMillis dataStartMs,
-        EpochMillis dataEndMs,
-        EpochMillis minimumSpanMs) noexcept
+        AxisCoordinate dataStart,
+        AxisCoordinate dataEnd,
+        AxisCoordinate minimumSpan) noexcept
     {
-        const EpochMillis dataSpan =
-            SafeDataSpan(dataStartMs, dataEndMs);
-        if (dataSpan <= 0) {
+        const AxisCoordinate dataSpan = SafeDataSpan(dataStart, dataEnd);
+        if (dataSpan <= 0.0) {
             viewport = {};
             return;
         }
         if (!viewport.initialized) {
-            ResetViewport(viewport, dataStartMs, dataEndMs);
+            ResetViewport(viewport, dataStart, dataEnd);
             return;
         }
 
-        const EpochMillis span = ClampSpan(
-            viewport.SpanMs(),
+        const AxisCoordinate span = ClampSpan(
+            viewport.Span(),
             dataSpan,
-            minimumSpanMs);
+            minimumSpan);
+        AxisCoordinate start = viewport.visibleStart;
+        AxisCoordinate end = start + span;
 
-        EpochMillis start = viewport.visibleStartMs;
-        EpochMillis end = start + span;
-
-        if (start < dataStartMs) {
-            start = dataStartMs;
+        if (start < dataStart) {
+            start = dataStart;
             end = start + span;
         }
-        if (end > dataEndMs) {
-            end = dataEndMs;
+        if (end > dataEnd) {
+            end = dataEnd;
             start = end - span;
         }
 
-        viewport.visibleStartMs = start;
-        viewport.visibleEndMs = end;
+        viewport.visibleStart = start;
+        viewport.visibleEnd = end;
         viewport.initialized = true;
     }
 
     void ZoomViewport(
         ChartViewport& viewport,
-        EpochMillis dataStartMs,
-        EpochMillis dataEndMs,
+        AxisCoordinate dataStart,
+        AxisCoordinate dataEnd,
         double anchorRatio,
         double wheelSteps,
-        EpochMillis minimumSpanMs) noexcept
+        AxisCoordinate minimumSpan) noexcept
     {
-        const EpochMillis dataSpan =
-            SafeDataSpan(dataStartMs, dataEndMs);
-        if (dataSpan <= 0 || wheelSteps == 0.0) return;
+        const AxisCoordinate dataSpan = SafeDataSpan(dataStart, dataEnd);
+        if (
+            dataSpan <= 0.0 ||
+            !std::isfinite(wheelSteps) ||
+            wheelSteps == 0.0)
+        {
+            return;
+        }
         if (!viewport.initialized) {
-            ResetViewport(viewport, dataStartMs, dataEndMs);
+            ResetViewport(viewport, dataStart, dataEnd);
         }
 
         anchorRatio = (std::max)(0.0, (std::min)(1.0, anchorRatio));
-        const EpochMillis oldSpan = ClampSpan(
-            viewport.SpanMs(),
+        const AxisCoordinate oldSpan = ClampSpan(
+            viewport.Span(),
             dataSpan,
-            minimumSpanMs);
+            minimumSpan);
         const double factor = std::pow(0.80, wheelSteps);
-        const EpochMillis requestedSpan = static_cast<EpochMillis>(
-            std::llround(static_cast<double>(oldSpan) * factor));
-        const EpochMillis newSpan = ClampSpan(
-            requestedSpan,
+        const AxisCoordinate newSpan = ClampSpan(
+            oldSpan * factor,
             dataSpan,
-            minimumSpanMs);
+            minimumSpan);
+        const AxisCoordinate anchor =
+            viewport.visibleStart + oldSpan * anchorRatio;
 
-        const double anchorTime =
-            static_cast<double>(viewport.visibleStartMs) +
-            static_cast<double>(oldSpan) * anchorRatio;
-        EpochMillis newStart = static_cast<EpochMillis>(std::llround(
-            anchorTime - static_cast<double>(newSpan) * anchorRatio));
-
-        viewport.visibleStartMs = newStart;
-        viewport.visibleEndMs = newStart + newSpan;
+        viewport.visibleStart = anchor - newSpan * anchorRatio;
+        viewport.visibleEnd = viewport.visibleStart + newSpan;
         viewport.autoScroll =
-            viewport.visibleEndMs >= dataEndMs - (std::max)(
-                static_cast<EpochMillis>(1),
-                newSpan / 100);
+            viewport.visibleEnd >= dataEnd - (std::max)(0.001, newSpan / 100.0);
         ClampViewport(
             viewport,
-            dataStartMs,
-            dataEndMs,
-            minimumSpanMs);
+            dataStart,
+            dataEnd,
+            minimumSpan);
     }
 
     void PanViewport(
         ChartViewport& viewport,
-        EpochMillis dataStartMs,
-        EpochMillis dataEndMs,
+        AxisCoordinate dataStart,
+        AxisCoordinate dataEnd,
         double visibleSpanFraction) noexcept
     {
-        const EpochMillis dataSpan =
-            SafeDataSpan(dataStartMs, dataEndMs);
+        const AxisCoordinate dataSpan = SafeDataSpan(dataStart, dataEnd);
         if (
-            dataSpan <= 0 ||
+            dataSpan <= 0.0 ||
             !std::isfinite(visibleSpanFraction) ||
             visibleSpanFraction == 0.0)
         {
             return;
         }
         if (!viewport.initialized) {
-            ResetViewport(viewport, dataStartMs, dataEndMs);
+            ResetViewport(viewport, dataStart, dataEnd);
         }
 
-        const EpochMillis span = ClampSpan(
-            viewport.SpanMs(),
+        const AxisCoordinate span = ClampSpan(
+            viewport.Span(),
             dataSpan,
-            1);
-        const EpochMillis delta = static_cast<EpochMillis>(std::llround(
-            static_cast<double>(span) * visibleSpanFraction));
+            0.001);
+        const AxisCoordinate delta = span * visibleSpanFraction;
 
-        viewport.visibleStartMs += delta;
-        viewport.visibleEndMs += delta;
+        viewport.visibleStart += delta;
+        viewport.visibleEnd += delta;
         viewport.autoScroll = false;
-        ClampViewport(viewport, dataStartMs, dataEndMs, 1);
+        ClampViewport(viewport, dataStart, dataEnd, 0.001);
 
-        if (viewport.visibleEndMs >= dataEndMs) {
+        if (viewport.visibleEnd >= dataEnd - 0.001) {
             viewport.autoScroll = true;
         }
     }

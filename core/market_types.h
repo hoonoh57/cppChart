@@ -42,6 +42,47 @@ namespace trading
             day >= 1 && day <= DaysInMonth(year, month);
     }
 
+    inline TradingDateYmd KstTradingDateYmdFromEpoch(
+        EpochMillis timestampMs) noexcept
+    {
+        constexpr EpochMillis DayMs = 86400000LL;
+        constexpr EpochMillis KstOffsetMs = 32400000LL;
+        if (timestampMs <= 0 ||
+            timestampMs > (std::numeric_limits<EpochMillis>::max)() -
+                KstOffsetMs)
+        {
+            return 0;
+        }
+
+        std::int64_t days =
+            (timestampMs + KstOffsetMs) / DayMs;
+        days += 719468;
+        const std::int64_t era =
+            (days >= 0 ? days : days - 146096) / 146097;
+        const unsigned dayOfEra = static_cast<unsigned>(
+            days - era * 146097);
+        const unsigned yearOfEra =
+            (dayOfEra - dayOfEra / 1460 + dayOfEra / 36524 -
+                dayOfEra / 146096) /
+            365;
+        int year = static_cast<int>(yearOfEra) +
+            static_cast<int>(era * 400);
+        const unsigned dayOfYear =
+            dayOfEra -
+            (365 * yearOfEra + yearOfEra / 4 - yearOfEra / 100);
+        const unsigned monthPrime = (5 * dayOfYear + 2) / 153;
+        const unsigned day =
+            dayOfYear - (153 * monthPrime + 2) / 5 + 1;
+        const unsigned month =
+            monthPrime + (monthPrime < 10 ? 3U : static_cast<unsigned>(-9));
+        year += month <= 2;
+
+        const TradingDateYmd result = static_cast<TradingDateYmd>(
+            year * 10000 + static_cast<int>(month) * 100 +
+            static_cast<int>(day));
+        return IsValidTradingDateYmd(result) ? result : 0;
+    }
+
     struct Bar final
     {
         PriceWon open = 0;

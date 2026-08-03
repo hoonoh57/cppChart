@@ -87,6 +87,69 @@ namespace trading
 
     struct Bar final
     {
+        Bar() = default;
+
+        Bar(
+            PriceWon openValue,
+            PriceWon highValue,
+            PriceWon lowValue,
+            PriceWon closeValue,
+            Volume volumeValue,
+            EpochMillis closeTimestampValue,
+            TickCount tickCountValue,
+            TradingDateYmd tradingDateValue = 0) noexcept
+            : open(openValue),
+              high(highValue),
+              low(lowValue),
+              close(closeValue),
+              volume(volumeValue),
+              closeTimestampMs(closeTimestampValue),
+              tickCount(tickCountValue),
+              tradingDateYmd(ResolveTradingDate(
+                  tradingDateValue,
+                  closeTimestampValue))
+        {
+        }
+
+        Bar(const Bar& other) noexcept
+            : Bar(
+                other.open,
+                other.high,
+                other.low,
+                other.close,
+                other.volume,
+                other.closeTimestampMs,
+                other.tickCount,
+                other.tradingDateYmd)
+        {
+        }
+
+        Bar(Bar&& other) noexcept
+            : Bar(static_cast<const Bar&>(other))
+        {
+        }
+
+        Bar& operator=(const Bar& other) noexcept
+        {
+            if (this == &other) return *this;
+            open = other.open;
+            high = other.high;
+            low = other.low;
+            close = other.close;
+            volume = other.volume;
+            closeTimestampMs = other.closeTimestampMs;
+            tickCount = other.tickCount;
+            tradingDateYmd = ResolveTradingDate(
+                other.tradingDateYmd,
+                other.closeTimestampMs);
+            return *this;
+        }
+
+        Bar& operator=(Bar&& other) noexcept
+        {
+            return operator=(static_cast<const Bar&>(other));
+        }
+
         PriceWon open = 0;
         PriceWon high = 0;
         PriceWon low = 0;
@@ -95,6 +158,16 @@ namespace trading
         EpochMillis closeTimestampMs = 0;
         TickCount tickCount = 0;
         TradingDateYmd tradingDateYmd = 0;
+
+    private:
+        static TradingDateYmd ResolveTradingDate(
+            TradingDateYmd value,
+            EpochMillis timestampMs) noexcept
+        {
+            return value == 0
+                ? KstTradingDateYmdFromEpoch(timestampMs)
+                : value;
+        }
     };
 
     struct PositionSnapshot final

@@ -637,4 +637,200 @@ namespace trading
             "inds_min_pole_qry",
             json);
     }
+
+    StockTradeDecodeResult DecodeStockTradeRecord(
+        const RealTimeRecord& record)
+    {
+        StockTradeDecodeResult decoded;
+        if (record.type != "0B") {
+            decoded.result.error = "real-time record is not stock trade type 0B";
+            return decoded;
+        }
+        if (record.item.empty()) {
+            decoded.result.error = "stock trade item code is missing";
+            return decoded;
+        }
+
+        const auto readSigned = [&record](
+            const char* key,
+            std::int64_t& value) -> bool {
+            const auto found = record.values.find(key);
+            if (found == record.values.end()) return false;
+
+            std::string normalized;
+            normalized.reserve(found->second.size());
+            for (char ch : found->second) {
+                if (ch != ',' &&
+                    std::isspace(static_cast<unsigned char>(ch)) == 0)
+                {
+                    normalized.push_back(ch);
+                }
+            }
+            if (normalized.empty()) return false;
+
+            try {
+                std::size_t consumed = 0;
+                const long long parsed =
+                    std::stoll(normalized, &consumed, 10);
+                if (consumed != normalized.size()) return false;
+                value = static_cast<std::int64_t>(parsed);
+                return true;
+            }
+            catch (...) {
+                return false;
+            }
+        };
+
+        std::int64_t timeValue = 0;
+        std::int64_t priceValue = 0;
+        std::int64_t volumeValue = 0;
+        std::int64_t cumulativeValue = 0;
+
+        if (!readSigned("20", timeValue)) {
+            decoded.result.error = "stock trade time FID 20 is missing or invalid";
+            return decoded;
+        }
+        if (!readSigned("10", priceValue)) {
+            decoded.result.error = "stock trade price FID 10 is missing or invalid";
+            return decoded;
+        }
+        if (!readSigned("15", volumeValue)) {
+            decoded.result.error = "stock trade volume FID 15 is missing or invalid";
+            return decoded;
+        }
+
+        const auto cumulative = record.values.find("13");
+        if (cumulative != record.values.end() &&
+            !readSigned("13", cumulativeValue))
+        {
+            decoded.result.error =
+                "stock cumulative volume FID 13 is invalid";
+            return decoded;
+        }
+
+        const std::int64_t absolutePrice =
+            priceValue < 0 ? -priceValue : priceValue;
+        const std::int64_t absoluteVolume =
+            volumeValue < 0 ? -volumeValue : volumeValue;
+        const std::int64_t absoluteCumulative =
+            cumulativeValue < 0 ? -cumulativeValue : cumulativeValue;
+
+        const int hhmmss = static_cast<int>(timeValue);
+        const int hour = hhmmss / 10000;
+        const int minute = (hhmmss / 100) % 100;
+        const int second = hhmmss % 100;
+
+        if (hour < 0 || hour > 23 ||
+            minute < 0 || minute > 59 ||
+            second < 0 || second > 59)
+        {
+            decoded.result.error = "stock trade time FID 20 is out of range";
+            return decoded;
+        }
+        if (absolutePrice <= 0 ||
+            absolutePrice > (std::numeric_limits<PriceWon>::max)())
+        {
+            decoded.result.error = "stock trade price is out of range";
+            return decoded;
+        }
+        if (absoluteVolume <= 0) {
+            decoded.result.error = "stock trade volume must be positive";
+            return decoded;
+        }
+
+        decoded.tick.code = record.item;
+        if (!decoded.tick.code.empty() &&
+            decoded.tick.code.front() == 'A')
+        {
+            decoded.tick.code.erase(decoded.tick.code.begin());
+        }
+        decoded.tick.priceWon = static_cast<PriceWon>(absolutePrice);
+        decoded.tick.tradeVolume = static_cast<Volume>(absoluteVolume);
+        decoded.tick.cumulativeVolume =
+            static_cast<Volume>(absoluteCumulative);
+        decoded.tick.tradeTimeHhmmss = hhmmss;
+        decoded.result.ok = true;
+        decoded.result.returnCode = 0;
+        return decoded;
+    }
+
+    bool MergeStockTradeIntoMinuteBars(
+        std::vector<Bar>& bars,
+        int minuteUnit,
+        EpochMillis sessionDateStartMs,
+        const StockTradeTick& tick,
+        std::string& error)
+    {
+        if (bars.empty()) {
+            error = "minute-bar backfill is required before stock trade merge";
+            return false;
+        }
+        if (!IsSupportedMinuteUnit(minuteUnit)) {
+            error = "unsupported minute unit for stock trade merge";
+            return false;
+        }
+        if (sessionDateStartMs <= 0) {
+            error = "session date start is required for stock trade merge";
+            return false;
+        }
+        if (!IsValidPrice(tick.priceWon) || tick.tradeVolume <= 0) {
+            error = "stock trade price and volume must be positive";
+            return false;
+        }
+
+        const int hour = tick.tradeTimeHhmmss / 10000;
+        const int minute = (tick.tradeTimeHhmmss / 100) % 100;
+        const int second = tick.tradeTimeHhmmss % 100;
+        if (hour < 0 || hour > 23 ||
+            minute < 0 || minute > 59 ||
+            second < 0 || second > 59)
+        {
+            error = "stock trade time is out of range";
+            return false;
+        }
+
+        constexpr EpochMillis SecondMs = 1000;
+        constexpr EpochMillis MinuteMs = 60 * SecondMs;
+        const EpochMillis eventTimestampMs =
+            sessionDateStartMs +
+            static_cast<EpochMillis>(hour) * 60 * MinuteMs +
+            static_cast<EpochMillis>(minute) * MinuteMs +
+            static_cast<EpochMillis>(second) * SecondMs;
+        const EpochMillis intervalMs =
+            static_cast<EpochMillis>(minuteUnit) * MinuteMs;
+        const EpochMillis bucketTimestampMs =
+            sessionDateStartMs +
+            ((eventTimestampMs - sessionDateStartMs) / intervalMs) *
+                intervalMs;
+
+        Bar& last = bars.back();
+        if (bucketTimestampMs < last.closeTimestampMs) {
+            error = "stale stock trade precedes the latest minute bar";
+            return false;
+        }
+
+        if (bucketTimestampMs == last.closeTimestampMs) {
+            last.high = (std::max)(last.high, tick.priceWon);
+            last.low = (std::min)(last.low, tick.priceWon);
+            last.close = tick.priceWon;
+            last.volume += tick.tradeVolume;
+            if (last.tickCount < (std::numeric_limits<TickCount>::max)()) {
+                ++last.tickCount;
+            }
+        }
+        else {
+            Bar bar;
+            bar.open = tick.priceWon;
+            bar.high = tick.priceWon;
+            bar.low = tick.priceWon;
+            bar.close = tick.priceWon;
+            bar.volume = tick.tradeVolume;
+            bar.closeTimestampMs = bucketTimestampMs;
+            bar.tickCount = 1;
+            bars.push_back(bar);
+        }
+
+        error.clear();
+        return true;
+    }
 }

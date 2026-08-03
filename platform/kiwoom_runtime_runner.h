@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "../core/kiwoom_runtime_engine.h"
 
@@ -75,6 +75,8 @@ namespace trading::platform
         std::function<void(
             const MinuteBarsPage& page,
             const Continuation& continuation)> minuteBars;
+        std::function<void(
+            const StockTradeTick& tick)> stockTrade;
     };
 
     class KiwoomRuntimeRunner final
@@ -108,6 +110,10 @@ namespace trading::platform
             const Continuation& continuation,
             std::string& error);
 
+        bool SubscribeStockTrades(
+            const std::string& stockCode,
+            std::string& error);
+
         bool SubmitOrder(
             const OrderIntent& intent,
             std::string& error);
@@ -130,6 +136,8 @@ namespace trading::platform
 
         void HandleAction(
             KiwoomRuntimeAction action);
+
+        void TryQueueStockTradeSubscription();
 
         void StartReceiver();
 
@@ -165,5 +173,9 @@ namespace trading::platform
         std::chrono::steady_clock::time_point reconnectDue_{};
         std::thread workerThread_;
         std::thread receiverThread_;
+
+        std::mutex subscriptionMutex_;
+        std::string stockTradeCode_;
+        bool stockTradeSubscriptionSent_ = false;
     };
 }

@@ -1,4 +1,4 @@
-#include "../platform/kiwoom_runtime_runner.h"
+﻿#include "../platform/kiwoom_runtime_runner.h"
 
 #include <atomic>
 #include <chrono>
@@ -10,6 +10,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace
 {
@@ -119,6 +120,11 @@ namespace
                 return false;
             }
 
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                sentMessages_.push_back(text);
+            }
+
             if (text.find("\"trnm\":\"LOGIN\"") != std::string::npos) {
                 PushText("{\"trnm\":\"LOGIN\",\"return_code\":0}");
             }
@@ -172,6 +178,32 @@ namespace
             return connectCount_.load(std::memory_order_relaxed);
         }
 
+        int StockTradeRegistrationCount()
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            int count = 0;
+            for (const std::string& message : sentMessages_) {
+                if (
+                    message.find("\"type\":[\"0B\"]") !=
+                        std::string::npos &&
+                    message.find("000660") != std::string::npos)
+                {
+                    ++count;
+                }
+            }
+            return count;
+        }
+
+        void PushStockTrade()
+        {
+            PushText(
+                "{\"trnm\":\"REAL\",\"return_code\":0,\"data\":[{"
+                "\"type\":\"0B\",\"item\":\"000660\","
+                "\"name\":\"주식체결\",\"values\":{"
+                "\"20\":\"123701\",\"10\":\"+1584000\","
+                "\"15\":\"-3\",\"13\":\"552\"}}]}");
+        }
+
     private:
         void PushText(const std::string& text)
         {
@@ -191,6 +223,7 @@ namespace
         std::mutex mutex_;
         std::condition_variable condition_;
         std::deque<trading::platform::RuntimeReceiveResult> messages_;
+        std::vector<std::string> sentMessages_;
     };
 
     trading::RuntimeConfig MakeConfig()
@@ -219,6 +252,7 @@ namespace
 
         std::atomic<int> logCount{ 0 };
         std::atomic<int> wakeCount{ 0 };
+        std::atomic<int> stockTradeCount{ 0 };
         std::atomic<bool> observe{ false };
 
         trading::platform::KiwoomRunnerCallbacks callbacks;
@@ -230,6 +264,11 @@ namespace
         };
         callbacks.setObserveMode = [&](bool enabled) {
             observe.store(enabled, std::memory_order_release);
+        };
+        callbacks.stockTrade = [&](const trading::StockTradeTick& tick) {
+            if (tick.code == "000660" && tick.priceWon == 1584000) {
+                stockTradeCount.fetch_add(1, std::memory_order_relaxed);
+            }
         };
 
         trading::platform::KiwoomRuntimeRunner runner(
@@ -248,6 +287,16 @@ namespace
               "initial flow must connect exactly once");
         Check(state.SnapshotPositions().size() == 1,
               "runner reconciliation must install broker position");
+
+        Check(runner.SubscribeStockTrades("000660", error),
+              "ready runner must accept stock trade subscription");
+        WaitUntil(
+            [&] { return fake->StockTradeRegistrationCount() >= 1; },
+            "runner did not send 0B stock trade registration");
+        fake->PushStockTrade();
+        WaitUntil(
+            [&] { return stockTradeCount.load(std::memory_order_relaxed) == 1; },
+            "runner did not decode and deliver 0B stock trade");
 
         trading::OrderIntent buy;
         buy.code = "005930";
@@ -277,6 +326,9 @@ namespace
         WaitUntil(
             [&] { return runner.Snapshot().orderSubmissionAllowed; },
             "runtime did not reconcile after reconnect");
+        WaitUntil(
+            [&] { return fake->StockTradeRegistrationCount() >= 2; },
+            "runtime did not restore 0B subscription after reconnect");
 
         Check(!observe.load(std::memory_order_acquire),
               "single recoverable disconnect must not force observe mode");

@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
+#include <chrono>
 #include <memory>
 #include <utility>
 
@@ -47,7 +48,7 @@ static IDXGISwapChain* g_swapChain = nullptr;
 static ID3D11RenderTargetView* g_mainRenderTargetView = nullptr;
 static UINT g_resizeWidth = 0;
 static UINT g_resizeHeight = 0;
-static std::atomic<int> g_wakeFrames{60};
+static std::atomic<int> g_wakeFrames{4};
 
 static void WakeFrames(int requested) noexcept
 {
@@ -160,9 +161,10 @@ static FaultPolicy g_faultPolicy(
     &g_wakeFrames,
     [](const char* category, const char* message) {
         g_log.Add(category, "%s", message);
-    });
+    },
+    4);
 
-static CommandBus g_commandBus(&g_wakeFrames);
+static CommandBus g_commandBus(&g_wakeFrames, 4);
 
 static double NowSeconds()
 {
@@ -177,6 +179,34 @@ static double NowSeconds()
     return
         static_cast<double>(counter.QuadPart) /
         static_cast<double>(frequency.QuadPart);
+}
+
+static trading::EpochMillis SystemNowEpochMillis()
+{
+    return static_cast<trading::EpochMillis>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+}
+
+static double g_renderRateHz = 0.0;
+static double g_renderRateWindowStart = 0.0;
+static std::uint64_t g_renderRateFrameCount = 0;
+
+static void RecordPresentedFrame()
+{
+    const double now = NowSeconds();
+    if (g_renderRateWindowStart <= 0.0) {
+        g_renderRateWindowStart = now;
+    }
+    ++g_renderRateFrameCount;
+
+    const double elapsed = now - g_renderRateWindowStart;
+    if (elapsed >= 1.0) {
+        g_renderRateHz =
+            static_cast<double>(g_renderRateFrameCount) / elapsed;
+        g_renderRateFrameCount = 0;
+        g_renderRateWindowStart = now;
+    }
 }
 
 static trading::TradingState g_tradingState;
@@ -224,6 +254,10 @@ enum class MarketDataState
 static std::atomic<MarketDataState> g_marketDataState{
     MarketDataState::Error};
 
+static std::atomic<std::uint64_t> g_stockTradeTickCount{0};
+static std::atomic<trading::EpochMillis> g_lastStockTradeTimestampMs{0};
+static std::atomic<bool> g_stockTradeSubscriptionRequested{false};
+
 static void SetMarketDataError(const std::string& message)
 {
     {
@@ -233,7 +267,7 @@ static void SetMarketDataError(const std::string& message)
     g_marketDataState.store(
         MarketDataState::Error,
         std::memory_order_release);
-    WakeFrames(60);
+    WakeFrames(4);
 }
 
 static std::string MarketDataErrorSnapshot()
@@ -260,10 +294,77 @@ static void BeginMarketDataRequest(
         g_marketDataView.continuation = {};
         g_marketDataError.clear();
     }
+    g_stockTradeTickCount.store(0, std::memory_order_release);
+    g_lastStockTradeTimestampMs.store(0, std::memory_order_release);
+    g_stockTradeSubscriptionRequested.store(false, std::memory_order_release);
     g_marketDataState.store(
         MarketDataState::Loading,
         std::memory_order_release);
-    WakeFrames(60);
+    WakeFrames(4);
+}
+
+static trading::EpochMillis KstSessionDateStart(
+    trading::EpochMillis timestampMs) noexcept
+{
+    constexpr trading::EpochMillis DayMs = 24LL * 60LL * 60LL * 1000LL;
+    constexpr trading::EpochMillis KstOffsetMs = 9LL * 60LL * 60LL * 1000LL;
+    return
+        ((timestampMs + KstOffsetMs) / DayMs) * DayMs -
+        KstOffsetMs;
+}
+
+static void ApplyStockTradeTick(
+    const trading::StockTradeTick& tick)
+{
+    trading::PriceWon latestPrice = 0;
+    std::string code;
+    trading::EpochMillis eventTimestampMs = 0;
+
+    {
+        std::lock_guard<std::mutex> lock(g_marketDataMutex);
+        if (
+            g_marketDataView.code.empty() ||
+            g_marketDataView.code != tick.code ||
+            g_marketDataView.bars.empty())
+        {
+            return;
+        }
+
+        const trading::EpochMillis sessionStart =
+            KstSessionDateStart(
+                g_marketDataView.bars.back().closeTimestampMs);
+        std::string error;
+        if (!trading::MergeStockTradeIntoMinuteBars(
+                g_marketDataView.bars,
+                g_marketDataView.minuteUnit,
+                sessionStart,
+                tick,
+                error))
+        {
+            if (error.find("stale stock trade") == std::string::npos) {
+                g_log.Add("FAULT", "0B 분봉 병합 실패: %s", error.c_str());
+            }
+            return;
+        }
+
+        const int hour = tick.tradeTimeHhmmss / 10000;
+        const int minute = (tick.tradeTimeHhmmss / 100) % 100;
+        const int second = tick.tradeTimeHhmmss % 100;
+        eventTimestampMs =
+            sessionStart +
+            static_cast<trading::EpochMillis>(hour) * 3600000LL +
+            static_cast<trading::EpochMillis>(minute) * 60000LL +
+            static_cast<trading::EpochMillis>(second) * 1000LL;
+        code = g_marketDataView.code;
+        latestPrice = g_marketDataView.bars.back().close;
+    }
+
+    g_stockTradeTickCount.fetch_add(1, std::memory_order_acq_rel);
+    g_lastStockTradeTimestampMs.store(
+        eventTimestampMs,
+        std::memory_order_release);
+    g_tradingState.UpdateCurrentPrice(code, latestPrice);
+    WakeFrames(2);
 }
 
 static void ApplyMinuteBars(
@@ -300,7 +401,7 @@ static void ApplyMinuteBars(
     g_tradingState.UpdateCurrentPrice(
         page.code,
         page.bars.back().close);
-    WakeFrames(60);
+    WakeFrames(4);
 }
 
 static int MinuteUnitFromSelection(int selection) noexcept
@@ -484,10 +585,34 @@ static void DrawToolbar()
         "| %s |",
         MarketDataStateLabel(marketState));
     ImGui::SameLine();
-    ImGui::Text(
-        "부팅 %.0fms   %.1ffps",
-        g_bootMilliseconds,
-        ImGui::GetIO().Framerate);
+    const std::uint64_t realTimeTicks =
+        g_stockTradeTickCount.load(std::memory_order_acquire);
+    const trading::EpochMillis lastTradeTimestamp =
+        g_lastStockTradeTimestampMs.load(std::memory_order_acquire);
+    const trading::EpochMillis tradeAgeMs = lastTradeTimestamp > 0
+        ? (std::max)(
+            static_cast<trading::EpochMillis>(0),
+            SystemNowEpochMillis() - lastTradeTimestamp)
+        : 0;
+
+    if (lastTradeTimestamp > 0) {
+        ImGui::Text(
+            "부팅 %.0fms  렌더 %.1fHz  0B %llu건/%lldms",
+            g_bootMilliseconds,
+            g_renderRateHz,
+            static_cast<unsigned long long>(realTimeTicks),
+            static_cast<long long>(tradeAgeMs));
+    }
+    else {
+        ImGui::Text(
+            "부팅 %.0fms  렌더 %.1fHz  0B %s",
+            g_bootMilliseconds,
+            g_renderRateHz,
+            g_stockTradeSubscriptionRequested.load(
+                std::memory_order_acquire)
+                ? "수신대기"
+                : "미등록");
+    }
 
     if (g_observeMode.load(std::memory_order_acquire)) {
         ImGui::SameLine();
@@ -647,7 +772,7 @@ static void DrawMarketDataPanel()
 
     const trading::Bar& latest = snapshot.bars.back();
     ImGui::Text(
-        "%s | %d분 | 실제 ka10079 | %zu봉",
+        "%s | %d분 | 실제 ka10080 | %zu봉",
         snapshot.code.c_str(),
         snapshot.minuteUnit,
         snapshot.bars.size());
@@ -987,12 +1112,12 @@ static void DrainCommands()
                     error))
             {
                 SetMarketDataError(error);
-                g_log.Add("FAULT", "ka10079 요청 실패: %s", error.c_str());
+                g_log.Add("FAULT", "ka10080 요청 실패: %s", error.c_str());
             }
             else {
                 g_log.Add(
                     "DATA",
-                    "ka10079 실제 분봉 요청: %s %d분",
+                    "ka10080 실제 분봉 요청: %s %d분",
                     command.arg.c_str(),
                     minuteUnit);
             }
@@ -1147,7 +1272,7 @@ static void DrainCommands()
                 SetMarketDataError(error);
             }
             else {
-                g_log.Add("DATA", "ka10079 실제 분봉 재조회: %s", snapshot.code.c_str());
+                g_log.Add("DATA", "ka10080 실제 분봉 재조회: %s", snapshot.code.c_str());
             }
             break;
         }
@@ -1292,7 +1417,7 @@ static LRESULT WINAPI WindowProcedure(
             wordParameter,
             longParameter))
     {
-        WakeFrames(60);
+        WakeFrames(4);
         return true;
     }
 
@@ -1301,7 +1426,7 @@ static LRESULT WINAPI WindowProcedure(
         if (wordParameter != SIZE_MINIMIZED) {
             g_resizeWidth = LOWORD(longParameter);
             g_resizeHeight = HIWORD(longParameter);
-            WakeFrames(60);
+            WakeFrames(4);
         }
         return 0;
 
@@ -1309,7 +1434,7 @@ static LRESULT WINAPI WindowProcedure(
     case WM_KEYDOWN:
     case WM_LBUTTONDOWN:
     case WM_MOUSEWHEEL:
-        WakeFrames(60);
+        WakeFrames(4);
         break;
 
     case WM_SYSCOMMAND:
@@ -1501,7 +1626,7 @@ int WINAPI wWinMain(
             }
         };
         callbacks.wakeUi = [] {
-            WakeFrames(60);
+            WakeFrames(4);
         };
         callbacks.setObserveMode = [](bool enabled) {
             g_observeMode.store(
@@ -1519,6 +1644,31 @@ int WINAPI wWinMain(
                     page.code.c_str(),
                     page.minuteUnit,
                     page.bars.size());
+
+                std::string subscriptionError;
+                if (
+                    !g_runtimeRunner ||
+                    !g_runtimeRunner->SubscribeStockTrades(
+                        page.code,
+                        subscriptionError))
+                {
+                    g_stockTradeSubscriptionRequested.store(
+                        false,
+                        std::memory_order_release);
+                    g_log.Add(
+                        "FAULT",
+                        "0B 실시간 등록 실패: %s",
+                        subscriptionError.c_str());
+                }
+                else {
+                    g_stockTradeSubscriptionRequested.store(
+                        true,
+                        std::memory_order_release);
+                    g_log.Add(
+                        "WS",
+                        "0B 실시간 등록 요청: %s",
+                        page.code.c_str());
+                }
             }
             else {
                 const std::string error = !page.result.error.empty()
@@ -1526,6 +1676,10 @@ int WINAPI wWinMain(
                     : page.result.returnMessage;
                 g_log.Add("FAULT", "실제 분봉 오류: %s", error.c_str());
             }
+        };
+        callbacks.stockTrade = [](
+            const trading::StockTradeTick& tick) {
+            ApplyStockTradeTick(tick);
         };
 
         g_runtimeRunner =
@@ -1550,7 +1704,7 @@ int WINAPI wWinMain(
         else {
             g_log.Add(
                 "SYS",
-                "키움 모의투자 연결 시작: 토큰 → WS → 00/04 → 계좌대조");
+                "키움 모의투자 연결 시작: 토큰 → WS → 00/04 → 계좌대조 → 선택종목 0B");
         }
     }
 
@@ -1681,6 +1835,9 @@ int WINAPI wWinMain(
         }
 
         const HRESULT present = g_swapChain->Present(1, 0);
+        if (SUCCEEDED(present)) {
+            RecordPresentedFrame();
+        }
         if (
             present == DXGI_ERROR_DEVICE_REMOVED ||
             present == DXGI_ERROR_DEVICE_RESET)
@@ -1694,7 +1851,7 @@ int WINAPI wWinMain(
             MsgWaitForMultipleObjectsEx(
                 0,
                 nullptr,
-                60,
+                250,
                 QS_ALLINPUT,
                 MWMO_INPUTAVAILABLE);
         }

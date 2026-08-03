@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "kiwoom_protocol.h"
 #include "kiwoom_reconciliation.h"
@@ -22,6 +22,21 @@ namespace trading
         std::string code;
         int minuteUnit = 1;
         std::vector<Bar> bars;
+    };
+
+    struct StockTradeTick final
+    {
+        std::string code;
+        PriceWon priceWon = 0;
+        Volume tradeVolume = 0;
+        Volume cumulativeVolume = 0;
+        int tradeTimeHhmmss = 0;
+    };
+
+    struct StockTradeDecodeResult final
+    {
+        ProtocolResult result;
+        StockTradeTick tick;
     };
 
     bool IsSupportedMinuteUnit(int minuteUnit) noexcept;
@@ -50,4 +65,15 @@ namespace trading
         const std::string& indexCode,
         int minuteUnit,
         const std::string& json);
+
+
+    StockTradeDecodeResult DecodeStockTradeRecord(
+        const RealTimeRecord& record);
+
+    bool MergeStockTradeIntoMinuteBars(
+        std::vector<Bar>& bars,
+        int minuteUnit,
+        EpochMillis sessionDateStartMs,
+        const StockTradeTick& tick,
+        std::string& error);
 }

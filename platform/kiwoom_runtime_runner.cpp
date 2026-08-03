@@ -83,6 +83,11 @@ namespace trading::platform
             queue_.clear();
             reconnectScheduled_ = false;
         }
+        {
+            std::lock_guard<std::mutex> lock(subscriptionMutex_);
+            stockTradeCode_.clear();
+            stockTradeSubscriptionSent_ = false;
+        }
 
         workerThread_ = std::thread(&KiwoomRuntimeRunner::WorkerLoop, this);
         Enqueue(engine_.Start(config));
@@ -112,6 +117,11 @@ namespace trading::platform
             std::lock_guard<std::mutex> lock(queueMutex_);
             queue_.clear();
             reconnectScheduled_ = false;
+        }
+        {
+            std::lock_guard<std::mutex> lock(subscriptionMutex_);
+            stockTradeCode_.clear();
+            stockTradeSubscriptionSent_ = false;
         }
 
         Log("SYS", "Kiwoom runtime stopped");
@@ -159,6 +169,32 @@ namespace trading::platform
                 error);
         if (actions.empty()) return false;
         Enqueue(std::move(actions));
+        return true;
+    }
+
+    bool KiwoomRuntimeRunner::SubscribeStockTrades(
+        const std::string& stockCode,
+        std::string& error)
+    {
+        if (!running_.load(std::memory_order_acquire)) {
+            error = "Kiwoom runtime is not running";
+            return false;
+        }
+        if (stockCode.empty()) {
+            error = "stock code is required for real-time subscription";
+            return false;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(subscriptionMutex_);
+            if (stockTradeCode_ != stockCode) {
+                stockTradeCode_ = stockCode;
+                stockTradeSubscriptionSent_ = false;
+            }
+        }
+
+        TryQueueStockTradeSubscription();
+        error.clear();
         return true;
     }
 
@@ -294,7 +330,30 @@ namespace trading::platform
             }
 
             if (received.kind == RuntimeReceiveKind::Text) {
+                const RealTimeEnvelope envelope =
+                    ParseRealTimeEnvelope(received.text);
+                if (envelope.result.ok) {
+                    for (const RealTimeRecord& record : envelope.records) {
+                        if (record.type != "0B") continue;
+
+                        const StockTradeDecodeResult decoded =
+                            DecodeStockTradeRecord(record);
+                        if (!decoded.result.ok) {
+                            Log(
+                                "FAULT",
+                                decoded.result.error.empty()
+                                    ? "stock trade 0B decode failed"
+                                    : decoded.result.error);
+                            continue;
+                        }
+                        if (callbacks_.stockTrade) {
+                            callbacks_.stockTrade(decoded.tick);
+                        }
+                    }
+                }
+
                 Enqueue(engine_.OnWebSocketMessage(received.text));
+                TryQueueStockTradeSubscription();
                 WakeUi();
                 continue;
             }
@@ -358,6 +417,10 @@ namespace trading::platform
             {
                 std::lock_guard<std::mutex> lock(queueMutex_);
                 reconnectScheduled_ = false;
+            }
+            {
+                std::lock_guard<std::mutex> lock(subscriptionMutex_);
+                stockTradeSubscriptionSent_ = false;
             }
 
             StartReceiver();
@@ -470,6 +533,35 @@ namespace trading::platform
             WakeUi();
             break;
         }
+
+        TryQueueStockTradeSubscription();
+    }
+
+    void KiwoomRuntimeRunner::TryQueueStockTradeSubscription()
+    {
+        if (!running_.load(std::memory_order_acquire)) return;
+        if (!engine_.Snapshot().orderSubmissionAllowed) return;
+        if (!transport_->IsWebSocketConnected()) return;
+
+        std::string code;
+        {
+            std::lock_guard<std::mutex> lock(subscriptionMutex_);
+            if (stockTradeCode_.empty() || stockTradeSubscriptionSent_) {
+                return;
+            }
+            code = stockTradeCode_;
+            stockTradeSubscriptionSent_ = true;
+        }
+
+        KiwoomRuntimeAction action;
+        action.type = KiwoomRuntimeActionType::SendWebSocketText;
+        action.text = BuildWebSocketRegistrationMessage(
+            "2",
+            false,
+            { code },
+            { "0B" });
+        Enqueue({ std::move(action) });
+        Log("WS", "stock trade 0B subscription queued: " + code);
     }
 
     void KiwoomRuntimeRunner::StartReceiver()

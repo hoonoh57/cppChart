@@ -80,6 +80,59 @@ namespace
               "KST timestamp ordering mismatch");
     }
 
+    void TestStockTradeAggregation()
+    {
+        trading::RealTimeRecord record;
+        record.type = "0B";
+        record.item = "A000660";
+        record.values["20"] = "123701";
+        record.values["10"] = "+1584000";
+        record.values["15"] = "-3";
+        record.values["13"] = "552";
+
+        const trading::StockTradeDecodeResult decoded =
+            trading::DecodeStockTradeRecord(record);
+        Check(decoded.result.ok, "valid 0B stock trade must decode");
+        Check(decoded.tick.code == "000660", "0B code normalization mismatch");
+        Check(decoded.tick.priceWon == 1584000, "0B price mismatch");
+        Check(decoded.tick.tradeVolume == 3, "0B volume mismatch");
+        Check(decoded.tick.tradeTimeHhmmss == 123701, "0B time mismatch");
+
+        constexpr trading::EpochMillis SessionStart = 1785682800000LL;
+        std::vector<trading::Bar> bars;
+        trading::Bar current;
+        current.open = 1582000;
+        current.high = 1583000;
+        current.low = 1581000;
+        current.close = 1583000;
+        current.volume = 549;
+        current.closeTimestampMs = SessionStart + 12LL * 3600000LL + 37LL * 60000LL;
+        bars.push_back(current);
+
+        std::string error;
+        Check(
+            trading::MergeStockTradeIntoMinuteBars(
+                bars, 1, SessionStart, decoded.tick, error),
+            "0B trade must merge into current minute bar");
+        Check(bars.size() == 1, "same-minute 0B trade must not append a bar");
+        Check(bars.back().close == 1584000, "0B close update mismatch");
+        Check(bars.back().high == 1584000, "0B high update mismatch");
+        Check(bars.back().volume == 552, "0B volume accumulation mismatch");
+        Check(bars.back().tickCount == 1, "0B tick count mismatch");
+
+        trading::StockTradeTick next = decoded.tick;
+        next.tradeTimeHhmmss = 123800;
+        next.priceWon = 1585000;
+        next.tradeVolume = 4;
+        Check(
+            trading::MergeStockTradeIntoMinuteBars(
+                bars, 1, SessionStart, next, error),
+            "next-minute 0B trade must append a bar");
+        Check(bars.size() == 2, "next-minute 0B trade bar count mismatch");
+        Check(bars.back().open == 1585000, "new 0B bar open mismatch");
+        Check(bars.back().volume == 4, "new 0B bar volume mismatch");
+    }
+
     void TestIndexAndFailures()
     {
         std::string error;
@@ -142,6 +195,7 @@ int main()
 {
     TestStockRequest();
     TestStrictStockParsing();
+    TestStockTradeAggregation();
     TestIndexAndFailures();
     std::puts("[PASS] kiwoom_market_data_tests");
     return 0;

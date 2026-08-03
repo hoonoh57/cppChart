@@ -39,6 +39,10 @@
 #include "app/feature_registry.h"
 #include "app/market_data_module.h"
 #include "app/chart_workspace_module.h"
+#include "app/indicator_module.h"
+#include "app/indicator_render_adapter.h"
+#include "app/default_indicator_render_plan.h"
+#include "app/indicator_workspace_coordinator.h"
 #include "render/market_chart_builder.h"
 #include "ui/render_document_renderer.h"
 
@@ -239,6 +243,8 @@ static double g_bootMilliseconds = 0.0;
 static trading::app::FeatureRegistry g_featureRegistry;
 static trading::app::MarketDataModule g_marketDataModule;
 static trading::app::ChartWorkspaceModule g_chartWorkspaceModule;
+static trading::app::IndicatorModule g_indicatorModule;
+static trading::app::IndicatorRenderAdapter g_indicatorRenderAdapter;
 static trading::ui::RenderSurfaceState g_mainRenderSurface;
 
 static int MinuteUnitFromSelection(int selection) noexcept
@@ -347,6 +353,19 @@ static bool SetFeatureLevel(
             }
         }
     }
+    else if (id == "indicators") {
+        if (!g_indicatorModule.SetLevel(level, error)) {
+            std::string rollbackError;
+            g_featureRegistry.SetLevel(
+                id,
+                previousFeature.level,
+                rollbackError);
+            return false;
+        }
+        if (level == trading::app::FeatureLevel::Off) {
+            g_indicatorRenderAdapter.ClearCache();
+        }
+    }
     else if (id == "chart-workspace") {
         if (!g_chartWorkspaceModule.SetLevel(level, error)) {
             std::string rollbackError;
@@ -393,6 +412,12 @@ static bool InitializeFeatureRegistry(std::string& error)
             {},
             error)) return false;
     if (!g_featureRegistry.Register(
+            "indicators",
+            "Indicators",
+            trading::app::FeatureLevel::Visible,
+            { "market-data" },
+            error)) return false;
+    if (!g_featureRegistry.Register(
             "chart-workspace",
             "Chart Workspace",
             trading::app::FeatureLevel::Visible,
@@ -410,6 +435,32 @@ static bool InitializeFeatureRegistry(std::string& error)
             trading::app::FeatureLevel::Visible,
             {},
             error)) return false;
+    return true;
+}
+
+static bool InitializeIndicators(std::string& error)
+{
+    const std::vector<trading::indicators::IndicatorSpec> specs =
+        trading::app::InitialIndicatorSpecs();
+    if (!g_indicatorModule.Configure(specs, error)) return false;
+
+    trading::app::IndicatorRenderPlan plan;
+    if (!trading::app::BuildDefaultIndicatorRenderPlan(
+            specs,
+            plan,
+            error))
+    {
+        return false;
+    }
+    if (!g_indicatorRenderAdapter.Configure(plan, error)) return false;
+    if (!g_indicatorModule.SetLevel(
+            trading::app::FeatureLevel::Visible,
+            error))
+    {
+        return false;
+    }
+
+    error.clear();
     return true;
 }
 
@@ -691,26 +742,118 @@ static void DrawMarketDataPanel()
     const trading::app::MarketDataSeriesSnapshot marketSeries =
         g_marketDataModule.SeriesSnapshot();
 
-    const double started = NowSeconds();
-    if (g_chartWorkspaceModule.NeedsUpdate(marketSeries.revision))
-    {
-        trading::app::ChartMarketSource chartSource;
-        chartSource.completedBars = marketSeries.completedBars;
-        chartSource.liveBar = marketSeries.liveBar;
-        chartSource.hasLiveBar = marketSeries.hasLiveBar;
-        chartSource.barCount = marketSeries.barCount;
-        chartSource.revision = marketSeries.revision;
-        chartSource.completedRevision = marketSeries.completedRevision;
-        chartSource.liveRevision = marketSeries.liveRevision;
+    trading::app::ChartMarketSource chartSource;
+    chartSource.completedBars = marketSeries.completedBars;
+    chartSource.liveBar = marketSeries.liveBar;
+    chartSource.hasLiveBar = marketSeries.hasLiveBar;
+    chartSource.barCount = marketSeries.barCount;
+    chartSource.revision = marketSeries.revision;
+    chartSource.completedRevision = marketSeries.completedRevision;
+    chartSource.liveRevision = marketSeries.liveRevision;
 
+    const double started = NowSeconds();
+    bool useIndicators = false;
+    trading::app::IndicatorModuleSnapshot indicatorSnapshot =
+        g_indicatorModule.Snapshot();
+
+    if (FeatureAtLeast(
+            "indicators",
+            trading::app::FeatureLevel::Visible))
+    {
+        const bool calculationNeeded =
+            indicatorSnapshot.state !=
+                trading::app::IndicatorModuleState::Ready ||
+            indicatorSnapshot.sourceRevision != marketSeries.revision ||
+            indicatorSnapshot.symbol != snapshot.code;
+
+        if (calculationNeeded) {
+            const std::uint64_t previousMergedEvents =
+                indicatorSnapshot.metrics.mergedEventCount;
+            const std::uint64_t previousDroppedEvents =
+                indicatorSnapshot.metrics.droppedEventCount;
+            trading::app::IndicatorMarketSource indicatorSource;
+            indicatorSource.symbol = snapshot.code;
+            indicatorSource.completedBars = marketSeries.completedBars;
+            indicatorSource.liveBar = marketSeries.liveBar;
+            indicatorSource.hasLiveBar = marketSeries.hasLiveBar;
+            indicatorSource.revision = marketSeries.revision;
+            indicatorSource.completedRevision =
+                marketSeries.completedRevision;
+
+            std::string indicatorError;
+            if (!g_indicatorModule.Update(
+                    indicatorSource,
+                    indicatorError))
+            {
+                g_log.Add(
+                    "FAULT",
+                    "지표 계산 실패: %s",
+                    indicatorError.c_str());
+                std::string healthError;
+                g_featureRegistry.SetHealth(
+                    "indicators",
+                    false,
+                    indicatorError,
+                    healthError);
+            }
+            else {
+                indicatorSnapshot = g_indicatorModule.Snapshot();
+                const trading::app::FeatureMetrics& metrics =
+                    indicatorSnapshot.metrics;
+                RecordFeatureWork(
+                    "indicators",
+                    metrics.lastProcessingMicros,
+                    metrics.retainedBytes +
+                        g_indicatorRenderAdapter.RetainedBytes(),
+                    metrics.symbolCount,
+                    metrics.renderSeriesCount,
+                    metrics.mergedEventCount - previousMergedEvents,
+                    metrics.droppedEventCount - previousDroppedEvents);
+                std::string healthError;
+                g_featureRegistry.SetHealth(
+                    "indicators",
+                    true,
+                    {},
+                    healthError);
+                useIndicators = true;
+            }
+        }
+        else {
+            useIndicators = true;
+        }
+    }
+
+    bool chartNeedsUpdate = false;
+    if (useIndicators) {
+        chartNeedsUpdate = g_chartWorkspaceModule.NeedsUpdate(
+            marketSeries.revision,
+            indicatorSnapshot,
+            g_indicatorRenderAdapter);
+    }
+    else {
+        chartNeedsUpdate =
+            g_chartWorkspaceModule.NeedsUpdate(marketSeries.revision);
+    }
+
+    if (chartNeedsUpdate) {
         std::string chartError;
-        if (!g_chartWorkspaceModule.UpdateMarketChart(
+        const bool updated = useIndicators
+            ? g_chartWorkspaceModule.UpdateMarketChart(
                 "main-market-chart",
                 snapshot.code,
                 snapshot.code,
                 chartSource,
-                chartError))
-        {
+                indicatorSnapshot,
+                g_indicatorRenderAdapter,
+                chartError)
+            : g_chartWorkspaceModule.UpdateMarketChart(
+                "main-market-chart",
+                snapshot.code,
+                snapshot.code,
+                chartSource,
+                chartError);
+
+        if (!updated) {
             g_log.Add(
                 "FAULT",
                 "차트 워크스페이스 갱신 실패: %s",
@@ -1668,6 +1811,29 @@ int WINAPI wWinMain(
     if (!InitializeFeatureRegistry(featureError)) {
         g_runtimeConfigError = "기능 레지스트리 초기화 실패: " + featureError;
         g_observeMode.store(true, std::memory_order_release);
+    }
+    else {
+        std::string indicatorError;
+        if (!InitializeIndicators(indicatorError)) {
+            std::string ignored;
+            g_indicatorModule.SetLevel(
+                trading::app::FeatureLevel::Off,
+                ignored);
+            g_indicatorRenderAdapter.Reset();
+            g_featureRegistry.SetHealth(
+                "indicators",
+                false,
+                indicatorError,
+                ignored);
+            g_featureRegistry.SetLevel(
+                "indicators",
+                trading::app::FeatureLevel::Off,
+                ignored);
+            g_log.Add(
+                "FAULT",
+                "지표 초기화 실패 — 시장 차트만 유지: %s",
+                indicatorError.c_str());
+        }
     }
 
     g_log.Add(

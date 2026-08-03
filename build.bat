@@ -8,6 +8,12 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    core\command_bus.cpp ^
    core\fault_policy.cpp ^
    core\json_lite.cpp ^
+   core\indicator_engine.cpp ^
+   core\sma_indicator.cpp ^
+   core\jma_indicator.cpp ^
+   core\obv_indicator.cpp ^
+   core\adx_indicator.cpp ^
+   core\vwap_indicator.cpp ^
    core\kiwoom_protocol.cpp ^
    core\kiwoom_realtime_subscription.cpp ^
    core\kiwoom_market_data.cpp ^
@@ -23,7 +29,10 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    app\feature_registry.cpp ^
    app\market_data_module.cpp ^
    app\chart_workspace_module.cpp ^
+   app\indicator_module.cpp ^
    app\indicator_render_adapter.cpp ^
+   app\default_indicator_render_plan.cpp ^
+   app\indicator_workspace_coordinator.cpp ^
    render\chart_viewport.cpp ^
    render\time_axis.cpp ^
    render\value_grid.cpp ^

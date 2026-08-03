@@ -10,8 +10,37 @@ namespace trading
     using PriceWon = std::int32_t;
     using Quantity = std::int32_t;
     using TickCount = std::int32_t;
+    using TradingDateYmd = std::int32_t;
     using Volume = std::int64_t;
     using MoneyWon = std::int64_t;
+
+    inline bool IsLeapYear(int year) noexcept
+    {
+        return
+            (year % 4 == 0 && year % 100 != 0) ||
+            year % 400 == 0;
+    }
+
+    inline int DaysInMonth(int year, int month) noexcept
+    {
+        static constexpr int days[] = {
+            31, 28, 31, 30, 31, 30,
+            31, 31, 30, 31, 30, 31};
+        if (month < 1 || month > 12) return 0;
+        if (month == 2 && IsLeapYear(year)) return 29;
+        return days[month - 1];
+    }
+
+    inline bool IsValidTradingDateYmd(TradingDateYmd value) noexcept
+    {
+        const int year = value / 10000;
+        const int month = (value / 100) % 100;
+        const int day = value % 100;
+        return
+            year >= 1970 && year <= 9999 &&
+            month >= 1 && month <= 12 &&
+            day >= 1 && day <= DaysInMonth(year, month);
+    }
 
     struct Bar final
     {
@@ -22,6 +51,7 @@ namespace trading
         Volume volume = 0;
         EpochMillis closeTimestampMs = 0;
         TickCount tickCount = 0;
+        TradingDateYmd tradingDateYmd = 0;
     };
 
     struct PositionSnapshot final

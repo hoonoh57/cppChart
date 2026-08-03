@@ -100,11 +100,12 @@ namespace trading::render
             Minimum(),
             (std::min)(Maximum(), coordinate));
         const long long rounded = std::llround(clamped);
-        const std::size_t index = static_cast<std::size_t>((std::max)(
+        const long long maximumIndex =
+            static_cast<long long>(timestamps_.size() - 1U);
+        const long long bounded = (std::max)(
             0LL,
-            (std::min)(
-                static_cast<long long>(timestamps_.size() - 1U),
-                rounded))));
+            (std::min)(maximumIndex, rounded));
+        const std::size_t index = static_cast<std::size_t>(bounded);
         return timestamps_[index];
     }
 

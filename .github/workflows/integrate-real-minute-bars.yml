@@ -1,10 +1,15 @@
 name: Integrate real minute bars
 
-# Executes the checked-in migration only after this workflow exists on the branch.
 on:
   push:
     branches:
       - p2/kiwoom-mock-gateway
+    paths:
+      - scripts/integrate_real_minute_bars.py
+      - .github/workflows/integrate-real-minute-bars.yml
+  pull_request:
+    branches:
+      - main
     paths:
       - scripts/integrate_real_minute_bars.py
       - .github/workflows/integrate-real-minute-bars.yml

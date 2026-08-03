@@ -31,6 +31,28 @@ namespace trading
             return value.substr(first, last - first);
         }
 
+        std::string ToUpper(std::string value)
+        {
+            for (char& ch : value) {
+                ch = static_cast<char>(
+                    std::toupper(static_cast<unsigned char>(ch)));
+            }
+            return value;
+        }
+
+        std::string StripUtf8Bom(const std::string& text)
+        {
+            if (
+                text.size() >= 3 &&
+                static_cast<unsigned char>(text[0]) == 0xEF &&
+                static_cast<unsigned char>(text[1]) == 0xBB &&
+                static_cast<unsigned char>(text[2]) == 0xBF)
+            {
+                return text.substr(3);
+            }
+            return text;
+        }
+
         bool IsValidKey(const std::string& key) noexcept
         {
             if (key.empty()) return false;
@@ -111,6 +133,38 @@ namespace trading
             return result;
         }
 
+        bool TryParseBoolean(
+            const std::string& value,
+            bool& result)
+        {
+            const std::string normalized =
+                ToUpper(Trim(value));
+
+            if (
+                normalized == "1" ||
+                normalized == "TRUE" ||
+                normalized == "YES" ||
+                normalized == "Y" ||
+                normalized == "ON")
+            {
+                result = true;
+                return true;
+            }
+
+            if (
+                normalized == "0" ||
+                normalized == "FALSE" ||
+                normalized == "NO" ||
+                normalized == "N" ||
+                normalized == "OFF")
+            {
+                result = false;
+                return true;
+            }
+
+            return false;
+        }
+
         std::string ReadEnvironment(const char* name)
         {
             const char* value = std::getenv(name);
@@ -142,6 +196,14 @@ namespace trading
 
             return {};
         }
+
+        std::string WithSource(
+            const std::string& sourcePath,
+            const std::string& message)
+        {
+            if (sourcePath.empty()) return message;
+            return sourcePath + ": " + message;
+        }
     }
 
     bool ParseEnvText(
@@ -149,7 +211,7 @@ namespace trading
         std::map<std::string, std::string>& values,
         std::string& error)
     {
-        std::istringstream stream(text);
+        std::istringstream stream(StripUtf8Bom(text));
         std::string line;
         int lineNumber = 0;
 
@@ -226,7 +288,7 @@ namespace trading
         const fs::path working =
             workingDirectory.empty()
                 ? fs::current_path()
-                : fs::path(workingDirectory);
+                : fs::absolute(fs::path(workingDirectory));
 
         candidates.push_back(working / ".env");
         candidates.push_back(working.parent_path() / ".env");
@@ -241,7 +303,8 @@ namespace trading
             std::ifstream stream(candidate, std::ios::binary);
             if (!stream) {
                 result.error =
-                    "cannot open runtime configuration file";
+                    candidate.string() +
+                    ": cannot open runtime configuration file";
                 return result;
             }
 
@@ -249,20 +312,25 @@ namespace trading
             content << stream.rdbuf();
             if (!stream.good() && !stream.eof()) {
                 result.error =
-                    "cannot read runtime configuration file";
+                    candidate.string() +
+                    ": cannot read runtime configuration file";
                 return result;
             }
 
-            if (!ParseEnvText(content.str(), values, result.error)) {
+            std::string parseError;
+            if (!ParseEnvText(content.str(), values, parseError)) {
+                result.error =
+                    candidate.string() + ": " + parseError;
                 return result;
             }
 
-            selectedPath = candidate.string();
+            selectedPath = fs::absolute(candidate).string();
             break;
         }
 
         const char* overrideKeys[] = {
             "TRADING_MODE",
+            "KIWOOM_MOCK",
             "KIWOOM_MOCK_APP_KEY",
             "KIWOOM_MOCK_SECRET_KEY",
             "KIWOOM_APP_KEY",
@@ -286,16 +354,6 @@ namespace trading
         ConfigLoadResult result;
         result.config.sourcePath = sourcePath;
 
-        const std::string mode =
-            FindValue(values, "TRADING_MODE");
-
-        if (mode != "KIWOOM_MOCK") {
-            result.error =
-                "TRADING_MODE=KIWOOM_MOCK is required; synthetic LOCAL_MOCK was removed";
-            return result;
-        }
-
-        result.config.mode = RuntimeMode::KiwoomMock;
         result.config.appKey =
             FindValue(
                 values,
@@ -311,6 +369,55 @@ namespace trading
         result.config.accountNumber =
             FindValue(values, "KIWOOM_ACCOUNT");
 
+        const std::string explicitMode =
+            ToUpper(Trim(FindValue(values, "TRADING_MODE")));
+        const std::string legacyMock =
+            FindValue(values, "KIWOOM_MOCK");
+
+        if (!explicitMode.empty()) {
+            if (explicitMode == "LOCAL_MOCK") {
+                result.error = WithSource(
+                    sourcePath,
+                    "LOCAL_MOCK was removed; use KIWOOM_MOCK");
+                return result;
+            }
+
+            if (explicitMode != "KIWOOM_MOCK") {
+                result.error = WithSource(
+                    sourcePath,
+                    "unsupported TRADING_MODE=" + explicitMode);
+                return result;
+            }
+
+            result.config.mode = RuntimeMode::KiwoomMock;
+        }
+        else if (!legacyMock.empty()) {
+            bool enabled = false;
+            if (!TryParseBoolean(legacyMock, enabled)) {
+                result.error = WithSource(
+                    sourcePath,
+                    "KIWOOM_MOCK must be true or false");
+                return result;
+            }
+
+            if (!enabled) {
+                result.error = WithSource(
+                    sourcePath,
+                    "KIWOOM_MOCK is false; real-data shell requires mock access");
+                return result;
+            }
+
+            result.config.mode = RuntimeMode::KiwoomMock;
+            result.warnings.push_back(
+                "legacy KIWOOM_MOCK=true accepted; TRADING_MODE=KIWOOM_MOCK is optional");
+        }
+        else {
+            result.error = WithSource(
+                sourcePath,
+                "set TRADING_MODE=KIWOOM_MOCK or KIWOOM_MOCK=true");
+            return result;
+        }
+
         const std::string restBase =
             FindValue(values, "KIWOOM_REST_BASE_URL");
         if (!restBase.empty()) {
@@ -324,8 +431,9 @@ namespace trading
         }
 
         if (!result.config.HasKiwoomCredentials()) {
-            result.error =
-                "KIWOOM_MOCK mode requires an App Key and App Secret";
+            result.error = WithSource(
+                sourcePath,
+                "Kiwoom mock App Key and App Secret are required");
             return result;
         }
 

@@ -380,7 +380,7 @@ namespace trading::app
         symbol_.clear();
         sourceRevision_ = 0;
         completedRevision_ = 0;
-        calculationRevision_ = 0;
+        ++calculationRevision_;
         metrics_.queueDepth = 0;
         metrics_.retainedBytes = 0;
         metrics_.symbolCount = 0;

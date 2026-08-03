@@ -1,0 +1,1 @@
+Temporary trigger for the atomic indicator legend and property-grid patch.

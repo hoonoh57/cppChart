@@ -15,10 +15,10 @@ Read these before changing code:
 - development branch: `p2/kiwoom-mock-gateway`
 - PR: `#1`, Draft
 - protected baseline: `main` at `f1a7d8db7a5d1b145781bfcb6ce11c2e24ef6683`
-- verified branch HEAD: `69ab02cea7ebcc78704fb6326c75969fd37c87e9`
-- successful Windows CI: `30852986667` (`Windows CI #812`)
-- successful CI artifact id: `8871436251`
-- artifact digest: `sha256:46fac9cdb9f9fd3704a117da091f9c5a519e2891c26aedd614d5b355c8e779de`
+- verified branch HEAD: `2f9cea39551b8f484d22ecd834738532ba4478a5`
+- successful Windows CI: `30853400640` (`Windows CI #816`)
+- successful CI artifact id: `8871604239`
+- artifact digest: `sha256:47623bb63fae35d4049dc1b85b0cc1b5b3495cd8380319f1ae275f1766c1af00`
 - production policy: real Kiwoom mock data only; no synthetic fallback
 
 The verified HEAD above passed architecture gates, MSVC x64 shell build, the complete
@@ -125,7 +125,7 @@ session key rather than inferring a date from display text or local wall time.
 
 ### M7 verification
 
-Windows CI `30852986667` passed:
+Windows CI `30853400640` passed:
 
 - repository and secret-file policy
 - core and modular architecture boundaries

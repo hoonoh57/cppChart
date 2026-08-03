@@ -7,11 +7,11 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $requiredFiles = @(
     'app\indicator_module.h',
     'app\indicator_module.cpp',
-    'app\indicator_render_contributor.h',
-    'app\indicator_render_contributor.cpp',
+    'app\indicator_render_adapter.h',
+    'app\indicator_render_adapter.cpp',
     'tests\indicator_module_tests.cpp',
     'tests\indicator_module_revision_tests.cpp',
-    'tests\indicator_render_contributor_tests.cpp'
+    'tests\indicator_render_adapter_tests.cpp'
 )
 foreach ($relative in $requiredFiles) {
     if (-not (Test-Path (Join-Path $repoRoot $relative))) {
@@ -49,31 +49,50 @@ if ($implementation.Contains('calculationRevision_ = 0;')) {
     throw 'Indicator calculation revision must remain monotonic across Off/reconfigure invalidation'
 }
 
-$contributorHeader = Get-Content (
-    Join-Path $repoRoot 'app\indicator_render_contributor.h') -Raw
+$adapterHeader = Get-Content (
+    Join-Path $repoRoot 'app\indicator_render_adapter.h') -Raw
 foreach ($marker in @(
-    'IndicatorRenderContributionStats',
-    'AppendIndicatorRenderContributions(',
+    'struct IndicatorOutputBinding final',
+    'IndicatorRenderKind kind',
+    'std::size_t outputIndex',
+    'class IndicatorRenderAdapter final',
     'render::RenderDocument& document')) {
-    if (-not $contributorHeader.Contains($marker)) {
-        throw "Indicator render contribution contract is missing: $marker"
+    if (-not $adapterHeader.Contains($marker)) {
+        throw "Generic indicator render binding contract is missing: $marker"
     }
 }
 
-$contributor = Get-Content (
-    Join-Path $repoRoot 'app\indicator_render_contributor.cpp') -Raw
+$adapter = Get-Content (
+    Join-Path $repoRoot 'app\indicator_render_adapter.cpp') -Raw
 foreach ($marker in @(
-    'BuildLinePoints(',
-    'BuildHistogramPoints(',
-    'AddSegmentedLine(',
-    'JmaUpOutput',
-    'ObvDirectionOutput',
-    'AdxValueOutput',
-    'VwapUpper2Output',
-    'render::ValidateRenderDocument(document, error)')) {
-    if (-not $contributor.Contains($marker)) {
-        throw "Generic indicator render mapping is missing: $marker"
+    'binding.indicatorId',
+    'binding.outputIndex',
+    'binding.kind == IndicatorRenderKind::Line',
+    'cache.completedIdentity',
+    'line.points.SetShared(',
+    'histogram.points.SetShared(',
+    'RebuildLineCache(',
+    'RebuildHistogramCache(',
+    'render::ValidateRenderDocument(document, validationError)')) {
+    if (-not $adapter.Contains($marker)) {
+        throw "Cached generic indicator render adapter is missing: $marker"
     }
+}
+foreach ($forbidden in @(
+    'series.spec.type == "SMA"',
+    'series.spec.type == "JMA"',
+    'series.spec.type == "VWAP"',
+    'series.spec.type == "OBV"',
+    'series.spec.type == "ADX"')) {
+    if ($adapter.Contains($forbidden)) {
+        throw "Indicator render adapter contains a central type switch: $forbidden"
+    }
+}
+
+$renderContract = Get-Content (
+    Join-Path $repoRoot 'render\render_document.h') -Raw
+if (-not $renderContract.Contains('SharedTailSeries<LinePoint> points')) {
+    throw 'LineSeries must share immutable completed history and a mutable live tail'
 }
 
 $cacheTests = Get-Content (
@@ -100,18 +119,16 @@ foreach ($marker in @(
     }
 }
 
-$contributionTests = Get-Content (
-    Join-Path $repoRoot 'tests\indicator_render_contributor_tests.cpp') -Raw
+$adapterTests = Get-Content (
+    Join-Path $repoRoot 'tests\indicator_render_adapter_tests.cpp') -Raw
 foreach ($marker in @(
-    'SMA must publish a standard price line',
-    'JMA Up must publish segmented standard lines',
-    'VWAP Upper2 must publish a standard price line',
-    'OBV must publish Direction histogram',
-    'ADX must publish 20 and 25 reference lines',
-    'Off indicator contribution must publish no work',
-    'indicator contribution without price pane must fail closed')) {
-    if (-not $contributionTests.Contains($marker)) {
-        throw "Indicator render contribution regression coverage is missing: $marker"
+    'NaN line gap must split into two finite line segments',
+    'completed line render points must be reused on live updates',
+    'completed histogram render points must be reused on live updates',
+    'live-only update must preserve render structure revision',
+    'missing indicator render source must fail closed')) {
+    if (-not $adapterTests.Contains($marker)) {
+        throw "Indicator render adapter regression coverage is missing: $marker"
     }
 }
 
@@ -119,12 +136,12 @@ $runAll = Get-Content (Join-Path $repoRoot 'tests\run_all.bat') -Raw
 foreach ($marker in @(
     'indicator_module_tests.exe',
     'indicator_module_revision_tests.exe',
-    'indicator_render_contributor_tests.exe',
+    'indicator_render_adapter_tests.exe',
     'app\indicator_module.cpp',
-    'app\indicator_render_contributor.cpp')) {
+    'app\indicator_render_adapter.cpp')) {
     if (-not $runAll.Contains($marker)) {
-        throw "Indicator module/contributor test is not in the complete suite: $marker"
+        throw "Indicator module/adapter test is not in the complete suite: $marker"
     }
 }
 
-Write-Host 'Indicator module execution-level, cache, revision, and generic render contribution contracts passed.' -ForegroundColor Green
+Write-Host 'Indicator module execution-level, cache, monotonic revision, and generic cached render adapter contracts passed.' -ForegroundColor Green

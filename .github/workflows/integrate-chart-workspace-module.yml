@@ -7,6 +7,7 @@ on:
     paths:
       - scripts/integrate_chart_workspace_module.py
       - scripts/integrate_realtime_feature_levels_v2.py
+      - scripts/run_realtime_feature_levels.py
       - .github/workflows/integrate-chart-workspace-module.yml
   pull_request:
     branches:
@@ -14,6 +15,7 @@ on:
     paths:
       - scripts/integrate_chart_workspace_module.py
       - scripts/integrate_realtime_feature_levels_v2.py
+      - scripts/run_realtime_feature_levels.py
       - .github/workflows/integrate-chart-workspace-module.yml
 
 permissions:
@@ -41,7 +43,7 @@ jobs:
 
       - name: Integrate upstream feature levels
         shell: pwsh
-        run: python .\scripts\integrate_realtime_feature_levels_v2.py
+        run: python .\scripts\run_realtime_feature_levels.py
 
       - name: Verify modular architecture
         shell: pwsh

@@ -4,7 +4,9 @@ $productionFiles = @(
     '.\shell_main.cpp',
     '.\core\runtime_config.h',
     '.\core\runtime_config.cpp',
-    '.\core\kiwoom_session.cpp'
+    '.\core\kiwoom_session.cpp',
+    '.\core\kiwoom_runtime_engine.h',
+    '.\core\kiwoom_runtime_engine.cpp'
 )
 
 $forbiddenMarkers = @(

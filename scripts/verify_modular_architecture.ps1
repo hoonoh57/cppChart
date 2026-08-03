@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 
 $requiredFiles = @(
     '.\docs\ARCHITECTURE_CONSTITUTION.md',
@@ -9,6 +9,10 @@ $requiredFiles = @(
     '.\app\market_data_module.cpp',
     '.\app\chart_workspace_module.h',
     '.\app\chart_workspace_module.cpp',
+    '.\core\indicator_engine.h',
+    '.\core\indicator_engine.cpp',
+    '.\core\sma_indicator.h',
+    '.\core\sma_indicator.cpp',
     '.\render\chart_viewport.h',
     '.\render\chart_viewport.cpp',
     '.\render\time_axis.h',
@@ -23,7 +27,8 @@ $requiredFiles = @(
     '.\render\market_chart_builder.h',
     '.\render\market_chart_builder.cpp',
     '.\ui\render_document_renderer.h',
-    '.\ui\render_document_renderer.cpp'
+    '.\ui\render_document_renderer.cpp',
+    '.\tests\indicator_engine_tests.cpp'
 )
 
 foreach ($file in $requiredFiles) {
@@ -171,4 +176,54 @@ if ($renderer.Contains('static_cast<double>(nearest->close)')) {
     throw 'Horizontal crosshair must not be forced to nearest candle close'
 }
 
-Write-Host 'Major-feature modules, immutable live-tail storage, compressed trading-time rendering, and pane-aware interaction verified.'
+$indicatorContract = Get-Content '.\core\indicator_engine.h' -Raw
+$requiredIndicatorContractMarkers = @(
+    'struct IndicatorSpec final',
+    'class IndicatorInstance final',
+    'class IndicatorRegistry final',
+    'SerializeIndicatorSpec(',
+    'ParseIndicatorSpec(',
+    'CalculateBatch('
+)
+foreach ($marker in $requiredIndicatorContractMarkers) {
+    if (-not $indicatorContract.Contains($marker)) {
+        throw "Reusable indicator contract is missing: $marker"
+    }
+}
+
+$smaIndicator = Get-Content '.\core\sma_indicator.cpp' -Raw
+$requiredSmaMarkers = @(
+    'RegisterSmaIndicator',
+    'bar.closeTimestampMs == state.latestTimestampMs',
+    'state.sum += close - state.window[state.latestIndex]',
+    'IndicatorFault::TimestampMovedBackward'
+)
+foreach ($marker in $requiredSmaMarkers) {
+    if (-not $smaIndicator.Contains($marker)) {
+        throw "Incremental SMA contract is missing: $marker"
+    }
+}
+
+$indicatorTests = Get-Content '.\tests\indicator_engine_tests.cpp' -Raw
+$requiredIndicatorTestMarkers = @(
+    'batch/incremental value parity mismatch',
+    'same-timestamp update must replace the mutable live tail',
+    'failed batch calculation must not expose partial results'
+)
+foreach ($marker in $requiredIndicatorTestMarkers) {
+    if (-not $indicatorTests.Contains($marker)) {
+        throw "Indicator parity regression coverage is missing: $marker"
+    }
+}
+
+$runAll = Get-Content '.\tests\run_all.bat' -Raw
+foreach ($marker in @(
+    'indicator_engine_tests.exe',
+    'core\indicator_engine.cpp',
+    'core\sma_indicator.cpp')) {
+    if (-not $runAll.Contains($marker)) {
+        throw "Indicator engine is not in the complete headless suite: $marker"
+    }
+}
+
+Write-Host 'Major-feature modules, M6 chart contracts, and the M7 batch/incremental SMA foundation are verified.'

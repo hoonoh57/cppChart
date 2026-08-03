@@ -6,6 +6,7 @@
 #include <ctime>
 #include <limits>
 #include <string>
+#include <vector>
 
 namespace trading::ui
 {
@@ -13,6 +14,7 @@ namespace trading::ui
     {
         constexpr float ValueAxisWidth = 74.0f;
         constexpr float TimeAxisHeight = 20.0f;
+        constexpr double MinimumVisibleSpan = 12.0;
 
         ImU32 ToImColor(const render::ColorRgba& color) noexcept
         {
@@ -23,11 +25,16 @@ namespace trading::ui
                 color.alpha);
         }
 
-        struct TimeRange final
+        struct AxisRange final
         {
-            EpochMillis minimum = 0;
-            EpochMillis maximum = 0;
+            render::AxisCoordinate minimum = 0.0;
+            render::AxisCoordinate maximum = 0.0;
             bool valid = false;
+
+            render::AxisCoordinate Span() const noexcept
+            {
+                return maximum > minimum ? maximum - minimum : 0.0;
+            }
         };
 
         struct ValueRange final
@@ -57,54 +64,6 @@ namespace trading::ui
             bool valid = false;
         };
 
-        void IncludeTimestamp(
-            TimeRange& range,
-            EpochMillis timestamp) noexcept
-        {
-            if (timestamp <= 0) return;
-            if (!range.valid) {
-                range.minimum = timestamp;
-                range.maximum = timestamp;
-                range.valid = true;
-                return;
-            }
-            range.minimum = (std::min)(range.minimum, timestamp);
-            range.maximum = (std::max)(range.maximum, timestamp);
-        }
-
-        TimeRange DocumentDataRange(
-            const render::RenderDocument& document)
-        {
-            TimeRange result;
-            for (const render::Pane& pane : document.panes) {
-                for (const render::CandleSeries& series : pane.candles) {
-                    if (!series.visible) continue;
-                    for (const Bar& bar : series.bars) {
-                        IncludeTimestamp(result, bar.closeTimestampMs);
-                    }
-                }
-                for (const render::LineSeries& series : pane.lines) {
-                    if (!series.visible) continue;
-                    for (const render::LinePoint& point : series.points) {
-                        IncludeTimestamp(result, point.timestampMs);
-                    }
-                }
-                for (const render::HistogramSeries& series : pane.histograms) {
-                    if (!series.visible) continue;
-                    for (const render::HistogramPoint& point : series.points) {
-                        IncludeTimestamp(result, point.timestampMs);
-                    }
-                }
-                for (const render::MarkerSeries& series : pane.markers) {
-                    if (!series.visible) continue;
-                    for (const render::MarkerPoint& point : series.points) {
-                        IncludeTimestamp(result, point.timestampMs);
-                    }
-                }
-            }
-            return result;
-        }
-
         std::vector<EpochMillis> PrimaryCandleTimestamps(
             const render::RenderDocument& document)
         {
@@ -122,45 +81,57 @@ namespace trading::ui
             return {};
         }
 
-        EpochMillis MinimumViewportSpan(
-            const render::RenderDocument& document) noexcept
+        std::vector<EpochMillis> CollectDocumentTimestamps(
+            const render::RenderDocument& document)
         {
-            EpochMillis minimumStep = 0;
+            std::vector<EpochMillis> result;
             for (const render::Pane& pane : document.panes) {
-                for (const render::CandleSeries& series : pane.candles) {
-                    EpochMillis previous = 0;
-                    for (const Bar& bar : series.bars) {
-                        if (previous > 0 && bar.closeTimestampMs > previous) {
-                            const EpochMillis step =
-                                bar.closeTimestampMs - previous;
-                            minimumStep = minimumStep == 0
-                                ? step
-                                : (std::min)(minimumStep, step);
-                        }
-                        previous = bar.closeTimestampMs;
+                for (const render::LineSeries& series : pane.lines) {
+                    if (!series.visible) continue;
+                    for (const render::LinePoint& point : series.points) {
+                        if (point.timestampMs > 0) result.push_back(point.timestampMs);
+                    }
+                }
+                for (const render::HistogramSeries& series : pane.histograms) {
+                    if (!series.visible) continue;
+                    for (const render::HistogramPoint& point : series.points) {
+                        if (point.timestampMs > 0) result.push_back(point.timestampMs);
+                    }
+                }
+                for (const render::MarkerSeries& series : pane.markers) {
+                    if (!series.visible) continue;
+                    for (const render::MarkerPoint& point : series.points) {
+                        if (point.timestampMs > 0) result.push_back(point.timestampMs);
+                    }
+                }
+                for (const render::TextAnnotation& annotation : pane.annotations) {
+                    if (annotation.visible && annotation.timestampMs > 0) {
+                        result.push_back(annotation.timestampMs);
                     }
                 }
             }
-            return (std::max)(
-                static_cast<EpochMillis>(1000),
-                minimumStep > 0
-                    ? minimumStep * 12
-                    : static_cast<EpochMillis>(1000));
+            std::sort(result.begin(), result.end());
+            result.erase(std::unique(result.begin(), result.end()), result.end());
+            return result;
         }
 
-        bool InTimeRange(
+        bool InAxisRange(
             EpochMillis timestamp,
-            const TimeRange& range) noexcept
+            const render::OrdinalTimeAxis& axis,
+            const AxisRange& range) noexcept
         {
+            if (!range.valid || timestamp <= 0 || axis.Empty()) return false;
+            const render::AxisCoordinate coordinate =
+                axis.CoordinateForTimestamp(timestamp);
             return
-                range.valid &&
-                timestamp >= range.minimum &&
-                timestamp <= range.maximum;
+                coordinate >= range.minimum - 0.0001 &&
+                coordinate <= range.maximum + 0.0001;
         }
 
         ValueRange PaneValueRange(
             const render::Pane& pane,
-            const TimeRange& timeRange)
+            const render::OrdinalTimeAxis& axis,
+            const AxisRange& range)
         {
             ValueRange result;
             if (pane.valueScale == render::PaneValueScale::Fixed) {
@@ -173,7 +144,7 @@ namespace trading::ui
             for (const render::CandleSeries& series : pane.candles) {
                 if (!series.visible) continue;
                 for (const Bar& bar : series.bars) {
-                    if (!InTimeRange(bar.closeTimestampMs, timeRange)) continue;
+                    if (!InAxisRange(bar.closeTimestampMs, axis, range)) continue;
                     result.Include(static_cast<double>(bar.low));
                     result.Include(static_cast<double>(bar.high));
                 }
@@ -181,7 +152,7 @@ namespace trading::ui
             for (const render::LineSeries& series : pane.lines) {
                 if (!series.visible) continue;
                 for (const render::LinePoint& point : series.points) {
-                    if (InTimeRange(point.timestampMs, timeRange)) {
+                    if (InAxisRange(point.timestampMs, axis, range)) {
                         result.Include(point.value);
                     }
                 }
@@ -190,7 +161,7 @@ namespace trading::ui
                 if (!series.visible) continue;
                 result.Include(0.0);
                 for (const render::HistogramPoint& point : series.points) {
-                    if (InTimeRange(point.timestampMs, timeRange)) {
+                    if (InAxisRange(point.timestampMs, axis, range)) {
                         result.Include(point.value);
                     }
                 }
@@ -198,7 +169,7 @@ namespace trading::ui
             for (const render::MarkerSeries& series : pane.markers) {
                 if (!series.visible) continue;
                 for (const render::MarkerPoint& point : series.points) {
-                    if (InTimeRange(point.timestampMs, timeRange)) {
+                    if (InAxisRange(point.timestampMs, axis, range)) {
                         result.Include(point.value);
                     }
                 }
@@ -232,16 +203,14 @@ namespace trading::ui
 
         float MapX(
             EpochMillis timestamp,
-            const TimeRange& range,
+            const render::OrdinalTimeAxis& axis,
+            const AxisRange& range,
             float left,
             float width) noexcept
         {
-            const EpochMillis span = (std::max)(
-                static_cast<EpochMillis>(1),
-                range.maximum - range.minimum);
-            const double ratio =
-                static_cast<double>(timestamp - range.minimum) /
-                static_cast<double>(span);
+            const double span = (std::max)(0.0001, range.Span());
+            const double coordinate = axis.CoordinateForTimestamp(timestamp);
+            const double ratio = (coordinate - range.minimum) / span;
             return left +
                 static_cast<float>((std::max)(0.0, (std::min)(1.0, ratio))) *
                 width;
@@ -272,8 +241,7 @@ namespace trading::ui
                 (std::min)(1.0,
                     static_cast<double>(y - top) /
                     static_cast<double>((std::max)(1.0f, height))));
-            return range.maximum -
-                ratio * (range.maximum - range.minimum);
+            return range.maximum - ratio * (range.maximum - range.minimum);
         }
 
         std::string FormatTimestamp(EpochMillis timestampMs)
@@ -301,19 +269,18 @@ namespace trading::ui
         const Bar* NearestVisibleBar(
             const render::Pane& pane,
             EpochMillis timestamp,
-            const TimeRange& timeRange)
+            const render::OrdinalTimeAxis& axis,
+            const AxisRange& range)
         {
             const Bar* nearest = nullptr;
-            EpochMillis nearestDistance =
-                (std::numeric_limits<EpochMillis>::max)();
+            double nearestDistance = (std::numeric_limits<double>::max)();
+            const double target = axis.CoordinateForTimestamp(timestamp);
             for (const render::CandleSeries& series : pane.candles) {
                 if (!series.visible) continue;
                 for (const Bar& bar : series.bars) {
-                    if (!InTimeRange(bar.closeTimestampMs, timeRange)) continue;
-                    const EpochMillis distance =
-                        bar.closeTimestampMs > timestamp
-                            ? bar.closeTimestampMs - timestamp
-                            : timestamp - bar.closeTimestampMs;
+                    if (!InAxisRange(bar.closeTimestampMs, axis, range)) continue;
+                    const double distance = std::fabs(
+                        axis.CoordinateForTimestamp(bar.closeTimestampMs) - target);
                     if (distance < nearestDistance) {
                         nearest = &bar;
                         nearestDistance = distance;
@@ -341,6 +308,20 @@ namespace trading::ui
             return found;
         }
 
+        double DefaultVisibleSpan(float width, std::size_t pointCount) noexcept
+        {
+            if (pointCount <= 1) return 1.0;
+            const double desiredBars = (std::max)(
+                40.0,
+                (std::min)(
+                    180.0,
+                    static_cast<double>((std::max)(130.0f, width) - ValueAxisWidth) /
+                        7.0));
+            return (std::min)(
+                static_cast<double>(pointCount - 1U),
+                (std::max)(MinimumVisibleSpan, desiredBars - 1.0));
+        }
+
         void DrawValueAxis(
             ImDrawList* draw,
             const ValueRange& values,
@@ -352,11 +333,15 @@ namespace trading::ui
             for (int index = 0; index <= 5; ++index) {
                 const double ratio = static_cast<double>(index) / 5.0;
                 const double value =
-                    values.maximum -
-                    ratio * (values.maximum - values.minimum);
+                    values.maximum - ratio * (values.maximum - values.minimum);
                 const float y =
                     plotOrigin.y + plotHeight * static_cast<float>(ratio);
-                std::snprintf(label, sizeof(label), "%.2f", value);
+                if (std::fabs(value) >= 1000.0) {
+                    std::snprintf(label, sizeof(label), "%.0f", value);
+                }
+                else {
+                    std::snprintf(label, sizeof(label), "%.2f", value);
+                }
                 draw->AddText(
                     ImVec2(plotOrigin.x + plotWidth + 5.0f, y - 7.0f),
                     IM_COL32(180, 184, 194, 255),
@@ -366,18 +351,18 @@ namespace trading::ui
 
         void DrawTimeAxis(
             ImDrawList* draw,
-            const TimeRange& timeRange,
+            const render::OrdinalTimeAxis& axis,
+            const AxisRange& range,
             const ImVec2& plotOrigin,
             float plotWidth,
             float plotHeight)
         {
             for (int index = 0; index <= 4; ++index) {
                 const double ratio = static_cast<double>(index) / 4.0;
+                const render::AxisCoordinate coordinate =
+                    range.minimum + range.Span() * ratio;
                 const EpochMillis timestamp =
-                    timeRange.minimum +
-                    static_cast<EpochMillis>(std::llround(
-                        static_cast<double>(
-                            timeRange.maximum - timeRange.minimum) * ratio));
+                    axis.TimestampForCoordinate(coordinate);
                 const float x =
                     plotOrigin.x + plotWidth * static_cast<float>(ratio);
                 const std::string label = FormatTimestamp(timestamp);
@@ -395,9 +380,10 @@ namespace trading::ui
             const ImVec2& plotOrigin,
             float plotWidth,
             float plotHeight,
-            const TimeRange& dataRange,
-            EpochMillis minimumSpanMs,
-            ValueRange values,
+            const render::OrdinalTimeAxis& axis,
+            const AxisRange& dataRange,
+            double defaultVisibleSpan,
+            const ValueRange& values,
             RenderSurfaceState& state)
         {
             if (!ImGui::IsItemHovered()) return;
@@ -416,7 +402,7 @@ namespace trading::ui
                     dataRange.maximum,
                     mouseRatio,
                     static_cast<double>(io.MouseWheel),
-                    minimumSpanMs);
+                    MinimumVisibleSpan);
                 state.dirty = true;
             }
 
@@ -434,15 +420,17 @@ namespace trading::ui
                 render::ResetViewport(
                     state.viewport,
                     dataRange.minimum,
-                    dataRange.maximum);
+                    dataRange.maximum,
+                    defaultVisibleSpan);
                 state.dirty = true;
             }
 
+            const render::AxisCoordinate crosshairCoordinate =
+                state.viewport.visibleStart +
+                state.viewport.Span() * mouseRatio;
             state.crosshairVisible = true;
             state.crosshairTimestampMs =
-                state.viewport.visibleStartMs +
-                static_cast<EpochMillis>(std::llround(
-                    static_cast<double>(state.viewport.SpanMs()) * mouseRatio));
+                axis.TimestampForCoordinate(crosshairCoordinate);
             state.crosshairValue = UnmapY(
                 io.MousePos.y,
                 values,
@@ -452,9 +440,10 @@ namespace trading::ui
 
         void DrawPane(
             const render::Pane& pane,
-            const TimeRange& dataRange,
-            const TimeRange& visibleRange,
-            EpochMillis minimumSpanMs,
+            const render::OrdinalTimeAxis& axis,
+            const AxisRange& dataRange,
+            const AxisRange& visibleRange,
+            double defaultVisibleSpan,
             bool drawTimeAxis,
             ImVec2 size,
             RenderSurfaceState& state,
@@ -462,16 +451,10 @@ namespace trading::ui
         {
             if (size.x < 130.0f || size.y < 50.0f) return;
 
-            const float timeAxisHeight =
-                drawTimeAxis ? TimeAxisHeight : 0.0f;
-            const float plotWidth = (std::max)(
-                40.0f,
-                size.x - ValueAxisWidth);
-            const float plotHeight = (std::max)(
-                30.0f,
-                size.y - timeAxisHeight);
-            const ValueRange values =
-                PaneValueRange(pane, visibleRange);
+            const float timeAxisHeight = drawTimeAxis ? TimeAxisHeight : 0.0f;
+            const float plotWidth = (std::max)(40.0f, size.x - ValueAxisWidth);
+            const float plotHeight = (std::max)(30.0f, size.y - timeAxisHeight);
+            const ValueRange values = PaneValueRange(pane, axis, visibleRange);
 
             ImGui::PushID(pane.id.c_str());
             ImGui::InvisibleButton("##surface", size);
@@ -505,15 +488,15 @@ namespace trading::ui
                 plotOrigin,
                 plotWidth,
                 plotHeight,
+                axis,
                 dataRange,
-                minimumSpanMs,
+                defaultVisibleSpan,
                 values,
                 state);
 
             for (int grid = 1; grid < 5; ++grid) {
                 const float y =
-                    plotOrigin.y +
-                    plotHeight * static_cast<float>(grid) / 5.0f;
+                    plotOrigin.y + plotHeight * static_cast<float>(grid) / 5.0f;
                 draw->AddLine(
                     ImVec2(plotOrigin.x, y),
                     ImVec2(plotEnd.x, y),
@@ -521,9 +504,10 @@ namespace trading::ui
             }
 
             for (const render::TimeBoundary& boundary : state.timeBoundaries) {
-                if (!InTimeRange(boundary.timestampMs, visibleRange)) continue;
+                if (!InAxisRange(boundary.timestampMs, axis, visibleRange)) continue;
                 const float x = MapX(
                     boundary.timestampMs,
+                    axis,
                     visibleRange,
                     plotOrigin.x,
                     plotWidth);
@@ -536,9 +520,8 @@ namespace trading::ui
                         ? IM_COL32(145, 150, 172, 190)
                         : IM_COL32(105, 110, 126, 135),
                     calendarDate ? 1.5f : 1.0f);
-
                 if (drawTimeAxis) {
-                    std::string label = calendarDate
+                    const std::string label = calendarDate
                         ? FormatTimestamp(boundary.timestampMs).substr(0, 5)
                         : std::string("gap");
                     draw->AddText(
@@ -554,7 +537,7 @@ namespace trading::ui
             for (const render::CandleSeries& series : pane.candles) {
                 if (!series.visible) continue;
                 for (const Bar& bar : series.bars) {
-                    if (InTimeRange(bar.closeTimestampMs, visibleRange)) {
+                    if (InAxisRange(bar.closeTimestampMs, axis, visibleRange)) {
                         ++visibleCandleCount;
                     }
                 }
@@ -572,9 +555,10 @@ namespace trading::ui
             for (const render::HistogramSeries& series : pane.histograms) {
                 if (!series.visible) continue;
                 for (const render::HistogramPoint& point : series.points) {
-                    if (!InTimeRange(point.timestampMs, visibleRange)) continue;
+                    if (!InAxisRange(point.timestampMs, axis, visibleRange)) continue;
                     const float x = MapX(
                         point.timestampMs,
+                        axis,
                         visibleRange,
                         plotOrigin.x,
                         plotWidth);
@@ -605,9 +589,10 @@ namespace trading::ui
             for (const render::CandleSeries& series : pane.candles) {
                 if (!series.visible) continue;
                 for (const Bar& bar : series.bars) {
-                    if (!InTimeRange(bar.closeTimestampMs, visibleRange)) continue;
+                    if (!InAxisRange(bar.closeTimestampMs, axis, visibleRange)) continue;
                     const float x = MapX(
                         bar.closeTimestampMs,
+                        axis,
                         visibleRange,
                         plotOrigin.x,
                         plotWidth);
@@ -653,10 +638,11 @@ namespace trading::ui
                 bool hasPrevious = false;
                 ImVec2 previous;
                 for (const render::LinePoint& point : series.points) {
-                    if (!InTimeRange(point.timestampMs, visibleRange)) continue;
+                    if (!InAxisRange(point.timestampMs, axis, visibleRange)) continue;
                     const ImVec2 current(
                         MapX(
                             point.timestampMs,
+                            axis,
                             visibleRange,
                             plotOrigin.x,
                             plotWidth),
@@ -694,10 +680,11 @@ namespace trading::ui
             for (const render::MarkerSeries& series : pane.markers) {
                 if (!series.visible) continue;
                 for (const render::MarkerPoint& marker : series.points) {
-                    if (!InTimeRange(marker.timestampMs, visibleRange)) continue;
+                    if (!InAxisRange(marker.timestampMs, axis, visibleRange)) continue;
                     const ImVec2 point(
                         MapX(
                             marker.timestampMs,
+                            axis,
                             visibleRange,
                             plotOrigin.x,
                             plotWidth),
@@ -706,16 +693,13 @@ namespace trading::ui
                             values,
                             plotOrigin.y,
                             plotHeight));
-                    draw->AddCircleFilled(
-                        point,
-                        4.0f,
-                        ToImColor(marker.color));
+                    draw->AddCircleFilled(point, 4.0f, ToImColor(marker.color));
                 }
             }
 
             for (const render::TextAnnotation& annotation : pane.annotations) {
                 if (!annotation.visible ||
-                    !InTimeRange(annotation.timestampMs, visibleRange))
+                    !InAxisRange(annotation.timestampMs, axis, visibleRange))
                 {
                     continue;
                 }
@@ -723,6 +707,7 @@ namespace trading::ui
                     ImVec2(
                         MapX(
                             annotation.timestampMs,
+                            axis,
                             visibleRange,
                             plotOrigin.x,
                             plotWidth),
@@ -737,7 +722,10 @@ namespace trading::ui
 
             PriceWon latestPrice = 0;
             EpochMillis latestTimestamp = 0;
-            if (LatestCandleClose(pane, latestPrice, latestTimestamp)) {
+            if (
+                LatestCandleClose(pane, latestPrice, latestTimestamp) &&
+                InAxisRange(latestTimestamp, axis, visibleRange))
+            {
                 const float currentY = MapY(
                     static_cast<double>(latestPrice),
                     values,
@@ -760,15 +748,11 @@ namespace trading::ui
                     label);
             }
 
-            DrawValueAxis(
-                draw,
-                values,
-                plotOrigin,
-                plotWidth,
-                plotHeight);
+            DrawValueAxis(draw, values, plotOrigin, plotWidth, plotHeight);
             if (drawTimeAxis) {
                 DrawTimeAxis(
                     draw,
+                    axis,
                     visibleRange,
                     plotOrigin,
                     plotWidth,
@@ -779,6 +763,7 @@ namespace trading::ui
                 const Bar* nearest = NearestVisibleBar(
                     pane,
                     state.crosshairTimestampMs,
+                    axis,
                     visibleRange);
                 if (nearest != nullptr) {
                     const float crossY = MapY(
@@ -818,25 +803,50 @@ namespace trading::ui
         ImVec2 size,
         RenderSurfaceState& surfaceState)
     {
-        const TimeRange dataRange = DocumentDataRange(document);
-        if (!dataRange.valid || document.panes.empty()) return;
+        if (document.panes.empty()) return;
 
-        const EpochMillis minimumSpanMs =
-            MinimumViewportSpan(document);
-        const std::uint64_t boundaryStructureRevision =
+        const std::uint64_t structureRevision =
             document.structureRevision != 0
                 ? document.structureRevision
                 : document.revision;
+        if (surfaceState.timeAxisRevision != structureRevision) {
+            std::vector<EpochMillis> timestamps =
+                PrimaryCandleTimestamps(document);
+            if (timestamps.empty()) {
+                timestamps = CollectDocumentTimestamps(document);
+            }
+            std::string axisError;
+            if (!surfaceState.timeAxis.Reset(timestamps, axisError)) {
+                surfaceState.timeAxis.Clear();
+                surfaceState.viewport = {};
+                return;
+            }
+            surfaceState.timeAxisRevision = structureRevision;
+        }
+        if (surfaceState.timeAxis.Empty()) return;
+
+        const std::uint64_t boundaryStructureRevision = structureRevision;
         if (surfaceState.boundaryRevision != boundaryStructureRevision) {
             surfaceState.timeBoundaries = render::FindTimeBoundaries(
-                PrimaryCandleTimestamps(document));
+                surfaceState.timeAxis.Timestamps());
             surfaceState.boundaryRevision = boundaryStructureRevision;
         }
+
+        AxisRange dataRange;
+        dataRange.minimum = surfaceState.timeAxis.Minimum();
+        dataRange.maximum = surfaceState.timeAxis.Maximum();
+        dataRange.valid = dataRange.maximum > dataRange.minimum;
+        if (!dataRange.valid) return;
+
+        surfaceState.defaultVisibleSpan = DefaultVisibleSpan(
+            size.x,
+            surfaceState.timeAxis.Size());
         if (!surfaceState.viewport.initialized) {
             render::ResetViewport(
                 surfaceState.viewport,
                 dataRange.minimum,
-                dataRange.maximum);
+                dataRange.maximum,
+                surfaceState.defaultVisibleSpan);
         }
         else if (surfaceState.renderedRevision != document.revision) {
             render::FollowLatest(
@@ -848,13 +858,12 @@ namespace trading::ui
             surfaceState.viewport,
             dataRange.minimum,
             dataRange.maximum,
-            minimumSpanMs);
+            MinimumVisibleSpan);
 
-        TimeRange visibleRange;
-        visibleRange.minimum = surfaceState.viewport.visibleStartMs;
-        visibleRange.maximum = surfaceState.viewport.visibleEndMs;
-        visibleRange.valid =
-            visibleRange.maximum > visibleRange.minimum;
+        AxisRange visibleRange;
+        visibleRange.minimum = surfaceState.viewport.visibleStart;
+        visibleRange.maximum = surfaceState.viewport.visibleEnd;
+        visibleRange.valid = visibleRange.maximum > visibleRange.minimum;
         if (!visibleRange.valid) return;
 
         surfaceState.crosshairVisible = false;
@@ -869,8 +878,7 @@ namespace trading::ui
             static_cast<float>((std::max)(
                 static_cast<std::size_t>(0),
                 document.panes.size() - 1));
-        const float availableHeight =
-            (std::max)(0.0f, size.y - spacing);
+        const float availableHeight = (std::max)(0.0f, size.y - spacing);
         std::vector<PaneGeometry> paneGeometries;
         paneGeometries.reserve(document.panes.size());
 
@@ -882,9 +890,10 @@ namespace trading::ui
                 totalWeight;
             DrawPane(
                 pane,
+                surfaceState.timeAxis,
                 dataRange,
                 visibleRange,
-                minimumSpanMs,
+                surfaceState.defaultVisibleSpan,
                 index + 1 == document.panes.size(),
                 ImVec2(size.x, paneHeight),
                 surfaceState,
@@ -896,7 +905,10 @@ namespace trading::ui
 
         if (
             surfaceState.crosshairVisible &&
-            InTimeRange(surfaceState.crosshairTimestampMs, visibleRange))
+            InAxisRange(
+                surfaceState.crosshairTimestampMs,
+                surfaceState.timeAxis,
+                visibleRange))
         {
             ImDrawList* draw = ImGui::GetWindowDrawList();
             for (const PaneGeometry& geometry : paneGeometries) {
@@ -904,6 +916,7 @@ namespace trading::ui
                 const float width = geometry.plotEnd.x - geometry.plotOrigin.x;
                 const float crossX = MapX(
                     surfaceState.crosshairTimestampMs,
+                    surfaceState.timeAxis,
                     visibleRange,
                     geometry.plotOrigin.x,
                     width);

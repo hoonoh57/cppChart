@@ -1,0 +1,83 @@
+name: Fix additive 0B subscription
+
+on:
+  push:
+    branches:
+      - p2/kiwoom-mock-gateway
+    paths:
+      - scripts/fix_0b_keep_existing.py
+      - .github/workflows/fix-0b-keep-existing.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-additive-0b-subscription
+  cancel-in-progress: false
+
+jobs:
+  patch-build-test-commit:
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout development branch
+        uses: actions/checkout@v4
+        with:
+          ref: p2/kiwoom-mock-gateway
+          fetch-depth: 0
+
+      - name: Make 0B subscription additive
+        shell: pwsh
+        run: python .\scripts\fix_0b_keep_existing.py
+
+      - name: Verify source contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runner = Get-Content .\platform\kiwoom_runtime_runner.cpp -Raw
+          $tests = Get-Content .\tests\kiwoom_runtime_runner_tests.cpp -Raw
+          if (-not $runner.Contains("`"2`",`r`n            true,")) {
+            throw '0B registration does not preserve existing subscriptions'
+          }
+          if (-not $tests.Contains('message.find("\"refresh\":\"1\"")')) {
+            throw '0B additive registration regression assertion is missing'
+          }
+
+      - name: Locate MSVC toolchain
+        id: msvc
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installation) { throw 'Visual Studio C++ toolchain not found' }
+          "devcmd=$(Join-Path $installation 'Common7\Tools\VsDevCmd.bat')" >> $env:GITHUB_OUTPUT
+
+      - name: Build shell
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $devCmd = '${{ steps.msvc.outputs.devcmd }}'
+          & cmd.exe /d /s /c "`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && call build.bat"
+          if ($LASTEXITCODE -ne 0) { throw "build failed, exit code=$LASTEXITCODE" }
+
+      - name: Run all headless tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $devCmd = '${{ steps.msvc.outputs.devcmd }}'
+          & cmd.exe /d /s /c "`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && call tests\run_all.bat"
+          if ($LASTEXITCODE -ne 0) { throw "tests failed, exit code=$LASTEXITCODE" }
+
+      - name: Commit verified correction
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add platform/kiwoom_runtime_runner.cpp tests/kiwoom_runtime_runner_tests.cpp
+          if (-not (git diff --cached --quiet)) {
+            git commit -m 'Preserve account streams when adding 0B subscription'
+            git push origin HEAD:p2/kiwoom-mock-gateway
+          }

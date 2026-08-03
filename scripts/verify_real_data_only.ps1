@@ -8,7 +8,9 @@ $productionFiles = @(
     '.\core\kiwoom_runtime_engine.h',
     '.\core\kiwoom_runtime_engine.cpp',
     '.\core\kiwoom_market_data.h',
-    '.\core\kiwoom_market_data.cpp'
+    '.\core\kiwoom_market_data.cpp',
+    '.\app\market_data_module.h',
+    '.\app\market_data_module.cpp'
 )
 
 $forbiddenMarkers = @(
@@ -33,19 +35,30 @@ foreach ($file in $productionFiles) {
 }
 
 $shell = Get-Content '.\shell_main.cpp' -Raw
-$requiredMarkers = @(
+$marketModule = Get-Content '.\app\market_data_module.cpp' -Raw
+
+$shellRequired = @(
     'CPPCHART_REAL_DATA_ONLY',
-    'MarketDataState::Error',
-    '합성 데이터는 제거되었으며 오류를 숨기지 않습니다',
     'CanSubmitEntryOrders',
     'CanSubmitLiquidationOrders',
     'RequestStockMinuteBars',
-    'ka10080'
+    'ka10080',
+    'MarketDataModule g_marketDataModule'
 )
-
-foreach ($marker in $requiredMarkers) {
+foreach ($marker in $shellRequired) {
     if (-not $shell.Contains($marker)) {
-        throw "Required real-data-only marker '$marker' is missing"
+        throw "Required real-data-only shell marker '$marker' is missing"
+    }
+}
+
+$moduleRequired = @(
+    'MarketDataState::Error',
+    '합성 데이터는 제거되었으며 오류를 숨기지 않습니다',
+    'MergeStockTradeIntoMinuteBars'
+)
+foreach ($marker in $moduleRequired) {
+    if (-not $marketModule.Contains($marker)) {
+        throw "Required real-data-only market module marker '$marker' is missing"
     }
 }
 

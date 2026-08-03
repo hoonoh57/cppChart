@@ -1,5 +1,6 @@
 ﻿#include "chart_workspace_module.h"
 
+#include "indicator_render_contributor.h"
 #include "../render/market_chart_builder.h"
 
 #include <utility>
@@ -41,6 +42,7 @@ namespace trading::app
             state_ = ChartWorkspaceState::Empty;
             sourceRevision_ = 0;
             completedRevision_ = 0;
+            indicatorRevision_ = 0;
             documentRevision_ = 0;
             sourceBarCount_ = 0;
             error_.clear();
@@ -63,6 +65,23 @@ namespace trading::app
         const ChartMarketSource& source,
         std::string& error)
     {
+        return UpdateMarketChart(
+            workspaceId,
+            title,
+            seriesId,
+            source,
+            nullptr,
+            error);
+    }
+
+    bool ChartWorkspaceModule::UpdateMarketChart(
+        const std::string& workspaceId,
+        const std::string& title,
+        const std::string& seriesId,
+        const ChartMarketSource& source,
+        const IndicatorModuleSnapshot* indicatorSnapshot,
+        std::string& error)
+    {
         if (workspaceId.empty()) {
             error = "chart workspace id is empty";
             return false;
@@ -80,6 +99,10 @@ namespace trading::app
             return false;
         }
 
+        const std::uint64_t nextIndicatorRevision =
+            indicatorSnapshot != nullptr
+                ? indicatorSnapshot->calculationRevision
+                : 0;
         std::uint64_t nextDocumentRevision = 0;
         std::shared_ptr<const std::vector<render::HistogramPoint>>
             completedVolume;
@@ -95,6 +118,7 @@ namespace trading::app
             if (
                 state_ == ChartWorkspaceState::Ready &&
                 sourceRevision_ == source.revision &&
+                indicatorRevision_ == nextIndicatorRevision &&
                 document_ != nullptr)
             {
                 error.clear();
@@ -129,6 +153,23 @@ namespace trading::app
                 renderSource,
                 nextDocumentRevision);
 
+        if (indicatorSnapshot != nullptr) {
+            IndicatorRenderContributionStats stats;
+            std::string contributionError;
+            if (!AppendIndicatorRenderContributions(
+                    *indicatorSnapshot,
+                    candidate,
+                    stats,
+                    contributionError))
+            {
+                SetError(
+                    "indicator render contribution failed: " +
+                    contributionError);
+                error = contributionError;
+                return false;
+            }
+        }
+
         std::string validationError;
         if (!render::ValidateRenderDocument(candidate, validationError)) {
             SetError("render document validation failed: " + validationError);
@@ -149,6 +190,7 @@ namespace trading::app
             if (
                 state_ == ChartWorkspaceState::Ready &&
                 sourceRevision_ == source.revision &&
+                indicatorRevision_ == nextIndicatorRevision &&
                 document_ != nullptr)
             {
                 error.clear();
@@ -157,6 +199,7 @@ namespace trading::app
 
             sourceRevision_ = source.revision;
             completedRevision_ = source.completedRevision;
+            indicatorRevision_ = nextIndicatorRevision;
             documentRevision_ = immutable->revision;
             sourceBarCount_ = source.barCount;
             completedVolume_ = std::move(completedVolume);
@@ -184,6 +227,7 @@ namespace trading::app
         result.level = level_;
         result.sourceRevision = sourceRevision_;
         result.completedRevision = completedRevision_;
+        result.indicatorRevision = indicatorRevision_;
         result.documentRevision = documentRevision_;
         result.sourceBarCount = sourceBarCount_;
         result.error = error_;
@@ -199,13 +243,21 @@ namespace trading::app
     bool ChartWorkspaceModule::NeedsUpdate(
         std::uint64_t sourceRevision) const noexcept
     {
+        return NeedsUpdate(sourceRevision, 0);
+    }
+
+    bool ChartWorkspaceModule::NeedsUpdate(
+        std::uint64_t sourceRevision,
+        std::uint64_t indicatorRevision) const noexcept
+    {
         std::lock_guard<std::mutex> lock(mutex_);
         return
             IsVisibleLevel(level_) &&
             (
                 document_ == nullptr ||
                 state_ != ChartWorkspaceState::Ready ||
-                sourceRevision_ != sourceRevision);
+                sourceRevision_ != sourceRevision ||
+                indicatorRevision_ != indicatorRevision);
     }
 
     const char* ChartWorkspaceModule::StateName(

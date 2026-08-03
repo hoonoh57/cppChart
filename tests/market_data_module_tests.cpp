@@ -62,6 +62,16 @@ namespace
         return page;
     }
 
+    trading::StockTradeTick MakeSameMinuteTick()
+    {
+        trading::StockTradeTick tick;
+        tick.code = "000660";
+        tick.priceWon = 158700;
+        tick.tradeVolume = 5;
+        tick.tradeTimeHhmmss = 90130;
+        return tick;
+    }
+
     void TestRequestPageAndVisibleRange()
     {
         trading::app::MarketDataModule module;
@@ -107,7 +117,7 @@ namespace
               "latest quote mismatch");
     }
 
-    void TestRealTimeMergeAndFeatureLevel()
+    void TestRealTimeMergeAndFeatureLevels()
     {
         trading::app::MarketDataModule module;
         std::string error;
@@ -117,12 +127,7 @@ namespace
               "minute bars were not applied");
 
         module.SetStockTradeSubscriptionRequested(true);
-
-        trading::StockTradeTick sameMinute;
-        sameMinute.code = "000660";
-        sameMinute.priceWon = 158700;
-        sameMinute.tradeVolume = 5;
-        sameMinute.tradeTimeHhmmss = 90130;
+        const trading::StockTradeTick sameMinute = MakeSameMinuteTick();
 
         const trading::app::MarketDataApplyResult updated =
             module.ApplyStockTradeTick(sameMinute);
@@ -146,6 +151,38 @@ namespace
               "new live bar tick count mismatch");
 
         Check(module.SetLevel(
+                  trading::app::FeatureLevel::Standby,
+                  error),
+              "market-data Standby transition failed");
+        const trading::app::MarketDataSnapshot standby = module.Snapshot();
+        Check(standby.barCount == 3,
+              "Standby must retain cached bars");
+        Check(!standby.stockTradeSubscriptionRequested,
+              "Standby must clear subscription intent");
+        Check(module.CopyVisibleBars(10).empty(),
+              "Standby must stop renderer bar copies");
+        Check(!module.BeginRequest("005930", 1, error),
+              "Standby must reject new REST requests");
+        Check(module.ApplyStockTradeTick(nextMinute).stale,
+              "Standby must ignore real-time tick calculation");
+        Check(module.Snapshot().stockTradeTickCount == 2,
+              "Standby tick must not alter tick metrics");
+
+        std::string quoteCode;
+        trading::PriceWon quote = 0;
+        Check(!module.TryGetLatestQuote(quoteCode, quote),
+              "Standby must not expose an entry quote");
+
+        Check(module.SetLevel(
+                  trading::app::FeatureLevel::Visible,
+                  error),
+              "market-data Visible transition failed");
+        Check(module.CopyVisibleBars(10).size() == 3,
+              "Visible must restore renderer access to retained bars");
+        Check(module.TryGetLatestQuote(quoteCode, quote),
+              "Visible must restore the latest quote");
+
+        Check(module.SetLevel(
                   trading::app::FeatureLevel::Off,
                   error),
               "market-data Off transition failed");
@@ -154,6 +191,8 @@ namespace
               "Off market-data must be disconnected");
         Check(off.barCount == 0,
               "Off market-data must release bars");
+        Check(off.retainedBytes == 0,
+              "Off market-data must release retained capacity");
         Check(!module.BeginRequest("000660", 1, error),
               "Off market-data must reject requests");
     }
@@ -192,7 +231,7 @@ namespace
 int main()
 {
     TestRequestPageAndVisibleRange();
-    TestRealTimeMergeAndFeatureLevel();
+    TestRealTimeMergeAndFeatureLevels();
     TestStalePageAndTick();
     std::puts("[PASS] market_data_module_tests");
     return 0;

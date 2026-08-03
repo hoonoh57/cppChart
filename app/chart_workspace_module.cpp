@@ -75,6 +75,7 @@ namespace trading::app
             return false;
         }
 
+        std::uint64_t nextDocumentRevision = 0;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (!IsVisibleLevel(level_)) {
@@ -93,10 +94,9 @@ namespace trading::app
                 error.clear();
                 return true;
             }
+            nextDocumentRevision = documentRevision_ + 1;
         }
 
-        const std::uint64_t nextDocumentRevision =
-            documentRevision_ + 1;
         render::RenderDocument candidate =
             render::BuildMarketChartDocument(
                 workspaceId,
@@ -121,6 +121,15 @@ namespace trading::app
             if (!IsVisibleLevel(level_)) {
                 error = "chart workspace level changed while building";
                 return false;
+            }
+            if (
+                state_ == ChartWorkspaceState::Ready &&
+                sourceRevision_ == sourceRevision &&
+                visibleBarLimit_ == visibleBarLimit &&
+                document_ != nullptr)
+            {
+                error.clear();
+                return true;
             }
             sourceRevision_ = sourceRevision;
             documentRevision_ = immutable->revision;

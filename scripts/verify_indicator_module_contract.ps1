@@ -14,6 +14,7 @@ $requiredFiles = @(
     'tests\indicator_module_tests.cpp',
     'tests\indicator_module_revision_tests.cpp',
     'tests\indicator_render_adapter_tests.cpp',
+    'tests\indicator_reference_adapter_tests.cpp',
     'tests\chart_workspace_indicator_tests.cpp'
 )
 foreach ($relative in $requiredFiles) {
@@ -56,8 +57,10 @@ $adapterHeader = Get-Content (
     Join-Path $repoRoot 'app\indicator_render_adapter.h') -Raw
 foreach ($marker in @(
     'struct IndicatorOutputBinding final',
+    'struct IndicatorReferenceBinding final',
     'IndicatorRenderKind kind',
     'std::size_t outputIndex',
+    'std::vector<IndicatorReferenceBinding> references',
     'class IndicatorRenderAdapter final',
     'render::RenderDocument& document')) {
     if (-not $adapterHeader.Contains($marker)) {
@@ -76,6 +79,8 @@ foreach ($marker in @(
     'histogram.points.SetShared(',
     'RebuildLineCache(',
     'RebuildHistogramCache(',
+    'for (const IndicatorReferenceBinding& reference',
+    'pane->referenceLines.push_back(',
     'render::ValidateRenderDocument(document, validationError)')) {
     if (-not $adapter.Contains($marker)) {
         throw "Cached generic indicator render adapter is missing: $marker"
@@ -160,6 +165,18 @@ foreach ($marker in @(
     }
 }
 
+$referenceTests = Get-Content (
+    Join-Path $repoRoot 'tests\indicator_reference_adapter_tests.cpp') -Raw
+foreach ($marker in @(
+    'line and reference IDs must share one uniqueness domain',
+    'generic indicator reference lines must apply',
+    'ADX 20 and 25 reference lines must be published',
+    'reference-line contribution must advance structure revision')) {
+    if (-not $referenceTests.Contains($marker)) {
+        throw "Indicator reference-line regression coverage is missing: $marker"
+    }
+}
+
 $workspaceTests = Get-Content (
     Join-Path $repoRoot 'tests\chart_workspace_indicator_tests.cpp') -Raw
 foreach ($marker in @(
@@ -178,6 +195,7 @@ foreach ($marker in @(
     'indicator_module_tests.exe',
     'indicator_module_revision_tests.exe',
     'indicator_render_adapter_tests.exe',
+    'indicator_reference_adapter_tests.exe',
     'chart_workspace_indicator_tests.exe',
     'app\indicator_module.cpp',
     'app\indicator_render_adapter.cpp',
@@ -187,4 +205,4 @@ foreach ($marker in @(
     }
 }
 
-Write-Host 'Indicator module cache, monotonic revision, generic render adapter, and chart workspace composition contracts passed.' -ForegroundColor Green
+Write-Host 'Indicator module cache, generic line/histogram/reference adapter, and chart workspace composition contracts passed.' -ForegroundColor Green

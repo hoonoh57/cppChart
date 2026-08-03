@@ -13,6 +13,12 @@ $requiredFiles = @(
     '.\core\indicator_engine.cpp',
     '.\core\sma_indicator.h',
     '.\core\sma_indicator.cpp',
+    '.\core\jma_indicator.h',
+    '.\core\jma_indicator.cpp',
+    '.\core\obv_indicator.h',
+    '.\core\obv_indicator.cpp',
+    '.\core\adx_indicator.h',
+    '.\core\adx_indicator.cpp',
     '.\render\chart_viewport.h',
     '.\render\chart_viewport.cpp',
     '.\render\time_axis.h',
@@ -28,7 +34,10 @@ $requiredFiles = @(
     '.\render\market_chart_builder.cpp',
     '.\ui\render_document_renderer.h',
     '.\ui\render_document_renderer.cpp',
-    '.\tests\indicator_engine_tests.cpp'
+    '.\tests\indicator_engine_tests.cpp',
+    '.\tests\jma_indicator_tests.cpp',
+    '.\tests\obv_indicator_tests.cpp',
+    '.\tests\adx_indicator_tests.cpp'
 )
 
 foreach ($file in $requiredFiles) {
@@ -191,16 +200,50 @@ foreach ($marker in $requiredIndicatorContractMarkers) {
     }
 }
 
-$smaIndicator = Get-Content '.\core\sma_indicator.cpp' -Raw
-$requiredSmaMarkers = @(
-    'RegisterSmaIndicator',
-    'bar.closeTimestampMs == state.latestTimestampMs',
-    'state.sum += close - state.window[state.latestIndex]',
-    'IndicatorFault::TimestampMovedBackward'
+$indicatorContracts = @(
+    @{
+        Path = '.\core\sma_indicator.cpp'
+        Name = 'SMA'
+        Markers = @(
+            'RegisterSmaIndicator',
+            'bar.closeTimestampMs == state.latestTimestampMs',
+            'state.sum += close - state.window[state.latestIndex]',
+            'IndicatorFault::TimestampMovedBackward')
+    },
+    @{
+        Path = '.\core\jma_indicator.cpp'
+        Name = 'JMA'
+        Markers = @(
+            'RegisterJmaIndicator',
+            'state.current = state.beforeLatest',
+            'StepJma(',
+            'std::nearbyint')
+    },
+    @{
+        Path = '.\core\obv_indicator.cpp'
+        Name = 'OBV'
+        Markers = @(
+            'RegisterObvIndicator',
+            'state.current = state.beforeLatest',
+            'bar.volume < 0',
+            'state.previousClose')
+    },
+    @{
+        Path = '.\core\adx_indicator.cpp'
+        Name = 'ADX'
+        Markers = @(
+            'RegisterAdxIndicator',
+            'state.current = state.beforeLatest',
+            'smoothedTrueRange',
+            'ConsumeDx(')
+    }
 )
-foreach ($marker in $requiredSmaMarkers) {
-    if (-not $smaIndicator.Contains($marker)) {
-        throw "Incremental SMA contract is missing: $marker"
+foreach ($contract in $indicatorContracts) {
+    $source = Get-Content $contract.Path -Raw
+    foreach ($marker in $contract.Markers) {
+        if (-not $source.Contains($marker)) {
+            throw "Incremental $($contract.Name) contract is missing: $marker"
+        }
     }
 }
 
@@ -216,14 +259,52 @@ foreach ($marker in $requiredIndicatorTestMarkers) {
     }
 }
 
+$specializedIndicatorTests = @(
+    @{
+        Path = '.\tests\jma_indicator_tests.cpp'
+        Markers = @(
+            'JMA legacy fixture mismatch',
+            'same-timestamp JMA update must replace the live tail',
+            'JMA batch/incremental value parity mismatch')
+    },
+    @{
+        Path = '.\tests\obv_indicator_tests.cpp'
+        Markers = @(
+            'OBV legacy fixture mismatch',
+            'same-timestamp OBV update must replace the live tail',
+            'OBV batch/incremental value parity mismatch')
+    },
+    @{
+        Path = '.\tests\adx_indicator_tests.cpp'
+        Markers = @(
+            'Wilder warm-up',
+            'same-timestamp ADX update must replace the live tail',
+            'ADX batch/incremental value parity mismatch')
+    }
+)
+foreach ($test in $specializedIndicatorTests) {
+    $source = Get-Content $test.Path -Raw
+    foreach ($marker in $test.Markers) {
+        if (-not $source.Contains($marker)) {
+            throw "Specialized indicator regression coverage is missing: $marker"
+        }
+    }
+}
+
 $runAll = Get-Content '.\tests\run_all.bat' -Raw
 foreach ($marker in @(
     'indicator_engine_tests.exe',
+    'jma_indicator_tests.exe',
+    'obv_indicator_tests.exe',
+    'adx_indicator_tests.exe',
     'core\indicator_engine.cpp',
-    'core\sma_indicator.cpp')) {
+    'core\sma_indicator.cpp',
+    'core\jma_indicator.cpp',
+    'core\obv_indicator.cpp',
+    'core\adx_indicator.cpp')) {
     if (-not $runAll.Contains($marker)) {
         throw "Indicator engine is not in the complete headless suite: $marker"
     }
 }
 
-Write-Host 'Major-feature modules, M6 chart contracts, and the M7 batch/incremental SMA foundation are verified.'
+Write-Host 'Major-feature modules, accepted M6 chart contracts, and the M7 SMA/JMA/OBV/ADX batch-incremental foundation are verified.'

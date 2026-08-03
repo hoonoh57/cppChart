@@ -1,157 +1,59 @@
-﻿@echo off
+@echo off
 setlocal
-cd /d %~dp0\..
+cd /d "%~dp0\.."
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\core_tests.cpp ^
-  core\command_bus.cpp ^
-  core\fault_policy.cpp ^
-  core\json_lite.cpp ^
-  core\parameter_store.cpp ^
-  core\trading_state.cpp ^
-  /Fe:core_tests.exe
-if errorlevel 1 exit /b 1
-core_tests.exe
+call :build_and_run core_tests.exe "tests\core_tests.cpp core\command_bus.cpp core\fault_policy.cpp core\json_lite.cpp core\parameter_store.cpp core\trading_state.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\feature_registry_tests.cpp ^
-  app\feature_registry.cpp ^
-  /Fe:feature_registry_tests.exe
-if errorlevel 1 exit /b 1
-feature_registry_tests.exe
+call :build_and_run indicator_engine_tests.exe "tests\indicator_engine_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\sma_indicator.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\render_document_tests.cpp ^
-  render\render_document.cpp ^
-  /Fe:render_document_tests.exe
-if errorlevel 1 exit /b 1
-render_document_tests.exe
+call :build_and_run feature_registry_tests.exe "tests\feature_registry_tests.cpp app\feature_registry.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\chart_viewport_tests.cpp ^
-  render\chart_viewport.cpp ^
-  /Fe:chart_viewport_tests.exe
-if errorlevel 1 exit /b 1
-chart_viewport_tests.exe
+call :build_and_run render_document_tests.exe "tests\render_document_tests.cpp render\render_document.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\value_grid_tests.cpp ^
-  render\value_grid.cpp ^
-  /Fe:value_grid_tests.exe
-if errorlevel 1 exit /b 1
-value_grid_tests.exe
+call :build_and_run chart_viewport_tests.exe "tests\chart_viewport_tests.cpp render\chart_viewport.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\series_geometry_tests.cpp ^
-  render\series_geometry.cpp ^
-  /Fe:series_geometry_tests.exe
-if errorlevel 1 exit /b 1
-series_geometry_tests.exe
+call :build_and_run value_grid_tests.exe "tests\value_grid_tests.cpp render\value_grid.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\cursor_label_layout_tests.cpp ^
-  /Fe:cursor_label_layout_tests.exe
-if errorlevel 1 exit /b 1
-cursor_label_layout_tests.exe
+call :build_and_run series_geometry_tests.exe "tests\series_geometry_tests.cpp render\series_geometry.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\time_axis_tests.cpp ^
-  render\time_axis.cpp ^
-  /Fe:time_axis_tests.exe
-if errorlevel 1 exit /b 1
-time_axis_tests.exe
+call :build_and_run cursor_label_layout_tests.exe "tests\cursor_label_layout_tests.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\time_boundaries_tests.cpp ^
-  render\time_boundaries.cpp ^
-  /Fe:time_boundaries_tests.exe
-if errorlevel 1 exit /b 1
-time_boundaries_tests.exe
+call :build_and_run time_axis_tests.exe "tests\time_axis_tests.cpp render\time_axis.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\market_data_module_tests.cpp ^
-  core\json_lite.cpp ^
-  core\kiwoom_market_data.cpp ^
-  app\market_data_module.cpp ^
-  /Fe:market_data_module_tests.exe
-if errorlevel 1 exit /b 1
-market_data_module_tests.exe
+call :build_and_run time_boundaries_tests.exe "tests\time_boundaries_tests.cpp render\time_boundaries.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\chart_workspace_module_tests.cpp ^
-  render\render_document.cpp ^
-  render\market_chart_builder.cpp ^
-  app\chart_workspace_module.cpp ^
-  /Fe:chart_workspace_module_tests.exe
-if errorlevel 1 exit /b 1
-chart_workspace_module_tests.exe
+call :build_and_run market_data_module_tests.exe "tests\market_data_module_tests.cpp core\json_lite.cpp core\kiwoom_market_data.cpp app\market_data_module.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\kiwoom_realtime_subscription_tests.cpp ^
-  core\json_lite.cpp ^
-  core\kiwoom_realtime_subscription.cpp ^
-  /Fe:kiwoom_realtime_subscription_tests.exe
-if errorlevel 1 exit /b 1
-kiwoom_realtime_subscription_tests.exe
+call :build_and_run chart_workspace_module_tests.exe "tests\chart_workspace_module_tests.cpp render\render_document.cpp render\market_chart_builder.cpp app\chart_workspace_module.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\kiwoom_protocol_tests.cpp ^
-  core\json_lite.cpp ^
-  core\kiwoom_protocol.cpp ^
-  /Fe:kiwoom_protocol_tests.exe
-if errorlevel 1 exit /b 1
-kiwoom_protocol_tests.exe
+call :build_and_run kiwoom_realtime_subscription_tests.exe "tests\kiwoom_realtime_subscription_tests.cpp core\json_lite.cpp core\kiwoom_realtime_subscription.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\kiwoom_market_data_tests.cpp ^
-  core\json_lite.cpp ^
-  core\kiwoom_market_data.cpp ^
-  /Fe:kiwoom_market_data_tests.exe
-if errorlevel 1 exit /b 1
-kiwoom_market_data_tests.exe
+call :build_and_run kiwoom_protocol_tests.exe "tests\kiwoom_protocol_tests.cpp core\json_lite.cpp core\kiwoom_protocol.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\runtime_config_tests.cpp ^
-  core\runtime_config.cpp ^
-  /Fe:runtime_config_tests.exe
-if errorlevel 1 exit /b 1
-runtime_config_tests.exe
+call :build_and_run kiwoom_market_data_tests.exe "tests\kiwoom_market_data_tests.cpp core\json_lite.cpp core\kiwoom_market_data.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\kiwoom_session_tests.cpp ^
-  core\json_lite.cpp ^
-  core\kiwoom_protocol.cpp ^
-  core\runtime_config.cpp ^
-  core\kiwoom_session.cpp ^
-  /Fe:kiwoom_session_tests.exe
-if errorlevel 1 exit /b 1
-kiwoom_session_tests.exe
+call :build_and_run runtime_config_tests.exe "tests\runtime_config_tests.cpp core\runtime_config.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\order_coordinator_tests.cpp ^
-  core\json_lite.cpp ^
-  core\kiwoom_protocol.cpp ^
-  core\trading_state.cpp ^
-  core\order_coordinator.cpp ^
-  /Fe:order_coordinator_tests.exe
+call :build_and_run kiwoom_session_tests.exe "tests\kiwoom_session_tests.cpp core\json_lite.cpp core\kiwoom_protocol.cpp core\runtime_config.cpp core\kiwoom_session.cpp"
 if errorlevel 1 exit /b 1
-order_coordinator_tests.exe
+
+call :build_and_run order_coordinator_tests.exe "tests\order_coordinator_tests.cpp core\json_lite.cpp core\kiwoom_protocol.cpp core\trading_state.cpp core\order_coordinator.cpp"
 if errorlevel 1 exit /b 1
 
 cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc /D_WIN32_WINNT=0x0602 ^
@@ -165,89 +67,32 @@ if errorlevel 1 exit /b 1
 winhttp_transport_tests.exe
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\kiwoom_events_tests.cpp ^
-  core\kiwoom_events.cpp ^
-  /Fe:kiwoom_events_tests.exe
-if errorlevel 1 exit /b 1
-kiwoom_events_tests.exe
+call :build_and_run kiwoom_events_tests.exe "tests\kiwoom_events_tests.cpp core\kiwoom_events.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\kiwoom_reconciliation_tests.cpp ^
-  core\json_lite.cpp ^
-  core\kiwoom_reconciliation.cpp ^
-  /Fe:kiwoom_reconciliation_tests.exe
-if errorlevel 1 exit /b 1
-kiwoom_reconciliation_tests.exe
+call :build_and_run kiwoom_reconciliation_tests.exe "tests\kiwoom_reconciliation_tests.cpp core\json_lite.cpp core\kiwoom_reconciliation.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\kiwoom_gateway_core_tests.cpp ^
-  core\json_lite.cpp ^
-  core\kiwoom_protocol.cpp ^
-  core\trading_state.cpp ^
-  core\order_coordinator.cpp ^
-  core\kiwoom_events.cpp ^
-  core\kiwoom_gateway_core.cpp ^
-  /Fe:kiwoom_gateway_core_tests.exe
-if errorlevel 1 exit /b 1
-kiwoom_gateway_core_tests.exe
+call :build_and_run kiwoom_gateway_core_tests.exe "tests\kiwoom_gateway_core_tests.cpp core\json_lite.cpp core\kiwoom_protocol.cpp core\trading_state.cpp core\order_coordinator.cpp core\kiwoom_events.cpp core\kiwoom_gateway_core.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\safe_liquidation_tests.cpp ^
-  core\json_lite.cpp ^
-  core\kiwoom_protocol.cpp ^
-  core\trading_state.cpp ^
-  core\order_coordinator.cpp ^
-  core\kiwoom_reconciliation.cpp ^
-  core\safe_liquidation.cpp ^
-  /Fe:safe_liquidation_tests.exe
-if errorlevel 1 exit /b 1
-safe_liquidation_tests.exe
+call :build_and_run safe_liquidation_tests.exe "tests\safe_liquidation_tests.cpp core\json_lite.cpp core\kiwoom_protocol.cpp core\trading_state.cpp core\order_coordinator.cpp core\kiwoom_reconciliation.cpp core\safe_liquidation.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\kiwoom_runtime_engine_tests.cpp ^
-  core\json_lite.cpp ^
-  core\kiwoom_protocol.cpp ^
-  core\kiwoom_market_data.cpp ^
-  core\runtime_config.cpp ^
-  core\kiwoom_session.cpp ^
-  core\trading_state.cpp ^
-  core\order_coordinator.cpp ^
-  core\kiwoom_events.cpp ^
-  core\kiwoom_gateway_core.cpp ^
-  core\kiwoom_reconciliation.cpp ^
-  core\safe_liquidation.cpp ^
-  core\kiwoom_runtime_engine.cpp ^
-  /Fe:kiwoom_runtime_engine_tests.exe
-if errorlevel 1 exit /b 1
-kiwoom_runtime_engine_tests.exe
+call :build_and_run kiwoom_runtime_engine_tests.exe "tests\kiwoom_runtime_engine_tests.cpp core\json_lite.cpp core\kiwoom_protocol.cpp core\kiwoom_market_data.cpp core\runtime_config.cpp core\kiwoom_session.cpp core\trading_state.cpp core\order_coordinator.cpp core\kiwoom_events.cpp core\kiwoom_gateway_core.cpp core\kiwoom_reconciliation.cpp core\safe_liquidation.cpp core\kiwoom_runtime_engine.cpp"
 if errorlevel 1 exit /b 1
 
-cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
-  tests\kiwoom_runtime_runner_tests.cpp ^
-  core\json_lite.cpp ^
-  core\kiwoom_protocol.cpp ^
-  core\kiwoom_market_data.cpp ^
-  core\runtime_config.cpp ^
-  core\kiwoom_session.cpp ^
-  core\trading_state.cpp ^
-  core\order_coordinator.cpp ^
-  core\kiwoom_events.cpp ^
-  core\kiwoom_gateway_core.cpp ^
-  core\kiwoom_reconciliation.cpp ^
-  core\safe_liquidation.cpp ^
-  core\kiwoom_runtime_engine.cpp ^
-  core\kiwoom_realtime_subscription.cpp ^
-  platform\kiwoom_runtime_runner.cpp ^
-  /Fe:kiwoom_runtime_runner_tests.exe
-if errorlevel 1 exit /b 1
-kiwoom_runtime_runner_tests.exe
+call :build_and_run kiwoom_runtime_runner_tests.exe "tests\kiwoom_runtime_runner_tests.cpp core\json_lite.cpp core\kiwoom_protocol.cpp core\kiwoom_market_data.cpp core\runtime_config.cpp core\kiwoom_session.cpp core\trading_state.cpp core\order_coordinator.cpp core\kiwoom_events.cpp core\kiwoom_gateway_core.cpp core\kiwoom_reconciliation.cpp core\safe_liquidation.cpp core\kiwoom_runtime_engine.cpp core\kiwoom_realtime_subscription.cpp platform\kiwoom_runtime_runner.cpp"
 if errorlevel 1 exit /b 1
 
 echo.
 echo *** ALL HEADLESS TESTS PASSED ***
 exit /b 0
+
+:build_and_run
+set "testExe=%~1"
+set "testSources=%~2"
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc %testSources% /Fe:%testExe%
+if errorlevel 1 exit /b 1
+%testExe%
+exit /b %errorlevel%

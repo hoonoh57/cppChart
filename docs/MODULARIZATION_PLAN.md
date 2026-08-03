@@ -2,88 +2,88 @@
 
 ## Goal
 
-Preserve the verified real Kiwoom minute-bar, `0B`, account, and order paths while converting the shell from a growing monolith into detachable major feature modules joined to a slim generic renderer contract.
+Preserve the verified real Kiwoom minute-bar, `0B`, account, and order paths while
+converting the shell from a growing monolith into detachable major feature modules
+joined to one slim generic renderer contract.
 
-The plan deliberately avoids an object-per-value design and does not introduce a DLL plugin ABI yet.
+The plan deliberately avoids an object-per-value design and does not introduce a
+DLL plugin ABI before the internal contracts stabilize.
 
 ## Baseline to preserve
 
-- `TRADING_MODE=KIWOOM_MOCK` fail-closed configuration
-- OAuth, WebSocket login, account-event registration, reconciliation, and order readiness
+- fail-closed `TRADING_MODE=KIWOOM_MOCK`
+- OAuth, WebSocket login, account-event registration, reconciliation, and order
+  readiness
 - `ka10080` real stock minute bars
-- selected-symbol `0B` subscription with `refresh=1`
-- live current-bar OHLCV and tick-count update
-- actual account position and PnL display
+- selected-symbol `0B` subscription with reconnect restoration
+- live current-bar OHLCV and tick-count replacement
+- actual account positions and PnL
 - no synthetic production data
-- emergency/position liquidation gated by broker readiness
-- Windows MSVC build and all headless tests
+- broker-readiness-gated liquidation
+- Windows MSVC build and complete headless suite
 
 ## Permanent rendering rules
 
 - Financial X coordinates use actual bar order, not elapsed wall-clock time.
-- Every visible bar slot has one shared horizontal pitch across every pane.
-- Candle, volume, indicator histogram, marker, and future trade-result series must align to that common slot geometry.
-- Pane-local Y interaction belongs to the pane. The vertical timestamp crosshair may synchronize across panes, but a horizontal value crosshair must display the hovered pane's own value.
-- Value snapping is supplied through generic pane metadata such as `ValueGrid`; the renderer must not contain broker, exchange, symbol, or indicator-specific branches.
-- Drag, zoom, and crosshair behavior must remain functional while real `0B` updates arrive.
+- Every visible bar slot has one shared horizontal pitch across all panes.
+- Candle, volume, indicator histogram, marker, and trade-result series align to
+  that common slot geometry.
+- Pane-local Y interaction belongs to the pane. The timestamp crosshair may be
+  synchronized, but a horizontal value crosshair displays the hovered pane's own
+  value.
+- Value snapping is supplied through generic pane metadata such as `ValueGrid`.
+- The renderer contains no broker, exchange, symbol, indicator, or strategy
+  branches.
+- Drag, zoom, crosshair, and manual viewport state remain stable while real `0B`
+  updates arrive.
 
 ## Milestone M1 — architecture contracts and regression gates
 
-Deliverables:
+Status: complete.
+
+Delivered:
 
 - `ARCHITECTURE_CONSTITUTION.md`
 - feature execution levels and registry
 - generic renderer document contract
 - module performance metrics
-- CI checks preventing forbidden dependencies and feature-specific renderer branches
-- headless tests for level transitions, dependencies, metrics, and render contracts
-
-Acceptance:
-
-- no user-visible behavior change
-- all existing tests pass
-- new contracts compile without Win32, ImGui, D3D, or Kiwoom dependencies
+- CI checks for forbidden dependencies and feature-specific renderer branches
+- headless execution-level, dependency, metric, and render-contract tests
 
 ## Milestone M2 — MarketDataModule
 
-Responsibilities:
+Status: complete.
 
-- request state
-- selected code and minute unit
-- REST page application
+Responsibilities implemented:
+
+- request state, selected code, and minute unit
+- REST page application and continuation state
 - `0B` tick merge
 - latest quote access
-- continuation state
 - subscription status
-- event and timing metrics
-- immutable completed history plus live tail
+- immutable completed history plus mutable live tail
+- event, timing, memory, merge, and drop metrics
 
-Acceptance:
-
-- `shell_main.cpp` owns no market-data mutex, bars, tick counters, or tick-to-bar merge logic
-- real-data tests remain valid
-- module state and snapshots are headless-testable
-- same-minute updates do not copy full history
+The shell owns no market-data mutex, bar store, tick counters, or tick-to-bar
+aggregation logic.
 
 ## Milestone M3 — generic chart renderer
 
-Create:
+Status: complete.
+
+Delivered:
 
 - broker-independent `RenderDocument`
-- price, volume, and future indicator panes
-- candle, line, histogram, marker, reference-line, and annotation series
-- generic ImGui renderer consuming only the render contract
-- renderer state containing viewport, dirty revision, and interaction state
-
-Acceptance:
-
-- renderer contains no Kiwoom API IDs, indicator names, strategy names, or account concepts
-- a fixture document renders without a live broker
-- document builder and renderer remain separately testable
+- candle, line, histogram, marker, reference-line, and annotation contracts
+- generic ImGui renderer consuming only that document
+- independent viewport and render-surface state
+- separately testable document builder and renderer
 
 ## Milestone M4 — FeatureRegistry and execution levels
 
-Register:
+Status: complete for the current production features.
+
+Registered production features:
 
 - market data
 - chart workspace
@@ -92,133 +92,167 @@ Register:
 
 Execution levels:
 
-- Off
-- Standby
-- Visible
-- Active
+- `Off`
+- `Standby`
+- `Visible`
+- `Active`
 
-Acceptance:
-
-- Off market data blocks subscriptions and requests
-- hidden workspace does not rebuild render documents
-- trading/account remains independently available for liquidation
-- feature metrics are visible in diagnostics
+The indicator feature is the next production registration required by M7 runtime
+wiring.
 
 ## Milestone M5 — application coordinator and thin shell
 
-`shell_main.cpp` retains only:
+Status: partially complete.
 
-- Win32/D3D lifecycle
-- ImGui frame lifecycle
-- top-level composition
-- device-loss handling
-- calls to application/UI objects
+Completed:
 
-Acceptance:
+- normalized modules and immutable snapshot flow
+- generic chart workspace
+- headless-tested market and order coordination
 
-- no market, strategy, order, or chart-domain mutation remains in `shell_main.cpp`
-- command routing is headless-testable
-- startup and shutdown remain deterministic
+Remaining long-term cleanup:
+
+- continue reducing `shell_main.cpp` to Win32/D3D lifecycle, top-level composition,
+  and calls into application/UI objects
+- keep all indicator, strategy, order, and chart-domain calculations outside the
+  shell
 
 ## Milestone M6 — chart viewport foundation
 
-Implemented:
+Status: complete and accepted on the real screen/GPU path.
+
+Implemented and verified:
 
 - ordinal trading-time axis
-- recent screen-sized initial window
-- wheel zoom anchored at mouse position
-- left or right horizontal drag pan
-- double-click reset and latest-bar auto-follow
-- visible-range automatic value scale
+- recent initial viewport
+- mouse-anchored wheel zoom
+- left/right horizontal drag pan
+- double-click latest reset and latest-bar auto-follow
+- visible-range value scale
 - current-price line and label
-- synchronized vertical time crosshair across panes
-- pane-local horizontal value crosshair
-- OHLCV and tick-count tooltip
-- time and value axes
+- synchronized timestamp crosshair across panes
+- pane-local value crosshair
+- OHLCV/tick-count tooltip
 - date and abnormal session-gap boundaries
 - immutable completed history and mutable live tail
-- common axis-slot body width for candles and histograms
-- generic `ValueGrid` cursor snapping
-- Korean stock quotation ladder configured by the market chart builder
-- integer value cursor for the volume pane
+- common candle/histogram slot width
+- generic `ValueGrid`
+- Korean quotation ladder supplied by the market chart builder
+- integer volume cursor
+- pane-local floating timestamp label
+- manual pan preservation during actual `0B` updates
 
-M6 regression fixtures:
-
-- overnight wall-clock gaps consume one adjacent ordinal slot
-- duplicate and descending timestamps fail
-- candle and volume body widths are identical for the same visible axis span
-- body width respects zoom minimum and maximum
-- value-grid boundaries and nearest-step rounding
-- Korean equity bands: 1, 5, 10, 50, 100, 500, and 1,000 won
-- volume cursor rounds to integer units
-- architecture gate rejects forced nearest-close horizontal crosshair
-- architecture gate requires left/right drag capture
-
-Remaining M6 acceptance:
-
-- one focused local visual/GPU test covering aligned volume width, left/right pan, wheel zoom, latest reset, price tick snapping, volume-pane cursor value, vertical crosshair alignment, and real `0B` viewport stability
+The user confirmed the focused M6 real-screen test as normal. No M6 acceptance gate
+remains.
 
 ## Milestone M7 — reusable indicator engine
 
-Create one batch/incremental engine and registry. Initial indicators:
+Status: core calculation, module lifecycle, generic render contribution, workspace
+composition, and coordinator are complete and verified. Production shell wiring and
+one focused real-screen indicator acceptance remain.
 
-- SMA
-- JMA
-- VWAP
-- OBV
-- ADX
+### Verified core
 
-Acceptance:
+- one batch/incremental implementation per indicator
+- deterministic `IndicatorSpec` serialization
+- maximum eight output channels and readiness mask
+- same-timestamp live-bar replacement
+- reset, invalid-input, descending-time, and fail-closed contracts
+- no partial batch output after failure
 
-- batch and incremental parity fixtures
-- indicators publish standard Line/Histogram/ReferenceLine series
-- renderer code does not change when indicators are added or removed
-- feature level controls acquisition, calculation, and rendering work
+Initial indicators:
+
+- SMA: Value
+- JMA: Value / Up / Down / Slope
+- VWAP: Value / Upper1 / Lower1 / Upper2 / Lower2
+- OBV: Value / Signal / Direction
+- ADX: Wilder ADX
+
+### Verified data contract
+
+- `Bar.TradingDateYmd` is explicit and calendar-validated
+- REST `cntr_tm` parsing preserves the KST trading date
+- `0B` new-bar creation preserves the same trading date
+- VWAP session reset uses `TradingDateYmd`
+
+### Verified application and renderer boundary
+
+- `IndicatorModule` owns execution level, cache, revision, metrics, and calculation
+- completed indicator output is shared across live-tail replacements
+- `IndicatorRenderAdapter` publishes only generic line, histogram, and reference
+  series
+- `DefaultIndicatorRenderPlan` maps initial outputs outside the renderer
+- ADX 20/25 and JMA slope zero are generic reference lines
+- `ChartWorkspaceModule` composes market and indicator revisions independently
+- contribution failure retains the last good document
+- `IndicatorWorkspaceCoordinator` verifies the complete headless application flow
+- standard pane IDs `price` and `volume` prevent duplicate price panes
+- adding/removing indicators requires no change to renderer source
+
+### Remaining M7 production acceptance
+
+1. Register `indicators` in `FeatureRegistry`, depending on `market-data`.
+2. Configure initial specs once during startup.
+3. Wire indicator execution levels and cache release.
+4. Feed the shared completed bars and live tail into `IndicatorModule`.
+5. Use the indicator-aware ChartWorkspace composition overload.
+6. Publish indicator metrics and health to diagnostics.
+7. Link all required indicator/module/default-plan sources into `build.bat`.
+8. Add a shell-integration architecture gate.
+9. Pass the existing Windows CI.
+10. Run one actual `ka10080 + 0B` visual acceptance covering overlays, lower panes,
+    references, crosshair alignment, viewport stability, and live-tail updates.
 
 ## Milestone M8 — index and multi-symbol comparison
 
-Connect:
+Status: not started.
+
+Planned:
 
 - `ka20005` index minute bars
 - `0I` real-time index values
-- synchronized symbol/index time axes
+- synchronized symbol/index axes
 - normalized return, relative strength, beta, and correlation
 - multiple workspaces sharing source data
 
 Acceptance:
 
 - missing index data does not corrupt stock data
-- comparison can be Off without changing the main chart
-- multi-symbol limits are measured and enforced
+- comparison may be Off without changing the main chart
+- measured and enforced multi-symbol limits
 
 ## Milestone M9 — strategy, replay, and trade results
 
-Use the same indicator and strategy code for replay, backtest, and real-time decisions. Publish:
+Status: not started.
 
-- signals
-- orders and fills
-- average-price lines
-- stop and target lines
-- per-symbol and portfolio results
+Planned:
+
+- one strategy evaluator for replay, backtest, monitoring, and live decisions
+- signal, order, fill, average-price, stop, target, and result contributions
+- per-symbol and portfolio result visualization
 
 Acceptance:
 
-- deterministic replay equals batch backtest for the same event stream
+- deterministic replay equals batch backtest for the same normalized event stream
 - live events use the same evaluator
-- chart result visualization remains a renderer contribution
+- results remain generic renderer contributions
 
 ## Continuous verification
 
-Every milestone runs:
+Every implementation milestone runs:
 
-- core dependency boundary checks
+- repository and secret-file policy
+- core dependency boundary
 - real-data-only production checks
-- architecture regression checks
+- modular architecture checks
 - MSVC x64 shell build
-- full headless suite
-- clean working-tree check
-- executable artifact upload
+- complete headless suite
+- clean working-tree verification
+- executable artifact publication
 
 ## User test policy
 
-Do not request a local pull merely because files changed. Request testing only when the milestone depends on visual interaction, actual Kiwoom payloads, physical reconnection, order/fill behavior, or soak performance.
+Do not request a local pull merely because files changed. Request user testing only
+when acceptance depends on visual interaction, actual Kiwoom payloads, physical
+reconnection, order/fill behavior, or soak performance. The request must be narrow,
+state the expected result, and require evidence only on failure.

@@ -84,7 +84,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git reset .github/workflows/integrate-real-minute-bars.yml scripts/integrate_real_minute_bars.py scripts/repair_real_minute_integration.py
+          git reset .github/workflows/windows-ci.yml .github/workflows/integrate-real-minute-bars.yml scripts/integrate_real_minute_bars.py scripts/repair_real_minute_integration.py
           if (-not (git diff --cached --quiet)) {
             git commit -m 'Integrate real Kiwoom minute-bar data path'
             git push origin HEAD:p2/kiwoom-mock-gateway

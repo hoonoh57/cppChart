@@ -8,6 +8,9 @@ if errorlevel 1 exit /b 1
 call :build_and_run trading_date_tests.exe "tests\trading_date_tests.cpp"
 if errorlevel 1 exit /b 1
 
+call :build_and_run market_trading_date_tests.exe "tests\market_trading_date_tests.cpp core\json_lite.cpp core\kiwoom_market_data.cpp"
+if errorlevel 1 exit /b 1
+
 call :build_and_run indicator_engine_tests.exe "tests\indicator_engine_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\sma_indicator.cpp"
 if errorlevel 1 exit /b 1
 

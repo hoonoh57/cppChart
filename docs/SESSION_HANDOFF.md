@@ -13,17 +13,17 @@ Read these before changing code:
 - repository: `hoonoh57/cppChart`
 - local repository root: `E:\2026\gpt\cpp\shell`
 - development branch: `p2/kiwoom-mock-gateway`
-- PR: `#1`, Draft; do not merge before real-data, visual, account, and order acceptance
+- PR: `#1`, Draft
 - protected baseline: `main` at `f1a7d8db7a5d1b145781bfcb6ce11c2e24ef6683`
+- verified branch HEAD: `69ab02cea7ebcc78704fb6326c75969fd37c87e9`
+- successful Windows CI: `30852986667` (`Windows CI #812`)
+- successful CI artifact id: `8871436251`
+- artifact digest: `sha256:46fac9cdb9f9fd3704a117da091f9c5a519e2891c26aedd614d5b355c8e779de`
 - production policy: real Kiwoom mock data only; no synthetic fallback
-- verified pane crosshair-label implementation: `5436c1988f80365e8b91d78384bb6da3f5261e8a`
-- last successful Windows CI: `30821367012`
-- successful CI artifact id: `8859035969`
-- artifact digest: `sha256:b212d2beb3ff7fbd6d93d70d9f21f6767597bd52c8e6904d79ee056cbb9724c8`
 
-The branch may contain a later documentation-only commit. Treat the implementation
-commit and successful CI above as the verified code baseline, then read the live
-branch HEAD with `git rev-parse HEAD` after pulling.
+The verified HEAD above passed architecture gates, MSVC x64 shell build, the complete
+headless suite, clean-tree verification, and executable artifact publication.
+Always read the live branch HEAD after pulling in case a later commit exists.
 
 ## Exact next-session opening commands
 
@@ -37,184 +37,147 @@ git status
 git rev-parse HEAD
 ```
 
-Do not alter `.env` unless a real configuration error is shown. Do not expose App
-Key, Secret Key, bearer token, or account-sensitive response data.
+Do not alter `.env` unless a concrete configuration error is shown. Never expose
+App Key, Secret Key, bearer token, or account-sensitive response data.
 
 ## Product objective
 
-Build a fast chart-based trading workbench that supports freely developed
-indicators and strategies, index and multi-symbol comparison, replay, backtest,
-and multi-symbol trading-result visualization without returning to a monolithic
+Build a fast chart-based trading workbench supporting freely developed indicators
+and strategies, index and multi-symbol comparison, replay, backtest, and
+multi-symbol trading-result visualization without returning to a monolithic
 `shell_main.cpp` or adding feature-specific branches to the renderer.
 
-## Architecture invariants
+## Permanent architecture invariants
 
+- Production uses normalized real Kiwoom data only and fails closed.
 - Objectify only major features with independent state and lifecycle.
-- Keep Tick, Bar, render points, and indicator values as compact value types in
+- Tick, Bar, indicator values, and render points remain compact value types in
   contiguous storage.
-- UI publishes commands and renders immutable snapshots; it does not mutate
-  market or account state directly.
-- The generic renderer consumes only `RenderDocument` and interaction state. It
-  must not know Kiwoom API IDs, indicators, strategies, or accounts.
-- Pane-specific cursor snapping is supplied as generic `ValueGrid` data by the
-  document builder; the renderer contains no Korean-market special branch.
-- Candle and histogram body widths derive from the same visible ordinal-axis
-  slot geometry.
-- Crosshair time labels are generic pane geometry and must work unchanged for
-  price, volume, and future indicator panes.
-- `Off` stops subscriptions, calculation, rendering, and retained memory;
-  `Standby` retains state but stops expensive work; `Visible` renders without
-  strategy execution; `Active` enables the complete feature.
-- Real errors remain visible and fail closed. Never restore synthetic data to
-  make the screen appear complete.
-- Batch, replay, and real-time indicator/strategy paths share the same
-  calculation implementation.
-- Financial bars use the ordinal trading-time axis. Wall-clock elapsed
-  milliseconds must never be mapped directly to horizontal pixels.
+- UI publishes commands and renders immutable snapshots.
+- The generic renderer consumes only `RenderDocument`; it never calculates or
+  identifies indicators, strategies, brokers, or accounts.
+- Batch, incremental, replay, backtest, and live paths share one calculation
+  implementation.
+- Completed history is immutable and shared; only the live tail is replaced.
+- Financial X coordinates use ordinal bar order rather than elapsed wall-clock
+  milliseconds.
+- `Off / Standby / Visible / Active` must control real work and retained state.
 
-## Verified real-data baseline
+## Verified real-data and M1-M6 baseline
 
 - fail-closed `TRADING_MODE=KIWOOM_MOCK`
-- OAuth token and Kiwoom mock WebSocket login
-- account event registration and reconciliation
+- OAuth token, WebSocket login, account registration, and reconciliation
 - `ka10080` real stock minute bars
 - selected-symbol `0B` subscription, unsubscribe, and reconnect restoration
-- immutable completed history plus mutable live tail
-- same-minute `0B` OHLCV/tick-count update without copying all history
-- actual account position and PnL display
-- no synthetic market, position, fill, or ranking data
-
-## Completed modularization
-
-- `FeatureRegistry`
-- `MarketDataModule`
-- `ChartWorkspaceModule`
-- generic `RenderDocument`
-- generic ImGui render-document renderer
-- feature-level `Off / Standby / Visible / Active`
-- WebSocket `0B` subscription lifecycle
-- compressed ordinal trading-time axis
-- shared candle/histogram slot geometry
+- same-minute live-tail OHLCV/tick-count replacement
+- actual account positions and PnL
+- `FeatureRegistry`, `MarketDataModule`, and `ChartWorkspaceModule`
+- generic `RenderDocument` and generic ImGui renderer
+- ordinal trading-time axis
+- common candle/histogram slot geometry
 - pane-aware `ValueGrid`
-- pane-aware crosshair timestamp labels
+- synchronized time crosshair and pane-local value crosshair
+- left/right drag pan, mouse-anchored wheel zoom, double-click latest reset
+- actual `0B` updates preserve a manually panned viewport
 
-## M6 real-screen findings and corrections
+M6 visual/GPU acceptance was completed successfully by the user. M6 is closed.
 
-### 1. Calendar gaps consumed X-axis width
+## M7 reusable indicator foundation — verified complete
 
-Absolute timestamps created huge overnight and weekend blank regions.
-`OrdinalTimeAxis` now assigns one horizontal slot per real bar while preserving
-real timestamps for labels, tooltips, and session boundaries.
+### Core calculation contract
 
-### 2. Candle and volume widths differed
+- one `IndicatorInstance` implementation shared by batch and incremental paths
+- deterministic `IndicatorSpec` JSON serialization/deserialization
+- maximum eight fixed output channels with readiness mask
+- same-timestamp live-bar replacement with state restoration
+- descending timestamp and invalid-input fail-closed handling
+- failed batch calculation does not publish partial output
 
-The volume pane inferred body width independently and produced overlapping bars.
-`SeriesBodyWidth` now derives both candle and histogram bodies from one shared
-visible-axis slot pitch.
+### Implemented indicators
 
-### 3. Drag did not pan
+- SMA: `Value`
+- JMA: `Value / Up / Down / Slope`
+- OBV: `Value / Signal / Direction`
+- ADX: Wilder `ADX`
+- VWAP: `Value / Upper1 / Lower1 / Upper2 / Lower2`
 
-The chart surface did not reliably capture the intended button. Both left and
-right horizontal drag now pan the same viewport; wheel zoom remains anchored at
-the mouse; double-click returns to the latest range.
+### Trading-date contract
 
-### 4. Horizontal crosshair was forced to candle close
+`Bar` carries explicit `TradingDateYmd`. REST `cntr_tm` minute bars and new bars
+created from `0B` preserve the same KST trading date. VWAP resets by that explicit
+session key rather than inferring a date from display text or local wall time.
 
-The mouse-derived Y value was overwritten by the nearest candle close. The
-horizontal line now follows mouse Y in the hovered pane. Price uses its legal
-quotation grid; volume uses an integer grid; future indicator panes may define
-independent decimals and grids.
+### Module and rendering contract
 
-### 5. Crosshair time had no floating label
+- `IndicatorModule` implements execution levels, revisions, timing/event metrics,
+  completed-history cache reuse, and live-tail incremental calculation.
+- `IndicatorRenderAdapter` converts outputs into generic `LineSeries`,
+  `HistogramSeries`, and `ReferenceLine` contributions.
+- `DefaultIndicatorRenderPlan` maps the five initial indicators without adding
+  indicator switches to the renderer.
+- ADX publishes 20/25 reference lines; JMA slope publishes a zero reference line.
+- `ChartWorkspaceModule` composes market and indicator revisions independently and
+  retains the last good immutable document when a contribution fails.
+- `IndicatorWorkspaceCoordinator` verifies configuration, execution level,
+  calculation, default plan, adapter, and chart composition as one headless flow.
+- market chart pane IDs are standardized as `price` and `volume`, allowing price
+  overlays to reuse the existing price pane rather than creating a duplicate.
 
-The vertical line was visible but its selected time appeared only in the candle
-tooltip. The renderer now draws a floating `MM/DD HH:mm` label in every hovered
-pane:
+### M7 verification
 
-- bottom pane: inside its reserved time-axis band;
-- middle/upper pane: inside the pane's lower edge;
-- left/right edge: clamped within the active pane;
-- price/volume value label remains visible simultaneously.
-
-Implementation files:
-
-- `render/cursor_label_layout.h`
-- `ui/render_document_renderer.cpp`
-- `tests/cursor_label_layout_tests.cpp`
-- `tests/run_all.bat`
-- `scripts/verify_modular_architecture.ps1`
-
-## Verification result
-
-Windows CI `30821367012` passed:
+Windows CI `30852986667` passed:
 
 - repository and secret-file policy
-- core dependency boundary
+- core and modular architecture boundaries
 - real-data-only production policy
-- modular renderer boundary
-- ordinal trading-time-axis contract
-- left/right drag interaction markers
-- pane-aware `ValueGrid`
-- shared candle/volume body geometry
-- pane crosshair time-label placement and edge clamping
+- M6 interaction contracts
 - MSVC x64 `shell.exe` build
-- complete headless test suite
+- every indicator parity/live-tail/reset/error fixture
+- IndicatorModule cache and monotonic revision fixtures
+- generic render adapter and reference-line fixtures
+- default render-plan fixture
+- indicator-aware ChartWorkspace fixture
+- IndicatorWorkspaceCoordinator fixture
+- complete legacy headless suite
 - clean source-tree verification
 - executable artifact publication
 
-## Current user-intervention point
+## Current boundary: M7 shell runtime wiring remains
 
-M6 is not accepted until one focused real-screen test confirms the latest
-crosshair-label behavior.
+The verified engine, module, adapter, plan, workspace composition, and coordinator
+are headless-complete. The production `shell_main.cpp` still builds the market-only
+`ChartWorkspaceModule` path. Therefore the five indicators are not yet displayed
+on the actual Kiwoom chart screen.
 
-Validate only:
+Do not describe M7 as visually complete until the following wiring is finished and
+locally accepted.
 
-1. price-pane hover shows both the quotation-grid price label and floating time;
-2. volume-pane hover shows both integer volume and the same floating time;
-3. the floating time remains inside the pane near both horizontal edges;
-4. left/right drag, wheel zoom, and double-click latest reset still work;
-5. candle and volume bars remain horizontally aligned;
-6. actual `0B` updates do not reset a manually panned viewport.
+## Exact next implementation order
 
-Local pull/build/launch:
+1. Register an `indicators` feature depending on `market-data`.
+2. Configure `InitialIndicatorSpecs()` once during application startup.
+3. Route indicator execution-level changes through `IndicatorModule` or the
+   verified coordinator; `Off` must release calculation and adapter caches.
+4. In the existing market snapshot path, build one `IndicatorMarketSource` from
+   the shared completed bars and live tail.
+5. Calculate only when the indicator feature is `Visible` or `Active`.
+6. Call the indicator-aware `ChartWorkspaceModule::UpdateMarketChart` overload so
+   market and indicator contributions form one immutable document.
+7. Record indicator processing time, retained bytes, event/merge counts, symbol
+   count, render-series count, readiness, and last error in `FeatureRegistry`.
+8. Add all required M7 sources to `build.bat`; no indicator calculation may be
+   copied into `shell_main.cpp`.
+9. Add a shell-integration architecture gate requiring the indicator feature and
+   coordinator/module markers while continuing to prohibit indicator names in
+   `ui/render_document_renderer.cpp`.
+10. Run the existing Windows CI and require complete success.
+11. Perform one focused local visual test using actual `ka10080 + 0B` data:
+    price overlays, OBV/ADX/JMA-slope panes, ADX/JMA reference lines, shared
+    crosshair/viewport alignment, and stable live-tail updates.
 
-```powershell
-Get-Process shell -ErrorAction SilentlyContinue | Stop-Process -Force
+## PR policy
 
-powershell -NoProfile `
-    -ExecutionPolicy Bypass `
-    -File E:\2026\gpt\cpp\shell\scripts\pull_and_verify.ps1 `
-    -Branch p2/kiwoom-mock-gateway `
-    -Launch
-```
-
-Do not start M7 until this visual acceptance succeeds.
-
-## Next milestone after M6 acceptance
-
-M7 reusable indicator engine:
-
-- one batch/incremental parity contract
-- indicator registry and parameter serialization
-- SMA, JMA, VWAP, OBV, and ADX
-- standard Line/Histogram/ReferenceLine render contributions
-- no renderer changes per added indicator
-- real-time last-bar updates without full-history recomputation
-
-## Session-efficiency rule
-
-The crosshair-label request was a small renderer change and should not require a
-long multi-workflow migration. Future small UI defects must use this sequence:
-
-1. inspect the exact renderer path once;
-2. patch the smallest responsible module;
-3. add one focused regression test;
-4. use the existing Windows CI only;
-5. report status immediately instead of repeatedly polling silently;
-6. do not create temporary one-shot workflows or repair scripts unless direct
-   repository writes are technically impossible;
-7. remove any unavoidable temporary automation before closing the session.
-
-Conversation length must not be compensated for by speculative edits. When
-context becomes expensive to reconstruct, stop feature work, refresh this
-handoff, and continue in a new session from the exact verified baseline above.
+PR #1 remains Draft. Do not merge before the remaining real account/order,
+physical reconnect, and intraday soak acceptance described by the PR policy.
+M7 runtime wiring and its focused real-screen acceptance must also be recorded
+before claiming the indicator milestone is closed.

@@ -72,6 +72,9 @@ namespace trading::platform
             const std::string& message)> log;
         std::function<void()> wakeUi;
         std::function<void(bool enabled)> setObserveMode;
+        std::function<void(
+            const MinuteBarsPage& page,
+            const Continuation& continuation)> minuteBars;
     };
 
     class KiwoomRuntimeRunner final
@@ -92,6 +95,18 @@ namespace trading::platform
             std::string& error);
 
         void Stop();
+
+        bool RequestStockMinuteBars(
+            const std::string& stockCode,
+            int minuteUnit,
+            const Continuation& continuation,
+            std::string& error);
+
+        bool RequestIndexMinuteBars(
+            const std::string& indexCode,
+            int minuteUnit,
+            const Continuation& continuation,
+            std::string& error);
 
         bool SubmitOrder(
             const OrderIntent& intent,
@@ -125,6 +140,11 @@ namespace trading::platform
 
         Continuation ReadContinuation(
             const RuntimeTransportResponse& response) const;
+
+        void DeliverMinuteBars(
+            const KiwoomRuntimeAction& action,
+            const RuntimeTransportResponse& response,
+            const Continuation& continuation);
 
         void Log(
             const char* category,

@@ -34,7 +34,6 @@ jobs:
           $ErrorActionPreference = 'Stop'
           git diff --check
           if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
-
           $trackedSecrets = @(
             git ls-files |
               Where-Object {
@@ -67,6 +66,7 @@ jobs:
           $marketCore = Get-Content .\core\kiwoom_market_data.cpp -Raw
           $marketModule = Get-Content .\app\market_data_module.cpp -Raw
           $chartModule = Get-Content .\app\chart_workspace_module.cpp -Raw
+          $chartTests = Get-Content .\tests\chart_workspace_module_tests.cpp -Raw
           $renderer = Get-Content .\ui\render_document_renderer.cpp -Raw
           $renderContract = Get-Content .\render\render_document.h -Raw
           $runnerTests = Get-Content .\tests\kiwoom_runtime_runner_tests.cpp -Raw
@@ -135,13 +135,16 @@ jobs:
             'UpdateMarketChart',
             'NeedsUpdate',
             'shared_ptr<const render::RenderDocument>',
-            'FeatureLevel::Off',
-            'FeatureLevel::Standby'
+            'FeatureLevel::Off'
           )
           foreach ($marker in $chartModuleRequired) {
             if (-not $chartModule.Contains($marker)) {
               throw "Missing chart workspace module marker: $marker"
             }
+          }
+          if (-not $chartTests.Contains('Standby must suppress render-document rebuilds') -or
+              -not $chartTests.Contains('Off workspace must release the render document')) {
+            throw 'Chart workspace execution-level regression coverage is missing'
           }
 
           $renderRequired = @(
@@ -182,7 +185,6 @@ jobs:
           if ($marketCore.Contains('IndexMinuteApiId = "ka20004"')) {
             throw 'index tick API ID remains on minute request path'
           }
-
           if (-not $runner.Contains('DeliverMinuteBars')) {
             throw 'Minute-bar responses are not delivered to the application callback'
           }
@@ -201,7 +203,6 @@ jobs:
           if (-not $runnerTests.Contains('message.find("\"refresh\":\"1\"")')) {
             throw '0B registration does not have a keep-existing regression gate'
           }
-
           if (-not $transport.Contains('CPPCHART_CONTINUATION_HEADERS')) {
             throw 'WinHTTP continuation response headers are not integrated'
           }

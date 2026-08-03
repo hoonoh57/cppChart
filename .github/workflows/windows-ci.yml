@@ -218,7 +218,6 @@ jobs:
           }
 
       - name: Commit verified integration
-        if: github.event_name == 'push'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'

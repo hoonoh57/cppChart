@@ -1,4 +1,4 @@
-#include "../app/indicator_render_adapter.h"
+﻿#include "../app/indicator_render_adapter.h"
 
 #include <cmath>
 #include <cstdio>
@@ -126,6 +126,7 @@ namespace
         up.seriesId = "jma.up";
         up.label = "JMA Up";
         up.width = 1.5f;
+        up.legendLabel = "JMA 20";
         plan.bindings.push_back(up);
 
         IndicatorOutputBinding slope;
@@ -139,6 +140,7 @@ namespace
             trading::render::PaneValueScale::Symmetric;
         slope.seriesId = "jma.slope.histogram";
         slope.label = "Slope";
+        slope.legendLabel = "JMA Slope 20";
         plan.bindings.push_back(slope);
 
         IndicatorReferenceBinding zero;
@@ -151,6 +153,7 @@ namespace
         zero.label = "Zero";
         zero.value = 0.0;
         zero.width = 1.0f;
+        zero.indicatorId = "jma.main";
         plan.references.push_back(zero);
 
         return plan;
@@ -187,6 +190,12 @@ int main()
           "indicator render contribution must apply");
     Check(first.panes.size() == 2U,
           "indicator histogram pane must be created generically");
+    Check(first.panes[0].legends.size() == 1U,
+          "price pane must contain one grouped JMA legend");
+    Check(first.panes[0].legends[0].ownerId == "jma.main",
+          "price legend owner mismatch");
+    Check(first.panes[0].legends[0].label == "JMA 20",
+          "price legend label mismatch");
     Check(first.panes[0].lines.size() == 2U,
           "NaN line gap must split into two finite line segments");
     Check(first.panes[0].lines[0].id == "jma.up",
@@ -199,6 +208,12 @@ int main()
           "live tail must extend the final finite line segment");
     Check(first.panes[0].lines[1].points.HasLiveTail(),
           "final line segment must expose a live tail");
+    Check(first.panes[0].lines[0].ownerId == "jma.main",
+          "line series owner mismatch");
+    Check(first.panes[1].legends.size() == 1U,
+          "slope pane must contain one grouped JMA legend");
+    Check(first.panes[1].legends[0].label == "JMA Slope 20",
+          "slope legend label mismatch");
     Check(first.panes[1].histograms.size() == 1U,
           "indicator histogram contribution count mismatch");
     Check(first.panes[1].histograms[0].points.size() == 6U,
@@ -211,6 +226,8 @@ int main()
           "indicator reference-line id mismatch");
     Check(first.panes[1].referenceLines[0].value == 0.0,
           "indicator reference-line value mismatch");
+    Check(first.panes[1].referenceLines[0].ownerId == "jma.main",
+          "indicator reference-line owner mismatch");
 
     const auto firstLinePrefix =
         first.panes[0].lines[1].points.SharedPrefix();

@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 setlocal
 cd /d "%~dp0\.."
 
@@ -38,7 +38,10 @@ if errorlevel 1 exit /b 1
 call :build_and_run indicator_reference_adapter_tests.exe "tests\indicator_reference_adapter_tests.cpp app\indicator_render_adapter.cpp render\render_document.cpp"
 if errorlevel 1 exit /b 1
 
-call :build_and_run default_indicator_render_plan_tests.exe "tests\default_indicator_render_plan_tests.cpp app\default_indicator_render_plan.cpp app\indicator_render_adapter.cpp render\render_document.cpp"
+call :build_and_run default_indicator_render_plan_tests.exe "tests\default_indicator_render_plan_tests.cpp app\default_indicator_render_plan.cpp app\indicator_properties.cpp app\indicator_render_adapter.cpp render\render_document.cpp"
+if errorlevel 1 exit /b 1
+
+call :build_and_run indicator_properties_tests.exe "tests\indicator_properties_tests.cpp app\indicator_properties.cpp"
 if errorlevel 1 exit /b 1
 
 call :build_and_run feature_registry_tests.exe "tests\feature_registry_tests.cpp app\feature_registry.cpp"

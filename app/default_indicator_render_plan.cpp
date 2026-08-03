@@ -1,5 +1,6 @@
-#include "default_indicator_render_plan.h"
+﻿#include "default_indicator_render_plan.h"
 
+#include "indicator_properties.h"
 #include "../core/adx_indicator.h"
 #include "../core/jma_indicator.h"
 #include "../core/obv_indicator.h"
@@ -19,6 +20,7 @@ namespace trading::app
             const std::string& paneTitle,
             const std::string& suffix,
             const std::string& label,
+            const std::string& legendLabel,
             render::ColorRgba color,
             float width)
         {
@@ -31,6 +33,7 @@ namespace trading::app
             binding.seriesId =
                 "indicator." + spec.id + "." + suffix;
             binding.label = label;
+            binding.legendLabel = legendLabel;
             binding.primaryColor = color;
             binding.width = width;
             return binding;
@@ -43,6 +46,7 @@ namespace trading::app
             const std::string& paneTitle,
             const std::string& suffix,
             const std::string& label,
+            const std::string& legendLabel,
             render::ColorRgba positive,
             render::ColorRgba negative)
         {
@@ -55,12 +59,14 @@ namespace trading::app
             binding.seriesId =
                 "indicator." + spec.id + "." + suffix;
             binding.label = label;
+            binding.legendLabel = legendLabel;
             binding.primaryColor = positive;
             binding.secondaryColor = negative;
             return binding;
         }
 
         IndicatorReferenceBinding ReferenceBinding(
+            const indicators::IndicatorSpec& spec,
             const std::string& paneId,
             const std::string& paneTitle,
             const std::string& id,
@@ -75,6 +81,7 @@ namespace trading::app
             binding.value = value;
             binding.color = { 170, 174, 188, 190 };
             binding.width = 1.0f;
+            binding.indicatorId = spec.id;
             return binding;
         }
 
@@ -124,9 +131,14 @@ namespace trading::app
                 return false;
             }
             if (!ids.insert(spec.id).second) {
-                error = "duplicate default indicator render-plan id: " + spec.id;
+                error =
+                    "duplicate default indicator render-plan id: " +
+                    spec.id;
                 return false;
             }
+
+            const std::string legend =
+                IndicatorLegendLabel(spec);
 
             if (spec.type == "SMA") {
                 candidate.bindings.push_back(LineBinding(
@@ -136,6 +148,7 @@ namespace trading::app
                     "Price",
                     "value",
                     "SMA",
+                    legend,
                     { 255, 210, 64, 255 },
                     1.5f));
             }
@@ -147,6 +160,7 @@ namespace trading::app
                     "Price",
                     "value",
                     "JMA",
+                    legend,
                     { 232, 232, 238, 210 },
                     1.0f));
                 candidate.bindings.push_back(LineBinding(
@@ -156,6 +170,7 @@ namespace trading::app
                     "Price",
                     "up",
                     "JMA Up",
+                    legend,
                     { 58, 196, 125, 255 },
                     2.0f));
                 candidate.bindings.push_back(LineBinding(
@@ -165,11 +180,14 @@ namespace trading::app
                     "Price",
                     "down",
                     "JMA Down",
+                    legend,
                     { 235, 80, 92, 255 },
                     2.0f));
 
                 const std::string paneId =
                     "indicator." + spec.id + ".slope.pane";
+                const std::string slopeLegend =
+                    IndicatorLegendLabel(spec, "slope");
                 IndicatorOutputBinding slope = HistogramBinding(
                     spec,
                     indicators::JmaSlopeOutput,
@@ -177,19 +195,22 @@ namespace trading::app
                     "JMA Slope",
                     "slope",
                     "Slope %",
+                    slopeLegend,
                     { 58, 196, 125, 220 },
                     { 235, 80, 92, 220 });
                 ConfigureSymmetricPane(slope);
                 candidate.bindings.push_back(slope);
 
                 IndicatorReferenceBinding zero = ReferenceBinding(
+                    spec,
                     paneId,
                     "JMA Slope",
                     "indicator." + spec.id + ".slope.zero",
                     "Zero",
                     0.0);
                 zero.paneHeightWeight = 0.22f;
-                zero.paneValueScale = render::PaneValueScale::Symmetric;
+                zero.paneValueScale =
+                    render::PaneValueScale::Symmetric;
                 zero.valueDecimals = 2;
                 candidate.references.push_back(zero);
             }
@@ -222,6 +243,7 @@ namespace trading::app
                         "Price",
                         suffixes[index],
                         labels[index],
+                        legend,
                         colors[index],
                         index == 0U ? 1.8f : 1.0f));
                 }
@@ -236,6 +258,7 @@ namespace trading::app
                     "OBV",
                     "value",
                     "OBV",
+                    legend,
                     { 224, 224, 230, 255 },
                     1.5f);
                 ConfigureObvPane(value);
@@ -248,6 +271,7 @@ namespace trading::app
                     "OBV",
                     "signal",
                     "OBV Signal",
+                    legend,
                     { 255, 196, 64, 255 },
                     1.2f);
                 ConfigureObvPane(signal);
@@ -260,6 +284,7 @@ namespace trading::app
                     "OBV",
                     "direction",
                     "Direction",
+                    legend,
                     { 58, 196, 125, 180 },
                     { 235, 80, 92, 180 });
                 ConfigureObvPane(direction);
@@ -275,12 +300,14 @@ namespace trading::app
                     "ADX",
                     "value",
                     "ADX",
+                    legend,
                     { 182, 120, 255, 255 },
                     1.6f);
                 ConfigureAdxPane(value);
                 candidate.bindings.push_back(value);
 
                 IndicatorReferenceBinding twenty = ReferenceBinding(
+                    spec,
                     paneId,
                     "ADX",
                     "indicator." + spec.id + ".reference.20",
@@ -290,6 +317,7 @@ namespace trading::app
                 candidate.references.push_back(twenty);
 
                 IndicatorReferenceBinding twentyFive = ReferenceBinding(
+                    spec,
                     paneId,
                     "ADX",
                     "indicator." + spec.id + ".reference.25",

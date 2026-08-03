@@ -33,9 +33,17 @@ namespace trading::render
         };
         pricePane.cursorGrid.fallbackStep = 1000.0;
 
+        LegendEntry priceLegend;
+        priceLegend.id = seriesId + ".legend.price";
+        priceLegend.label = title;
+        priceLegend.color = { 232, 232, 238, 255 };
+        priceLegend.selectable = false;
+        pricePane.legends.push_back(std::move(priceLegend));
+
         CandleSeries candles;
         candles.id = seriesId + ".candles";
         candles.label = title;
+        candles.ownerId = seriesId;
         candles.bars.SetShared(
             source.completedBars,
             source.hasLiveBar ? &source.liveBar : nullptr);
@@ -49,9 +57,17 @@ namespace trading::render
         volumePane.cursorGrid.enabled = true;
         volumePane.cursorGrid.fallbackStep = 1.0;
 
+        LegendEntry volumeLegend;
+        volumeLegend.id = seriesId + ".legend.volume";
+        volumeLegend.label = "Volume";
+        volumeLegend.color = { 170, 174, 188, 255 };
+        volumeLegend.selectable = false;
+        volumePane.legends.push_back(std::move(volumeLegend));
+
         HistogramSeries volume;
         volume.id = seriesId + ".volume";
         volume.label = "Volume";
+        volume.ownerId = seriesId + ".volume";
 
         HistogramPoint liveVolume;
         const HistogramPoint* liveVolumePointer = nullptr;

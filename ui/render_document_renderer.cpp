@@ -18,6 +18,8 @@ namespace trading::ui
     {
         constexpr float ValueAxisWidth = 74.0f;
         constexpr float TimeAxisHeight = 20.0f;
+        constexpr float LegendItemHeight = 20.0f;
+        constexpr float LegendSpacing = 4.0f;
         constexpr double MinimumVisibleSpan = 12.0;
 
         ImU32 ToImColor(const render::ColorRgba& color) noexcept
@@ -456,6 +458,127 @@ namespace trading::ui
             }
         }
 
+
+        bool PointInRect(
+            const ImVec2& point,
+            const ImVec2& minimum,
+            const ImVec2& maximum) noexcept
+        {
+            return
+                point.x >= minimum.x &&
+                point.x <= maximum.x &&
+                point.y >= minimum.y &&
+                point.y <= maximum.y;
+        }
+
+        bool OwnerSelected(
+            const std::string& ownerId,
+            const RenderSurfaceState& state) noexcept
+        {
+            return
+                !ownerId.empty() &&
+                ownerId == state.selectedOwnerId;
+        }
+
+        bool DrawPaneLegends(
+            ImDrawList* draw,
+            const render::Pane& pane,
+            const ImVec2& plotOrigin,
+            const ImVec2& plotEnd,
+            RenderSurfaceState& state)
+        {
+            if (pane.legends.empty()) return false;
+
+            const ImVec2 mouse = ImGui::GetIO().MousePos;
+            const float left = plotOrigin.x + 6.0f;
+            const float right = plotEnd.x - 6.0f;
+            float x = left;
+            float y = plotOrigin.y + 5.0f;
+            bool hoveredAny = false;
+
+            for (const render::LegendEntry& legend : pane.legends) {
+                if (!legend.visible || legend.label.empty()) continue;
+
+                const ImVec2 textSize =
+                    ImGui::CalcTextSize(legend.label.c_str());
+                const float width = 28.0f + textSize.x;
+                if (x > left && x + width > right) {
+                    x = left;
+                    y += LegendItemHeight + LegendSpacing;
+                }
+                if (y + LegendItemHeight > plotEnd.y - 3.0f) break;
+
+                const ImVec2 minimum(x, y);
+                const ImVec2 maximum(
+                    (std::min)(right, x + width),
+                    y + LegendItemHeight);
+                const bool hovered =
+                    PointInRect(mouse, minimum, maximum);
+                hoveredAny = hoveredAny || hovered;
+                const bool selected =
+                    OwnerSelected(legend.ownerId, state);
+
+                if (selected || hovered) {
+                    draw->AddRectFilled(
+                        minimum,
+                        maximum,
+                        selected
+                            ? IM_COL32(52, 74, 112, 225)
+                            : IM_COL32(52, 54, 64, 205),
+                        2.0f);
+                }
+                if (selected) {
+                    draw->AddRect(
+                        minimum,
+                        maximum,
+                        IM_COL32(155, 190, 245, 235),
+                        2.0f,
+                        0,
+                        1.0f);
+                }
+
+                const float centerY =
+                    y + LegendItemHeight * 0.5f;
+                draw->AddLine(
+                    ImVec2(x + 5.0f, centerY),
+                    ImVec2(x + 17.0f, centerY),
+                    ToImColor(legend.color),
+                    selected ? 3.0f : 2.0f);
+                draw->AddText(
+                    ImVec2(x + 22.0f, y + 2.0f),
+                    selected
+                        ? IM_COL32(248, 250, 255, 255)
+                        : IM_COL32(220, 223, 232, 245),
+                    legend.label.c_str());
+
+                if (
+                    hovered &&
+                    legend.selectable &&
+                    !legend.ownerId.empty())
+                {
+                    const bool doubleClicked =
+                        ImGui::IsMouseDoubleClicked(
+                            ImGuiMouseButton_Left);
+                    const bool clicked =
+                        ImGui::IsMouseClicked(
+                            ImGuiMouseButton_Left);
+                    if (doubleClicked || clicked) {
+                        state.selectedOwnerId = legend.ownerId;
+                        state.selectedPaneId = pane.id;
+                        state.selectedLegendId = legend.id;
+                        state.selectedLegendLabel = legend.label;
+                        state.selectionChanged = true;
+                        state.selectionDoubleClicked =
+                            doubleClicked;
+                    }
+                }
+
+                x += width + LegendSpacing;
+            }
+
+            return hoveredAny;
+        }
+
         void ProcessInteraction(
             const ImVec2& plotOrigin,
             float plotWidth,
@@ -465,8 +588,10 @@ namespace trading::ui
             double defaultVisibleSpan,
             const render::Pane& pane,
             const ValueRange& values,
+            bool legendHovered,
             RenderSurfaceState& state)
         {
+            if (legendHovered) return;
             if (!ImGui::IsItemHovered() && !ImGui::IsItemActive()) return;
 
             ImGuiIO& io = ImGui::GetIO();
@@ -575,6 +700,13 @@ namespace trading::ui
                 plotEnd,
                 IM_COL32(70, 72, 82, 255));
 
+            const bool legendHovered = DrawPaneLegends(
+                draw,
+                pane,
+                plotOrigin,
+                plotEnd,
+                state);
+
             if (!values.valid || !visibleRange.valid) {
                 ImGui::PopID();
                 return;
@@ -589,10 +721,12 @@ namespace trading::ui
                 defaultVisibleSpan,
                 pane,
                 values,
+                legendHovered,
                 state);
 
             const bool paneHovered =
-                ImGui::IsItemHovered() || ImGui::IsItemActive();
+                !legendHovered &&
+                (ImGui::IsItemHovered() || ImGui::IsItemActive());
 
             for (int grid = 1; grid < 5; ++grid) {
                 const float y =
@@ -639,6 +773,8 @@ namespace trading::ui
 
             for (const render::HistogramSeries& series : pane.histograms) {
                 if (!series.visible) continue;
+                const bool selected =
+                    OwnerSelected(series.ownerId, state);
                 for (const render::HistogramPoint& point : series.points) {
                     if (!InAxisRange(point.timestampMs, axis, visibleRange)) continue;
                     const float x = MapX(
@@ -657,17 +793,28 @@ namespace trading::ui
                         values,
                         plotOrigin.y,
                         plotHeight);
+                    const ImVec2 barMinimum(
+                        x - seriesBodyWidth * 0.5f,
+                        (std::min)(y, zeroY));
+                    const ImVec2 barMaximum(
+                        x + seriesBodyWidth * 0.5f,
+                        (std::max)(y, zeroY));
                     draw->AddRectFilled(
-                        ImVec2(
-                            x - seriesBodyWidth * 0.5f,
-                            (std::min)(y, zeroY)),
-                        ImVec2(
-                            x + seriesBodyWidth * 0.5f,
-                            (std::max)(y, zeroY)),
+                        barMinimum,
+                        barMaximum,
                         ToImColor(
                             point.positive
                                 ? series.positiveColor
                                 : series.negativeColor));
+                    if (selected) {
+                        draw->AddRect(
+                            barMinimum,
+                            barMaximum,
+                            IM_COL32(245, 247, 252, 210),
+                            0.0f,
+                            0,
+                            1.0f);
+                    }
                 }
             }
 
@@ -720,6 +867,8 @@ namespace trading::ui
 
             for (const render::LineSeries& series : pane.lines) {
                 if (!series.visible) continue;
+                const bool selected =
+                    OwnerSelected(series.ownerId, state);
                 bool hasPrevious = false;
                 ImVec2 previous;
                 for (const render::LinePoint& point : series.points) {
@@ -741,7 +890,7 @@ namespace trading::ui
                             previous,
                             current,
                             ToImColor(series.color),
-                            series.width);
+                            series.width + (selected ? 1.5f : 0.0f));
                     }
                     previous = current;
                     hasPrevious = true;
@@ -750,6 +899,8 @@ namespace trading::ui
 
             for (const render::ReferenceLine& line : pane.referenceLines) {
                 if (!line.visible) continue;
+                const bool selected =
+                    OwnerSelected(line.ownerId, state);
                 const float y = MapY(
                     line.value,
                     values,
@@ -759,11 +910,13 @@ namespace trading::ui
                     ImVec2(plotOrigin.x, y),
                     ImVec2(plotEnd.x, y),
                     ToImColor(line.color),
-                    line.width);
+                    line.width + (selected ? 1.0f : 0.0f));
             }
 
             for (const render::MarkerSeries& series : pane.markers) {
                 if (!series.visible) continue;
+                const bool selected =
+                    OwnerSelected(series.ownerId, state);
                 for (const render::MarkerPoint& marker : series.points) {
                     if (!InAxisRange(marker.timestampMs, axis, visibleRange)) continue;
                     const ImVec2 point(
@@ -778,7 +931,10 @@ namespace trading::ui
                             values,
                             plotOrigin.y,
                             plotHeight));
-                    draw->AddCircleFilled(point, 4.0f, ToImColor(marker.color));
+                    draw->AddCircleFilled(
+                        point,
+                        selected ? 6.0f : 4.0f,
+                        ToImColor(marker.color));
                 }
             }
 
@@ -904,6 +1060,8 @@ namespace trading::ui
         ImVec2 size,
         RenderSurfaceState& surfaceState)
     {
+        surfaceState.selectionChanged = false;
+        surfaceState.selectionDoubleClicked = false;
         if (document.panes.empty()) return;
 
         const std::uint64_t structureRevision =

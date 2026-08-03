@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <chrono>
 #include <memory>
+#include <map>
 #include <utility>
 
 #include "imgui.h"
@@ -42,6 +43,7 @@
 #include "app/indicator_module.h"
 #include "app/indicator_render_adapter.h"
 #include "app/default_indicator_render_plan.h"
+#include "app/indicator_properties.h"
 #include "app/indicator_workspace_coordinator.h"
 #include "render/market_chart_builder.h"
 #include "ui/render_document_renderer.h"
@@ -246,6 +248,13 @@ static trading::app::ChartWorkspaceModule g_chartWorkspaceModule;
 static trading::app::IndicatorModule g_indicatorModule;
 static trading::app::IndicatorRenderAdapter g_indicatorRenderAdapter;
 static trading::ui::RenderSurfaceState g_mainRenderSurface;
+static std::vector<trading::indicators::IndicatorSpec> g_indicatorSpecs;
+static std::string g_selectedIndicatorId;
+static std::string g_indicatorPropertyDraftId;
+static std::map<std::string, double> g_indicatorPropertyDraft;
+static bool g_indicatorPropertyDirty = false;
+static bool g_focusIndicatorProperties = false;
+static std::string g_indicatorPropertyError;
 
 static int MinuteUnitFromSelection(int selection) noexcept
 {
@@ -460,6 +469,68 @@ static bool InitializeIndicators(std::string& error)
         return false;
     }
 
+    g_indicatorSpecs = specs;
+    g_indicatorPropertyDraftId.clear();
+    g_indicatorPropertyDraft.clear();
+    g_indicatorPropertyDirty = false;
+    g_indicatorPropertyError.clear();
+    error.clear();
+    return true;
+}
+
+static const trading::indicators::IndicatorSpec*
+FindIndicatorSpecById(const std::string& indicatorId)
+{
+    for (const trading::indicators::IndicatorSpec& spec :
+         g_indicatorSpecs)
+    {
+        if (spec.id == indicatorId) return &spec;
+    }
+    return nullptr;
+}
+
+static void ResetIndicatorPropertyDraft(
+    const trading::indicators::IndicatorSpec& spec)
+{
+    g_indicatorPropertyDraftId = spec.id;
+    g_indicatorPropertyDraft = spec.parameters;
+    g_indicatorPropertyDirty = false;
+    g_indicatorPropertyError.clear();
+}
+
+static bool ApplyIndicatorConfiguration(
+    const std::vector<trading::indicators::IndicatorSpec>& candidate,
+    std::string& error)
+{
+    trading::app::IndicatorRenderPlan plan;
+    if (!trading::app::BuildDefaultIndicatorRenderPlan(
+            candidate,
+            plan,
+            error))
+    {
+        return false;
+    }
+
+    trading::app::IndicatorRenderAdapter validationAdapter;
+    if (!validationAdapter.Configure(plan, error)) {
+        return false;
+    }
+    if (!g_indicatorModule.Configure(candidate, error)) {
+        return false;
+    }
+    if (!g_indicatorRenderAdapter.Configure(plan, error)) {
+        return false;
+    }
+
+    g_indicatorSpecs = candidate;
+    g_mainRenderSurface.dirty = true;
+    std::string healthError;
+    g_featureRegistry.SetHealth(
+        "indicators",
+        true,
+        {},
+        healthError);
+    WakeFrames(6);
     error.clear();
     return true;
 }
@@ -884,6 +955,19 @@ static void DrawMarketDataPanel()
         *workspace.document,
         available,
         g_mainRenderSurface);
+    if (g_mainRenderSurface.selectionChanged) {
+        const trading::indicators::IndicatorSpec* selected =
+            FindIndicatorSpecById(
+                g_mainRenderSurface.selectedOwnerId);
+        if (selected != nullptr) {
+            g_selectedIndicatorId = selected->id;
+            ResetIndicatorPropertyDraft(*selected);
+            if (g_mainRenderSurface.selectionDoubleClicked) {
+                g_focusIndicatorProperties = true;
+            }
+            WakeFrames(4);
+        }
+    }
     const std::uint64_t elapsedMicros = static_cast<std::uint64_t>(
         (NowSeconds() - started) * 1000000.0);
     RecordFeatureWork(
@@ -937,6 +1021,197 @@ static void DrawScanner()
         ImGui::TextWrapped(
             "현재 단계에서는 한 종목의 실제 분봉만 검증합니다. 실제 유니버스가 연결되기 전에는 베타·상관·시차·거래대금 순위를 만들지 않습니다.");
     }
+    ImGui::End();
+}
+
+
+static void DrawIndicatorPropertiesWindow()
+{
+    if (g_focusIndicatorProperties) {
+        ImGui::SetNextWindowFocus();
+    }
+
+    ImGui::Begin("프로퍼티");
+    g_focusIndicatorProperties = false;
+
+    if (g_selectedIndicatorId.empty()) {
+        ImGui::TextDisabled(
+            "차트 패널 좌측 상단의 지표 범례를 클릭하면 선택됩니다.");
+        ImGui::TextDisabled(
+            "더블클릭하면 이 프로퍼티 탭이 즉시 활성화됩니다.");
+        ImGui::End();
+        return;
+    }
+
+    const trading::indicators::IndicatorSpec* spec =
+        FindIndicatorSpecById(g_selectedIndicatorId);
+    if (spec == nullptr) {
+        ImGui::TextColored(
+            ImVec4(0.95f, 0.30f, 0.30f, 1.0f),
+            "선택한 지표 구성을 찾을 수 없습니다.");
+        ImGui::End();
+        return;
+    }
+
+    trading::app::IndicatorPropertySnapshot properties;
+    std::string descriptionError;
+    if (!trading::app::DescribeIndicatorProperties(
+            *spec,
+            properties,
+            descriptionError))
+    {
+        ImGui::TextColored(
+            ImVec4(0.95f, 0.30f, 0.30f, 1.0f),
+            "%s",
+            descriptionError.c_str());
+        ImGui::End();
+        return;
+    }
+
+    if (g_indicatorPropertyDraftId != spec->id) {
+        ResetIndicatorPropertyDraft(*spec);
+    }
+
+    ImGui::Text(
+        "%s",
+        trading::app::IndicatorLegendLabel(*spec).c_str());
+    ImGui::TextDisabled(
+        "ID: %s  Type: %s",
+        spec->id.c_str(),
+        spec->type.c_str());
+    ImGui::Separator();
+
+    if (ImGui::BeginTable(
+            "indicator_property_grid",
+            2,
+            ImGuiTableFlags_Borders |
+                ImGuiTableFlags_RowBg |
+                ImGuiTableFlags_SizingStretchProp))
+    {
+        ImGui::TableSetupColumn("속성");
+        ImGui::TableSetupColumn("값");
+        ImGui::TableHeadersRow();
+
+        for (const trading::app::IndicatorParameterDescriptor& descriptor :
+             properties.parameters)
+        {
+            ImGui::TableNextRow();
+            ImGui::PushID(descriptor.key.c_str());
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(descriptor.displayName.c_str());
+            ImGui::TableNextColumn();
+            ImGui::SetNextItemWidth(-1.0f);
+
+            double& draft =
+                g_indicatorPropertyDraft[descriptor.key];
+            bool changed = false;
+            if (
+                descriptor.kind ==
+                trading::app::IndicatorParameterKind::Integer)
+            {
+                int value = static_cast<int>(std::llround(draft));
+                const int step =
+                    static_cast<int>(std::llround(descriptor.step));
+                const int fastStep =
+                    static_cast<int>(std::llround(descriptor.fastStep));
+                if (ImGui::InputInt(
+                        "##value",
+                        &value,
+                        step,
+                        fastStep))
+                {
+                    draft = static_cast<double>(value);
+                    changed = true;
+                }
+            }
+            else {
+                double value = draft;
+                if (ImGui::InputDouble(
+                        "##value",
+                        &value,
+                        descriptor.step,
+                        descriptor.fastStep,
+                        "%.4f"))
+                {
+                    draft = value;
+                    changed = true;
+                }
+            }
+            if (changed) {
+                g_indicatorPropertyDirty = true;
+                g_indicatorPropertyError.clear();
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+
+    if (!g_indicatorPropertyDirty) ImGui::BeginDisabled();
+    if (ImGui::Button("적용")) {
+        const std::string selectedId = spec->id;
+        std::vector<trading::indicators::IndicatorSpec> candidate =
+            g_indicatorSpecs;
+        std::string error;
+        bool valid = true;
+        for (const trading::app::IndicatorParameterDescriptor& descriptor :
+             properties.parameters)
+        {
+            const auto found =
+                g_indicatorPropertyDraft.find(descriptor.key);
+            if (
+                found == g_indicatorPropertyDraft.end() ||
+                !trading::app::UpdateIndicatorParameter(
+                    candidate,
+                    selectedId,
+                    descriptor.key,
+                    found->second,
+                    error))
+            {
+                valid = false;
+                if (error.empty()) {
+                    error =
+                        "프로퍼티 초안 값이 없습니다: " +
+                        descriptor.key;
+                }
+                break;
+            }
+        }
+
+        if (valid && ApplyIndicatorConfiguration(candidate, error)) {
+            const trading::indicators::IndicatorSpec* updated =
+                FindIndicatorSpecById(selectedId);
+            if (updated != nullptr) {
+                ResetIndicatorPropertyDraft(*updated);
+            }
+            g_log.Add(
+                "FEATURE",
+                "지표 파라미터 적용: %s",
+                selectedId.c_str());
+        }
+        else {
+            g_indicatorPropertyError = error;
+            g_log.Add(
+                "REJECT",
+                "지표 파라미터 적용 거부 %s: %s",
+                selectedId.c_str(),
+                error.c_str());
+        }
+    }
+    if (!g_indicatorPropertyDirty) ImGui::EndDisabled();
+
+    ImGui::SameLine();
+    if (ImGui::Button("되돌리기")) {
+        ResetIndicatorPropertyDraft(*spec);
+    }
+
+    if (!g_indicatorPropertyError.empty()) {
+        ImGui::Separator();
+        ImGui::TextColored(
+            ImVec4(0.95f, 0.30f, 0.30f, 1.0f),
+            "%s",
+            g_indicatorPropertyError.c_str());
+    }
+
     ImGui::End();
 }
 
@@ -1542,6 +1817,7 @@ static void BuildDefaultLayout(ImGuiID root)
     ImGui::DockBuilderDockWindow("주문/체결", bottomLogs);
     ImGui::DockBuilderDockWindow("결함", bottomLogs);
     ImGui::DockBuilderDockWindow("기능/성능", right);
+    ImGui::DockBuilderDockWindow("프로퍼티", right);
     ImGui::DockBuilderFinish(root);
 }
 
@@ -2101,6 +2377,7 @@ int WINAPI wWinMain(
             DrawMarketDataPanel();
         }
         DrawScanner();
+        DrawIndicatorPropertiesWindow();
         DrawDashboard();
         DrawLogWindow("로그", g_log);
         DrawLogWindow("신호", g_signalLog);

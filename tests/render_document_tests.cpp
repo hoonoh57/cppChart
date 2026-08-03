@@ -1,4 +1,4 @@
-#include "../render/render_document.h"
+﻿#include "../render/render_document.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -46,6 +46,12 @@ namespace
         trading::render::Pane pricePane;
         pricePane.id = "price";
         pricePane.title = "Price";
+
+        trading::render::LegendEntry legend;
+        legend.id = "legend.sma.5";
+        legend.ownerId = "sma.5";
+        legend.label = "SMA 5";
+        pricePane.legends.push_back(legend);
 
         trading::render::CandleSeries candles;
         candles.id = "stock.candles";
@@ -122,6 +128,20 @@ namespace
 
         Check(!trading::render::ValidateRenderDocument(unordered, error),
               "unordered candle timestamps must fail");
+
+        trading::render::RenderDocument invalidLegend;
+        invalidLegend.workspaceId = "main";
+        trading::render::Pane legendPane;
+        legendPane.id = "price";
+        trading::render::LegendEntry selectable;
+        selectable.id = "legend.invalid";
+        selectable.label = "Invalid";
+        selectable.selectable = true;
+        legendPane.legends.push_back(selectable);
+        invalidLegend.panes.push_back(legendPane);
+        Check(!trading::render::ValidateRenderDocument(
+                  invalidLegend, error),
+              "selectable legend without owner must fail");
     }
 }
 

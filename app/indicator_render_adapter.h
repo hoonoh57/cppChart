@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "indicator_module.h"
 #include "../render/render_document.h"
@@ -38,6 +38,7 @@ namespace trading::app
         render::ColorRgba secondaryColor;
         float width = 1.0f;
         bool visible = true;
+        std::string legendLabel;
     };
 
     struct IndicatorReferenceBinding final
@@ -57,6 +58,7 @@ namespace trading::app
         render::ColorRgba color;
         float width = 1.0f;
         bool visible = true;
+        std::string indicatorId;
     };
 
     struct IndicatorRenderPlan final

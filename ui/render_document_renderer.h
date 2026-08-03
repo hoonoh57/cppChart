@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "../render/chart_viewport.h"
 #include "../render/render_document.h"
@@ -7,6 +7,7 @@
 
 #include "imgui.h"
 
+#include <string>
 #include <vector>
 
 namespace trading::ui
@@ -24,6 +25,12 @@ namespace trading::ui
         double crosshairValue = 0.0;
         std::uint64_t boundaryRevision = 0;
         std::vector<render::TimeBoundary> timeBoundaries;
+        std::string selectedOwnerId;
+        std::string selectedPaneId;
+        std::string selectedLegendId;
+        std::string selectedLegendLabel;
+        bool selectionChanged = false;
+        bool selectionDoubleClicked = false;
     };
 
     void DrawRenderDocument(

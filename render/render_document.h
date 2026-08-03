@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "../core/market_types.h"
 #include "value_grid.h"
@@ -219,6 +219,16 @@ namespace trading::render
         std::uint8_t alpha = 255;
     };
 
+    struct LegendEntry final
+    {
+        std::string id;
+        std::string ownerId;
+        std::string label;
+        ColorRgba color;
+        bool selectable = true;
+        bool visible = true;
+    };
+
     struct LinePoint final
     {
         EpochMillis timestampMs = 0;
@@ -258,6 +268,7 @@ namespace trading::render
         ColorRgba upColor{ 235, 72, 72, 255 };
         ColorRgba downColor{ 70, 130, 240, 255 };
         bool visible = true;
+        std::string ownerId;
     };
 
     struct LineSeries final
@@ -268,6 +279,7 @@ namespace trading::render
         ColorRgba color;
         float width = 1.0f;
         bool visible = true;
+        std::string ownerId;
     };
 
     struct HistogramSeries final
@@ -278,6 +290,7 @@ namespace trading::render
         ColorRgba positiveColor{ 235, 72, 72, 255 };
         ColorRgba negativeColor{ 70, 130, 240, 255 };
         bool visible = true;
+        std::string ownerId;
     };
 
     struct MarkerSeries final
@@ -286,6 +299,7 @@ namespace trading::render
         std::string label;
         std::vector<MarkerPoint> points;
         bool visible = true;
+        std::string ownerId;
     };
 
     struct ReferenceLine final
@@ -296,6 +310,7 @@ namespace trading::render
         ColorRgba color;
         float width = 1.0f;
         bool visible = true;
+        std::string ownerId;
     };
 
     struct TextAnnotation final
@@ -325,6 +340,7 @@ namespace trading::render
         double fixedMaximum = 0.0;
         ValueGrid cursorGrid;
         int valueDecimals = 2;
+        std::vector<LegendEntry> legends;
         std::vector<CandleSeries> candles;
         std::vector<LineSeries> lines;
         std::vector<HistogramSeries> histograms;

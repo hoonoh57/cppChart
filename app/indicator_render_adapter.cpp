@@ -1,4 +1,4 @@
-#include "indicator_render_adapter.h"
+﻿#include "indicator_render_adapter.h"
 
 #include <algorithm>
 #include <cmath>
@@ -85,6 +85,52 @@ namespace trading::app
             pane.fixedMaximum = fixedMaximum;
             pane.cursorGrid = cursorGrid;
             pane.valueDecimals = valueDecimals;
+        }
+
+        bool EnsureLegend(
+            render::Pane& pane,
+            const std::string& ownerId,
+            const std::string& label,
+            render::ColorRgba color,
+            bool visible,
+            std::string& error)
+        {
+            if (ownerId.empty()) {
+                error = "indicator legend owner id is empty";
+                return false;
+            }
+            if (label.empty()) {
+                error = "indicator legend label is empty: " + ownerId;
+                return false;
+            }
+
+            const std::string legendId =
+                "legend." + pane.id + "." + ownerId;
+            for (const render::LegendEntry& existing : pane.legends) {
+                if (existing.id != legendId) continue;
+                if (
+                    existing.ownerId != ownerId ||
+                    existing.label != label)
+                {
+                    error =
+                        "indicator legend contract conflicts: " +
+                        legendId;
+                    return false;
+                }
+                error.clear();
+                return true;
+            }
+
+            render::LegendEntry legend;
+            legend.id = legendId;
+            legend.ownerId = ownerId;
+            legend.label = label;
+            legend.color = color;
+            legend.selectable = true;
+            legend.visible = visible;
+            pane.legends.push_back(std::move(legend));
+            error.clear();
+            return true;
         }
     }
 
@@ -208,6 +254,18 @@ namespace trading::app
             render::Pane* pane =
                 FindOrCreatePane(document, binding, error);
             if (pane == nullptr) return false;
+            if (!EnsureLegend(
+                    *pane,
+                    binding.indicatorId,
+                    binding.legendLabel.empty()
+                        ? binding.label
+                        : binding.legendLabel,
+                    binding.primaryColor,
+                    binding.visible,
+                    error))
+            {
+                return false;
+            }
 
             BindingCache& cache = caches_[binding.seriesId];
             const void* completedIdentity = series->completedValues.get();
@@ -251,6 +309,7 @@ namespace trading::app
                     line.color = binding.primaryColor;
                     line.width = binding.width;
                     line.visible = binding.visible;
+                    line.ownerId = binding.indicatorId;
 
                     const bool appendLive =
                         hasLive &&
@@ -273,6 +332,7 @@ namespace trading::app
                     line.color = binding.primaryColor;
                     line.width = binding.width;
                     line.visible = binding.visible;
+                    line.ownerId = binding.indicatorId;
                     line.points.push_back(livePoint);
                     pane->lines.push_back(std::move(line));
                     ++segmentIndex;
@@ -316,6 +376,7 @@ namespace trading::app
                 histogram.positiveColor = binding.primaryColor;
                 histogram.negativeColor = binding.secondaryColor;
                 histogram.visible = binding.visible;
+                histogram.ownerId = binding.indicatorId;
                 histogram.points.SetShared(
                     cache.histogramPoints,
                     hasLive ? &livePoint : nullptr);
@@ -337,6 +398,7 @@ namespace trading::app
             line.color = reference.color;
             line.width = reference.width;
             line.visible = reference.visible;
+            line.ownerId = reference.indicatorId;
             pane->referenceLines.push_back(std::move(line));
             ++contributedSeries;
             structureToken = MixRevision(structureToken, 1U);
@@ -392,12 +454,14 @@ namespace trading::app
             bytes += binding.paneTitle.capacity();
             bytes += binding.seriesId.capacity();
             bytes += binding.label.capacity();
+            bytes += binding.legendLabel.capacity();
         }
         for (const IndicatorReferenceBinding& reference : plan_.references) {
             bytes += reference.paneId.capacity();
             bytes += reference.paneTitle.capacity();
             bytes += reference.referenceId.capacity();
             bytes += reference.label.capacity();
+            bytes += reference.indicatorId.capacity();
         }
         for (const auto& entry : caches_) {
             bytes += entry.first.capacity();

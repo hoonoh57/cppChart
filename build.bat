@@ -32,6 +32,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    app\indicator_module.cpp ^
    app\indicator_render_adapter.cpp ^
    app\default_indicator_render_plan.cpp ^
+   app\indicator_properties.cpp ^
    app\indicator_workspace_coordinator.cpp ^
    render\chart_viewport.cpp ^
    render\time_axis.cpp ^

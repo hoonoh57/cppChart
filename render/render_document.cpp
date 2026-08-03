@@ -1,4 +1,4 @@
-#include "render_document.h"
+﻿#include "render_document.h"
 
 #include <cmath>
 #include <set>
@@ -62,6 +62,22 @@ namespace trading::render
             {
                 error = "fixed render pane range is invalid: " + pane.id;
                 return false;
+            }
+
+            for (const LegendEntry& legend : pane.legends) {
+                if (!AddUnique(elementIds, legend.id, error)) return false;
+                if (legend.label.empty()) {
+                    error = "render legend label is empty: " + legend.id;
+                    return false;
+                }
+                if (legend.selectable && legend.ownerId.empty()) {
+                    error = "selectable render legend owner is empty: " + legend.id;
+                    return false;
+                }
+                if (!ValidColor(legend.color)) {
+                    error = "render legend color is invalid: " + legend.id;
+                    return false;
+                }
             }
 
             for (const CandleSeries& series : pane.candles) {

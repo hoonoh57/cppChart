@@ -106,7 +106,7 @@ anchor = '''        Check(missing.result.error.find("stk_min_pole_chart_qry") !=
               "missing array error must name the field");
 
 '''
-addition = anchor + '''        const trading::MinuteBarsPage wrongApi =
+addition = anchor + r'''        const trading::MinuteBarsPage wrongApi =
             trading::ParseStockMinuteBarsResponse(
                 "005930",
                 1,

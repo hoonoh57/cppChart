@@ -40,9 +40,29 @@ namespace trading::app
         bool visible = true;
     };
 
+    struct IndicatorReferenceBinding final
+    {
+        std::string paneId;
+        std::string paneTitle;
+        float paneHeightWeight = 0.3f;
+        render::PaneValueScale paneValueScale =
+            render::PaneValueScale::Auto;
+        double fixedMinimum = 0.0;
+        double fixedMaximum = 0.0;
+        render::ValueGrid cursorGrid;
+        int valueDecimals = 2;
+        std::string referenceId;
+        std::string label;
+        double value = 0.0;
+        render::ColorRgba color;
+        float width = 1.0f;
+        bool visible = true;
+    };
+
     struct IndicatorRenderPlan final
     {
         std::vector<IndicatorOutputBinding> bindings;
+        std::vector<IndicatorReferenceBinding> references;
     };
 
     class IndicatorRenderAdapter final
@@ -87,6 +107,11 @@ namespace trading::app
         render::Pane* FindOrCreatePane(
             render::RenderDocument& document,
             const IndicatorOutputBinding& binding,
+            std::string& error) const;
+
+        render::Pane* FindOrCreatePane(
+            render::RenderDocument& document,
+            const IndicatorReferenceBinding& binding,
             std::string& error) const;
 
         bool RebuildLineCache(

@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -22,26 +22,11 @@ jobs:
   build-and-test:
     name: MSVC build and headless tests
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: p2/kiwoom-mock-gateway
-          fetch-depth: 0
-
-      - name: Apply selected-stock 0B integration
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $shell = Get-Content .\shell_main.cpp -Raw
-          if (-not $shell.Contains('ApplyStockTradeTick')) {
-            python .\scripts\apply_realtime_core_only.py
-          }
-          else {
-            Write-Host 'Selected-stock 0B integration is already present.'
-          }
 
       - name: Verify repository policy
         shell: pwsh
@@ -217,27 +202,7 @@ jobs:
             throw "headless tests failed, exit code=$LASTEXITCODE"
           }
 
-      - name: Commit verified integration
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add `
-            core/kiwoom_market_data.h `
-            core/kiwoom_market_data.cpp `
-            platform/kiwoom_runtime_runner.h `
-            platform/kiwoom_runtime_runner.cpp `
-            shell_main.cpp `
-            tests/kiwoom_market_data_tests.cpp `
-            tests/kiwoom_runtime_runner_tests.cpp `
-            .github/workflows/windows-ci.yml
-          if (-not (git diff --cached --quiet)) {
-            git commit -m 'Connect 0B trades to live minute bars'
-            git push origin HEAD:p2/kiwoom-mock-gateway
-          }
-
-      - name: Verify clean source tree after commit
+      - name: Verify clean source tree after build
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'

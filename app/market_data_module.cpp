@@ -21,7 +21,8 @@ namespace trading::app
     }
 
     MarketDataModule::MarketDataModule()
-        : error_(
+        : completedBars_(EmptyCompletedBars()),
+          error_(
             "실제 시세 백필과 실시간 체결 수신이 연결되지 않았습니다. "
             "합성 데이터는 제거되었으며 오류를 숨기지 않습니다.")
     {
@@ -36,12 +37,15 @@ namespace trading::app
         level_ = level;
         if (level == FeatureLevel::Off) {
             code_.clear();
-            bars_.clear();
-            bars_.shrink_to_fit();
+            completedBars_ = EmptyCompletedBars();
+            liveBar_ = {};
+            hasLiveBar_ = false;
             continuation_ = {};
             state_ = MarketDataState::Disconnected;
             error_.clear();
             ++revision_;
+            ++completedRevision_;
+            ++liveRevision_;
             stockTradeTickCount_.store(0, std::memory_order_release);
             lastStockTradeTimestampMs_.store(0, std::memory_order_release);
             stockTradeSubscriptionRequested_.store(
@@ -89,11 +93,15 @@ namespace trading::app
 
         code_ = code;
         minuteUnit_ = minuteUnit;
-        bars_.clear();
+        completedBars_ = EmptyCompletedBars();
+        liveBar_ = {};
+        hasLiveBar_ = false;
         continuation_ = {};
         error_.clear();
         state_ = MarketDataState::Loading;
         ++revision_;
+        ++completedRevision_;
+        ++liveRevision_;
         stockTradeTickCount_.store(0, std::memory_order_release);
         lastStockTradeTimestampMs_.store(0, std::memory_order_release);
         stockTradeSubscriptionRequested_.store(
@@ -135,6 +143,14 @@ namespace trading::app
             return result;
         }
 
+        auto completed = std::make_shared<std::vector<Bar>>();
+        if (page.bars.size() > 1) {
+            completed->assign(page.bars.begin(), page.bars.end() - 1);
+        }
+        std::shared_ptr<const std::vector<Bar>> immutableCompleted =
+            std::move(completed);
+        const Bar live = page.bars.back();
+
         std::lock_guard<std::mutex> lock(mutex_);
         if (!IsVisibleLevel(level_)) {
             result.stale = true;
@@ -150,16 +166,20 @@ namespace trading::app
 
         code_ = page.code;
         minuteUnit_ = page.minuteUnit;
-        bars_ = page.bars;
+        completedBars_ = std::move(immutableCompleted);
+        liveBar_ = live;
+        hasLiveBar_ = true;
         continuation_ = continuation;
         error_.clear();
         state_ = MarketDataState::Ready;
         ++revision_;
+        ++completedRevision_;
+        ++liveRevision_;
 
         result.applied = true;
         result.code = code_;
-        result.latestPriceWon = bars_.back().close;
-        result.eventTimestampMs = bars_.back().closeTimestampMs;
+        result.latestPriceWon = liveBar_.close;
+        result.eventTimestampMs = liveBar_.closeTimestampMs;
         return result;
     }
 
@@ -175,18 +195,22 @@ namespace trading::app
                 "비활성 시장 데이터 기능의 실시간 체결을 무시했습니다.";
             return result;
         }
-        if (code_.empty() || bars_.empty() || code_ != tick.code) {
+        if (code_.empty() || !hasLiveBar_ || code_ != tick.code) {
             result.stale = true;
             result.error = "현재 선택 종목과 다른 실시간 체결입니다.";
             return result;
         }
 
         const EpochMillis sessionStart =
-            KstSessionDateStart(bars_.back().closeTimestampMs);
+            KstSessionDateStart(liveBar_.closeTimestampMs);
+
+        std::vector<Bar> liveWindow;
+        liveWindow.reserve(2);
+        liveWindow.push_back(liveBar_);
 
         std::string mergeError;
         if (!MergeStockTradeIntoMinuteBars(
-                bars_,
+                liveWindow,
                 minuteUnit_,
                 sessionStart,
                 tick,
@@ -195,6 +219,25 @@ namespace trading::app
             result.stale =
                 mergeError.find("stale stock trade") != std::string::npos;
             result.error = mergeError;
+            return result;
+        }
+
+        if (liveWindow.size() == 1) {
+            liveBar_ = liveWindow.front();
+        }
+        else if (liveWindow.size() == 2) {
+            auto nextCompleted = std::make_shared<std::vector<Bar>>();
+            if (completedBars_) {
+                *nextCompleted = *completedBars_;
+            }
+            nextCompleted->push_back(liveWindow.front());
+            completedBars_ = std::move(nextCompleted);
+            liveBar_ = liveWindow.back();
+            ++completedRevision_;
+        }
+        else {
+            result.error =
+                "실시간 체결 병합 결과가 2개 이상의 새 분봉을 생성했습니다.";
             return result;
         }
 
@@ -208,6 +251,7 @@ namespace trading::app
             static_cast<EpochMillis>(second) * 1000LL;
 
         ++revision_;
+        ++liveRevision_;
         stockTradeTickCount_.fetch_add(1, std::memory_order_acq_rel);
         lastStockTradeTimestampMs_.store(
             eventTimestampMs,
@@ -215,7 +259,7 @@ namespace trading::app
 
         result.applied = true;
         result.code = code_;
-        result.latestPriceWon = bars_.back().close;
+        result.latestPriceWon = liveBar_.close;
         result.eventTimestampMs = eventTimestampMs;
         return result;
     }
@@ -246,13 +290,13 @@ namespace trading::app
             !IsVisibleLevel(level_) ||
             state_ != MarketDataState::Ready ||
             code_.empty() ||
-            bars_.empty())
+            !hasLiveBar_)
         {
             return false;
         }
 
         code = code_;
-        priceWon = bars_.back().close;
+        priceWon = liveBar_.close;
         return IsValidPrice(priceWon);
     }
 
@@ -265,18 +309,24 @@ namespace trading::app
             result.level = level_;
             result.code = code_;
             result.minuteUnit = minuteUnit_;
-            result.barCount = bars_.size();
+            result.barCount =
+                (completedBars_ ? completedBars_->size() : 0U) +
+                (hasLiveBar_ ? 1U : 0U);
             result.continuation = continuation_;
             result.error = error_;
             result.revision = revision_;
+            result.completedRevision = completedRevision_;
+            result.liveRevision = liveRevision_;
             result.retainedBytes =
-                bars_.capacity() * sizeof(Bar) +
+                (completedBars_ ?
+                    completedBars_->capacity() * sizeof(Bar) : 0U) +
+                (hasLiveBar_ ? sizeof(Bar) : 0U) +
                 DynamicStringBytes(code_) +
                 DynamicStringBytes(error_) +
                 DynamicStringBytes(continuation_.continueYn) +
                 DynamicStringBytes(continuation_.nextKey);
-            if (!bars_.empty()) {
-                result.latestBar = bars_.back();
+            if (hasLiveBar_) {
+                result.latestBar = liveBar_;
                 result.hasLatestBar = true;
             }
         }
@@ -291,19 +341,52 @@ namespace trading::app
         return result;
     }
 
+    MarketDataSeriesSnapshot MarketDataModule::SeriesSnapshot() const
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        MarketDataSeriesSnapshot result;
+        result.state = state_;
+        result.level = level_;
+        result.code = code_;
+        result.minuteUnit = minuteUnit_;
+        result.completedBars = completedBars_;
+        result.liveBar = liveBar_;
+        result.hasLiveBar = hasLiveBar_;
+        result.barCount =
+            (completedBars_ ? completedBars_->size() : 0U) +
+            (hasLiveBar_ ? 1U : 0U);
+        result.revision = revision_;
+        result.completedRevision = completedRevision_;
+        result.liveRevision = liveRevision_;
+        return result;
+    }
+
     std::vector<Bar> MarketDataModule::CopyVisibleBars(
         std::size_t maximumCount) const
     {
         if (maximumCount == 0) return {};
 
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!IsVisibleLevel(level_) || bars_.empty()) return {};
+        if (!IsVisibleLevel(level_) || !hasLiveBar_) return {};
 
+        const std::size_t completedCount =
+            completedBars_ ? completedBars_->size() : 0U;
+        const std::size_t totalCount = completedCount + 1U;
         const std::size_t count =
-            (std::min)(maximumCount, bars_.size());
-        const auto first = bars_.end() -
-            static_cast<std::ptrdiff_t>(count);
-        return std::vector<Bar>(first, bars_.end());
+            (std::min)(maximumCount, totalCount);
+        const std::size_t completedToCopy =
+            count > 0 ? count - 1U : 0U;
+
+        std::vector<Bar> result;
+        result.reserve(count);
+        if (completedToCopy > 0 && completedBars_) {
+            const auto first = completedBars_->end() -
+                static_cast<std::ptrdiff_t>(completedToCopy);
+            result.insert(result.end(), first, completedBars_->end());
+        }
+        result.push_back(liveBar_);
+        return result;
     }
 
     const char* MarketDataModule::StateName(
@@ -327,5 +410,13 @@ namespace trading::app
         return
             ((timestampMs + KstOffsetMs) / DayMs) * DayMs -
             KstOffsetMs;
+    }
+
+    std::shared_ptr<const std::vector<Bar>>
+    MarketDataModule::EmptyCompletedBars()
+    {
+        static const auto empty =
+            std::make_shared<const std::vector<Bar>>();
+        return empty;
     }
 }

@@ -5,6 +5,9 @@ cd /d "%~dp0\.."
 call :build_and_run core_tests.exe "tests\core_tests.cpp core\command_bus.cpp core\fault_policy.cpp core\json_lite.cpp core\parameter_store.cpp core\trading_state.cpp"
 if errorlevel 1 exit /b 1
 
+call :build_and_run trading_date_tests.exe "tests\trading_date_tests.cpp"
+if errorlevel 1 exit /b 1
+
 call :build_and_run indicator_engine_tests.exe "tests\indicator_engine_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\sma_indicator.cpp"
 if errorlevel 1 exit /b 1
 

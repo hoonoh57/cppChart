@@ -181,7 +181,7 @@ namespace trading::app
             std::vector<render::LinePoint> segment;
             std::size_t segmentIndex = 0;
 
-            const auto flush = [&]() mutable {
+            auto flush = [&]() {
                 if (segment.empty()) return;
                 AddLine(
                     pane,
@@ -459,6 +459,7 @@ namespace trading::app
             return false;
         }
 
+        document.panes.reserve(document.panes.size() + snapshot.series.size());
         render::Pane* pricePane = FindPricePane(document);
         if (pricePane == nullptr) {
             error = "indicator contributions require a price pane";

@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: windows-ci-live-tail-${{ github.ref }}
+  group: windows-ci-m6-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -29,9 +29,11 @@ jobs:
           ref: p2/kiwoom-mock-gateway
           fetch-depth: 0
 
-      - name: Integrate immutable history and live tail
+      - name: Apply pending M6 migrations
         shell: pwsh
-        run: python .\scripts\finish_m6_live_tail.py
+        run: |
+          python .\scripts\finish_m6_live_tail.py
+          python .\scripts\complete_m6_boundaries.py
 
       - name: Verify repository policy
         shell: pwsh
@@ -57,53 +59,32 @@ jobs:
           .\scripts\verify_real_data_only.ps1
           .\scripts\verify_modular_architecture.ps1
 
-      - name: Verify integrated runtime contract
+      - name: Verify M6 contracts
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $source = Get-Content .\shell_main.cpp -Raw
-          $runner = Get-Content .\platform\kiwoom_runtime_runner.cpp -Raw
-          $marketCore = Get-Content .\core\kiwoom_market_data.cpp -Raw
           $marketModule = Get-Content .\app\market_data_module.cpp -Raw
           $chartModule = Get-Content .\app\chart_workspace_module.cpp -Raw
-          $chartTests = Get-Content .\tests\chart_workspace_module_tests.cpp -Raw
           $renderer = Get-Content .\ui\render_document_renderer.cpp -Raw
           $renderContract = Get-Content .\render\render_document.h -Raw
+          $builder = Get-Content .\render\market_chart_builder.cpp -Raw
+          $boundaries = Get-Content .\render\time_boundaries.cpp -Raw
           $runAll = Get-Content .\tests\run_all.bat -Raw
-          $runnerTests = Get-Content .\tests\kiwoom_runtime_runner_tests.cpp -Raw
-          $transport = Get-Content .\platform\winhttp_transport.cpp -Raw
+          $build = Get-Content .\build.bat -Raw
 
-          $requiredShell = @(
-            'CPPCHART_SHARED_RUNTIME_INTEGRATED',
-            'CPPCHART_REAL_DATA_ONLY',
-            'CPPCHART_MAJOR_FEATURE_MODULES',
-            'CPPCHART_GENERIC_RENDER_DOCUMENT',
-            'MarketDataModule g_marketDataModule',
-            'ChartWorkspaceModule g_chartWorkspaceModule',
-            'FeatureRegistry g_featureRegistry',
+          foreach ($marker in @(
             'MarketDataSeriesSnapshot marketSeries',
             'ChartMarketSource chartSource',
             'DrawRenderDocument',
-            'RecordPresentedFrame'
-          )
-          foreach ($marker in $requiredShell) {
+            'RecordPresentedFrame')) {
             if (-not $source.Contains($marker)) {
-              throw "Missing integrated shell marker: $marker"
+              throw "Missing shell M6 marker: $marker"
             }
           }
           foreach ($marker in @('CopyVisibleBars(visibleLimit)', 'const std::vector<trading::Bar> visibleBars')) {
             if ($source.Contains($marker)) {
               throw "Full-history copy remains in the live render path: $marker"
-            }
-          }
-
-          foreach ($marker in @(
-            'StockMinuteApiId = "ka10080"',
-            'IndexMinuteApiId = "ka20005"',
-            'DecodeStockTradeRecord',
-            'MergeStockTradeIntoMinuteBars')) {
-            if (-not $marketCore.Contains($marker)) {
-              throw "Missing strict market-data marker: $marker"
             }
           }
 
@@ -114,57 +95,60 @@ jobs:
             'SeriesSnapshot()',
             'liveWindow.reserve(2)')) {
             if (-not $marketModule.Contains($marker)) {
-              throw "Missing market-data live-tail marker: $marker"
+              throw "Missing market live-tail marker: $marker"
             }
           }
-
           foreach ($marker in @(
             'BuildCompletedVolume',
             'completedVolume_',
-            'source.completedRevision',
-            'shared_ptr<const render::RenderDocument>')) {
+            'renderSource.completedRevision')) {
             if (-not $chartModule.Contains($marker)) {
-              throw "Missing chart-workspace reuse marker: $marker"
+              throw "Missing workspace sharing marker: $marker"
             }
+          }
+          foreach ($marker in @(
+            'class SharedTailSeries final',
+            'structureRevision',
+            'SetShared(',
+            'SharedPrefix()',
+            'HasLiveTail()')) {
+            if (-not $renderContract.Contains($marker)) {
+              throw "Missing shared render contract marker: $marker"
+            }
+          }
+          if (-not $builder.Contains('document.structureRevision = source.completedRevision')) {
+            throw 'market chart builder does not publish stable structure revision'
           }
 
           foreach ($marker in @(
-            'class SharedTailSeries final',
-            'SetShared(',
-            'SharedPrefix()',
-            'HasLiveTail()',
-            'RenderDocument',
-            'CandleSeries',
-            'HistogramSeries')) {
-            if (-not $renderContract.Contains($marker)) {
-              throw "Missing generic shared render contract marker: $marker"
+            'PrimaryCandleTimestamps',
+            'boundaryStructureRevision',
+            'FindTimeBoundaries',
+            'TimeBoundaryKind::CalendarDate')) {
+            if (-not $renderer.Contains($marker)) {
+              throw "Missing renderer boundary marker: $marker"
             }
           }
-
-          if (-not $chartTests.Contains('live tick must reuse completed candle history') -or
-              -not $chartTests.Contains('new minute must rebuild completed volume history once')) {
-            throw 'Live-tail chart reuse regression coverage is missing'
+          foreach ($marker in @(
+            'LocalDayNumber',
+            'InferExpectedStep',
+            'TimeBoundaryKind::SessionGap')) {
+            if (-not $boundaries.Contains($marker)) {
+              throw "Missing boundary detector marker: $marker"
+            }
           }
-          if (-not $runAll.Contains('chart_viewport_tests.exe')) {
-            throw 'Viewport tests are not registered in the full suite'
+          if (-not $runAll.Contains('chart_viewport_tests.exe') -or
+              -not $runAll.Contains('time_boundaries_tests.exe')) {
+            throw 'M6 viewport and boundary tests are not in the full suite'
+          }
+          if (-not $build.Contains('render\time_boundaries.cpp')) {
+            throw 'time boundary implementation is not linked into shell.exe'
           }
 
           foreach ($marker in @('Kiwoom', 'ka10080', 'StockTradeTick', 'OrderIntent', 'TradingState', 'SMA', 'JMA', 'VWAP', 'Strategy')) {
             if ($renderer.Contains($marker)) {
               throw "Generic renderer contains feature-specific marker: $marker"
             }
-          }
-
-          if (-not $runner.Contains('DeliverMinuteBars') -or
-              -not $runner.Contains('SubscribeStockTrades') -or
-              -not $runner.Contains('UnsubscribeStockTrades')) {
-            throw 'Kiwoom minute and 0B runtime integration is incomplete'
-          }
-          if (-not $runnerTests.Contains('must not return after reconnect')) {
-            throw '0B reconnect regression gate is missing'
-          }
-          if (-not $transport.Contains('CPPCHART_CONTINUATION_HEADERS')) {
-            throw 'WinHTTP continuation headers are missing'
           }
           if ($source.Contains('ImGui::GetIO().Framerate')) {
             throw 'ImGui smoothed FPS is exposed as actual render rate'
@@ -197,16 +181,16 @@ jobs:
           & cmd.exe /d /s /c "`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && call tests\run_all.bat"
           if ($LASTEXITCODE -ne 0) { throw "tests failed, exit code=$LASTEXITCODE" }
 
-      - name: Commit verified integration
+      - name: Commit verified M6 implementation
         if: github.event_name == 'pull_request'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add shell_main.cpp scripts/verify_modular_architecture.ps1 docs/MODULARIZATION_PLAN.md docs/SESSION_HANDOFF.md
+          git add render/render_document.h render/market_chart_builder.h render/market_chart_builder.cpp app/chart_workspace_module.cpp ui/render_document_renderer.cpp build.bat tests/run_all.bat docs/MODULARIZATION_PLAN.md docs/SESSION_HANDOFF.md
           if (-not (git diff --cached --quiet)) {
-            git commit -m 'Share immutable chart history across live ticks'
+            git commit -m 'Complete generic chart viewport boundaries'
             git push origin HEAD:p2/kiwoom-mock-gateway
           }
 

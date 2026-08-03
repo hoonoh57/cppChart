@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+# Execute the source migration with a corrected range-replacement helper.
 script_path = Path(__file__).with_name("apply_modular_shell_refactor.py")
 source = script_path.read_text(encoding="utf-8-sig")
 old = "    return text[:first] + replacement + text[last:]\n"

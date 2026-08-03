@@ -14,6 +14,9 @@ if errorlevel 1 exit /b 1
 call :build_and_run obv_indicator_tests.exe "tests\obv_indicator_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\obv_indicator.cpp"
 if errorlevel 1 exit /b 1
 
+call :build_and_run adx_indicator_tests.exe "tests\adx_indicator_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\adx_indicator.cpp"
+if errorlevel 1 exit /b 1
+
 call :build_and_run feature_registry_tests.exe "tests\feature_registry_tests.cpp app\feature_registry.cpp"
 if errorlevel 1 exit /b 1
 

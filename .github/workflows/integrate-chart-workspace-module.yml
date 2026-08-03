@@ -1,4 +1,4 @@
-name: Integrate chart workspace module
+name: Integrate modular feature runtime
 
 on:
   push:
@@ -6,19 +6,21 @@ on:
       - p2/kiwoom-mock-gateway
     paths:
       - scripts/integrate_chart_workspace_module.py
+      - scripts/integrate_realtime_feature_levels_v2.py
       - .github/workflows/integrate-chart-workspace-module.yml
   pull_request:
     branches:
       - main
     paths:
       - scripts/integrate_chart_workspace_module.py
+      - scripts/integrate_realtime_feature_levels_v2.py
       - .github/workflows/integrate-chart-workspace-module.yml
 
 permissions:
   contents: write
 
 concurrency:
-  group: integrate-chart-workspace-module-${{ github.event_name }}
+  group: integrate-modular-feature-runtime-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -36,6 +38,10 @@ jobs:
       - name: Integrate chart workspace module
         shell: pwsh
         run: python .\scripts\integrate_chart_workspace_module.py
+
+      - name: Integrate upstream feature levels
+        shell: pwsh
+        run: python .\scripts\integrate_realtime_feature_levels_v2.py
 
       - name: Verify modular architecture
         shell: pwsh
@@ -82,9 +88,15 @@ jobs:
           $ErrorActionPreference = 'Stop'
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add shell_main.cpp scripts/verify_modular_architecture.ps1 .github/workflows/windows-ci.yml
+          git add `
+            shell_main.cpp `
+            platform/kiwoom_runtime_runner.cpp `
+            tests/kiwoom_runtime_runner_tests.cpp `
+            tests/run_all.bat `
+            scripts/verify_modular_architecture.ps1 `
+            .github/workflows/windows-ci.yml
           if (-not (git diff --cached --quiet)) {
-            git commit -m 'Integrate detachable chart workspace module'
+            git commit -m 'Integrate modular chart and feature execution levels'
             git fetch origin p2/kiwoom-mock-gateway
             git rebase origin/p2/kiwoom-mock-gateway
             git push origin HEAD:p2/kiwoom-mock-gateway

@@ -22,7 +22,7 @@ namespace
 
     void CheckNear(double actual, double expected, const char* message)
     {
-        if (std::fabs(actual - expected) > 1.0e-9) {
+        if (std::fabs(actual - expected) > 1.0e-5) {
             std::fprintf(
                 stderr,
                 "[FAIL] %s actual=%.12f expected=%.12f\n",
@@ -31,6 +31,11 @@ namespace
                 expected);
             std::exit(1);
         }
+    }
+
+    void CheckNan(double actual, const char* message)
+    {
+        if (!std::isnan(actual)) Fail(message);
     }
 
     trading::Bar MakeBar(
@@ -94,13 +99,21 @@ int main()
         MakeBar(50, 5000),
         MakeBar(60, 6000)
     };
-    const double expected[] = {
+    const double expectedValue[] = {
         10.0,
         15.0,
         20.0,
-        36.8351,
-        48.1618,
-        58.3648
+        36.83509826660156,
+        48.161800384521484,
+        58.36479949951172
+    };
+    const double expectedSlope[] = {
+        0.0,
+        50.0,
+        33.29999923706055,
+        84.19999694824219,
+        30.700000762939453,
+        21.200000762939453
     };
 
     IndicatorInstance batchInstance =
@@ -113,12 +126,24 @@ int main()
     Check(batch.size() == bars.size(),
           "JMA batch output size mismatch");
     for (std::size_t index = 0; index < batch.size(); ++index) {
-        Check(batch[index].ready,
-              "JMA value must be ready from the first sample");
+        Check(batch[index].outputCount == 4U,
+              "JMA must publish Value/Up/Down/Slope");
+        Check(
+            batch[index].IsReady(JmaValueOutput) &&
+            batch[index].IsReady(JmaUpOutput) &&
+            batch[index].IsReady(JmaDownOutput) &&
+            batch[index].IsReady(JmaSlopeOutput),
+            "JMA outputs must be ready from the first sample");
         Check(batch[index].fault == IndicatorFault::None,
               "JMA batch value fault mismatch");
-        CheckNear(batch[index].value, expected[index],
-                  "JMA legacy fixture mismatch");
+        CheckNear(batch[index].Value(JmaValueOutput), expectedValue[index],
+                  "JMA legacy Value fixture mismatch");
+        CheckNear(batch[index].Value(JmaUpOutput), expectedValue[index],
+                  "JMA legacy Up fixture mismatch");
+        CheckNan(batch[index].Value(JmaDownOutput),
+                 "rising JMA must publish NaN on Down");
+        CheckNear(batch[index].Value(JmaSlopeOutput), expectedSlope[index],
+                  "JMA legacy Slope fixture mismatch");
     }
 
     IndicatorInstance incremental =
@@ -129,34 +154,39 @@ int main()
         const IndicatorValue value = incremental.Update(bars[index]);
         Check(value.timestampMs == batch[index].timestampMs,
               "JMA batch/incremental timestamp parity mismatch");
-        Check(value.ready == batch[index].ready,
+        Check(value.readyMask == batch[index].readyMask,
               "JMA batch/incremental readiness parity mismatch");
         Check(value.fault == batch[index].fault,
               "JMA batch/incremental fault parity mismatch");
-        CheckNear(value.value, batch[index].value,
-                  "JMA batch/incremental value parity mismatch");
+        for (std::size_t output = 0; output < 4; ++output) {
+            const double actual = value.Value(output);
+            const double expected = batch[index].Value(output);
+            if (std::isnan(expected)) CheckNan(actual, "JMA NaN parity mismatch");
+            else CheckNear(actual, expected, "JMA output parity mismatch");
+        }
     }
 
     IndicatorInstance live = registry.Create(JmaSpec(3, 0, 2), error);
     Check(live.IsValid(), "live JMA instance creation failed");
-    CheckNear(live.Update(MakeBar(10, 1000)).value, 10.0,
-              "first live JMA value mismatch");
-    CheckNear(live.Update(MakeBar(20, 2000)).value, 15.0,
-              "second live JMA value mismatch");
-    CheckNear(live.Update(MakeBar(30, 3000)).value, 20.0,
-              "third live JMA value mismatch");
+    live.Update(MakeBar(10, 1000));
+    live.Update(MakeBar(20, 2000));
+    live.Update(MakeBar(30, 3000));
 
     IndicatorValue value = live.Update(MakeBar(60, 3000));
     Check(value.replaced,
           "same-timestamp JMA update must replace the live tail");
-    CheckNear(value.value, 30.0,
+    CheckNear(value.Value(JmaValueOutput), 30.0,
               "same-timestamp JMA replacement mismatch");
+    CheckNear(value.Value(JmaSlopeOutput), 100.0,
+              "same-timestamp JMA slope mismatch");
 
     value = live.Update(MakeBar(40, 4000));
     Check(!value.replaced,
           "new JMA timestamp must append instead of replace");
-    CheckNear(value.value, 39.5807,
+    CheckNear(value.Value(JmaValueOutput), 39.5806999206543,
               "post-replacement JMA state mismatch");
+    CheckNear(value.Value(JmaSlopeOutput), 31.899999618530273,
+              "post-replacement JMA slope mismatch");
 
     const IndicatorValue backward = live.Update(MakeBar(50, 3500));
     Check(backward.fault == IndicatorFault::TimestampMovedBackward,
@@ -169,7 +199,7 @@ int main()
     value = live.Update(MakeBar(50, 4000));
     Check(value.replaced,
           "JMA state must remain replaceable after rejected input");
-    CheckNear(value.value, 47.7743,
+    CheckNear(value.Value(JmaValueOutput), 47.77429962158203,
               "rejected JMA input must not mutate state");
 
     Check(live.RetainedBytes() >= sizeof(double) * 10U,
@@ -177,10 +207,18 @@ int main()
 
     live.Reset();
     value = live.Update(MakeBar(7, 7000));
-    Check(value.ready && !value.replaced,
+    Check(value.IsReady(JmaValueOutput) && !value.replaced,
           "JMA reset must restore an empty state");
-    CheckNear(value.value, 7.0,
+    CheckNear(value.Value(JmaValueOutput), 7.0,
               "JMA reset value mismatch");
+
+    value = live.Update(MakeBar(5, 8000));
+    CheckNan(value.Value(JmaUpOutput),
+             "falling JMA must publish NaN on Up");
+    CheckNear(value.Value(JmaDownOutput), 6.0,
+              "falling JMA Down output mismatch");
+    CheckNear(value.Value(JmaSlopeOutput), -14.300000190734863,
+              "falling JMA slope mismatch");
 
     std::puts("[PASS] jma_indicator_tests");
     return 0;

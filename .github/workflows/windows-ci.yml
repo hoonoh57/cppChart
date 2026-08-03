@@ -58,20 +58,30 @@ jobs:
         shell: pwsh
         run: .\scripts\verify_real_data_only.ps1
 
+      - name: Verify modular architecture
+        shell: pwsh
+        run: .\scripts\verify_modular_architecture.ps1
+
       - name: Verify integrated runtime contract
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $source = Get-Content .\shell_main.cpp -Raw
           $runner = Get-Content .\platform\kiwoom_runtime_runner.cpp -Raw
-          $marketData = Get-Content .\core\kiwoom_market_data.cpp -Raw
+          $marketCore = Get-Content .\core\kiwoom_market_data.cpp -Raw
+          $marketModule = Get-Content .\app\market_data_module.cpp -Raw
+          $renderer = Get-Content .\ui\render_document_renderer.cpp -Raw
+          $renderContract = Get-Content .\render\render_document.h -Raw
           $runnerTests = Get-Content .\tests\kiwoom_runtime_runner_tests.cpp -Raw
           $transport = Get-Content .\platform\winhttp_transport.cpp -Raw
+
           $required = @(
             'CPPCHART_SHARED_RUNTIME_INTEGRATED',
             'CPPCHART_UI_THREAD_DATA_HANDOFF',
             'CPPCHART_KIWOOM_RUNTIME_CONNECTED',
             'CPPCHART_REAL_DATA_ONLY',
+            'CPPCHART_MAJOR_FEATURE_MODULES',
+            'CPPCHART_GENERIC_RENDER_DOCUMENT',
             'std::atomic<int> g_wakeFrames',
             'trading::TradingState g_tradingState',
             'trading::KiwoomRuntimeEngine g_runtimeEngine',
@@ -79,9 +89,10 @@ jobs:
             'CanSubmitEntryOrders',
             'CanSubmitLiquidationOrders',
             'RequestStockMinuteBars',
-            'ApplyMinuteBars',
-            'DrawRealCandles',
-            'ApplyStockTradeTick',
+            'MarketDataModule g_marketDataModule',
+            'FeatureRegistry g_featureRegistry',
+            'BuildMarketChartDocument',
+            'DrawRenderDocument',
             'RecordPresentedFrame',
             '렌더 %.1fHz'
           )
@@ -104,20 +115,63 @@ jobs:
             'stock trade time FID 20'
           )
           foreach ($marker in $marketRequired) {
-            if (-not $marketData.Contains($marker)) {
+            if (-not $marketCore.Contains($marker)) {
               throw "Missing strict market-data marker: $marker"
             }
           }
 
-          if ($marketData.Contains('StockMinuteApiId = "ka10079"')) {
+          $moduleRequired = @(
+            'ApplyMinuteBars',
+            'ApplyStockTradeTick',
+            'CopyVisibleBars',
+            'FeatureLevel::Off',
+            'MergeStockTradeIntoMinuteBars'
+          )
+          foreach ($marker in $moduleRequired) {
+            if (-not $marketModule.Contains($marker)) {
+              throw "Missing market-data module marker: $marker"
+            }
+          }
+
+          $renderRequired = @(
+            'RenderDocument',
+            'CandleSeries',
+            'HistogramSeries',
+            'ReferenceLine',
+            'TextAnnotation'
+          )
+          foreach ($marker in $renderRequired) {
+            if (-not $renderContract.Contains($marker)) {
+              throw "Missing generic render contract marker: $marker"
+            }
+          }
+
+          $rendererForbidden = @(
+            'Kiwoom',
+            'ka10080',
+            'StockTradeTick',
+            'OrderIntent',
+            'TradingState',
+            'SMA',
+            'JMA',
+            'VWAP',
+            'Strategy'
+          )
+          foreach ($marker in $rendererForbidden) {
+            if ($renderer.Contains($marker)) {
+              throw "Generic renderer contains feature-specific marker: $marker"
+            }
+          }
+
+          if ($marketCore.Contains('StockMinuteApiId = "ka10079"')) {
             throw 'stock tick API ID remains on minute request path'
           }
-          if ($marketData.Contains('IndexMinuteApiId = "ka20004"')) {
+          if ($marketCore.Contains('IndexMinuteApiId = "ka20004"')) {
             throw 'index tick API ID remains on minute request path'
           }
 
           if (-not $runner.Contains('DeliverMinuteBars')) {
-            throw 'Minute-bar responses are not delivered to the UI callback'
+            throw 'Minute-bar responses are not delivered to the application callback'
           }
           if (-not $runner.Contains('SubscribeStockTrades') -or
               -not $runner.Contains('{ "0B" }')) {
@@ -144,6 +198,11 @@ jobs:
             'struct Position {',
             'static double g_realizedPnL',
             'static int  g_wakeFrames',
+            'struct MarketDataView final',
+            'static std::mutex g_marketDataMutex',
+            'static void ApplyStockTradeTick(',
+            'static void ApplyMinuteBars(',
+            'static void DrawRealCandles(',
             'MakeMockData',
             'MockFeedThread',
             'std::mt19937',
@@ -154,7 +213,7 @@ jobs:
           )
           foreach ($marker in $forbidden) {
             if ($source.Contains($marker)) {
-              throw "Synthetic or legacy shell state remains: $marker"
+              throw "Synthetic, legacy, or modularized shell state remains: $marker"
             }
           }
 

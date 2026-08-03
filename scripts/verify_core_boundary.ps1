@@ -50,3 +50,4 @@ Write-Host "Core dependency boundary passed." -ForegroundColor Green
 
 & (Join-Path $PSScriptRoot 'verify_trading_date_contract.ps1')
 & (Join-Path $PSScriptRoot 'verify_indicator_module_contract.ps1')
+& (Join-Path $PSScriptRoot 'verify_indicator_workspace_contract.ps1')

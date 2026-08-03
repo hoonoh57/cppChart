@@ -18,7 +18,7 @@ namespace trading::render
         document.structureRevision = source.completedRevision;
 
         Pane pricePane;
-        pricePane.id = workspaceId + ".price";
+        pricePane.id = "price";
         pricePane.title = "Price";
         pricePane.heightWeight = 0.80f;
         pricePane.valueDecimals = 0;
@@ -42,7 +42,7 @@ namespace trading::render
         pricePane.candles.push_back(std::move(candles));
 
         Pane volumePane;
-        volumePane.id = workspaceId + ".volume";
+        volumePane.id = "volume";
         volumePane.title = "Volume";
         volumePane.heightWeight = 0.20f;
         volumePane.valueDecimals = 0;

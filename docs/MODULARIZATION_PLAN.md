@@ -1,4 +1,4 @@
-﻿# cppChart Modularization and Performance Plan
+# cppChart Modularization and Performance Plan
 
 ## Goal
 
@@ -8,222 +8,217 @@ The plan deliberately avoids an object-per-value design and does not introduce a
 
 ## Baseline to preserve
 
-The following behavior is already a verified baseline and must remain unchanged throughout refactoring:
+- `TRADING_MODE=KIWOOM_MOCK` fail-closed configuration
+- OAuth, WebSocket login, account-event registration, reconciliation, and order readiness
+- `ka10080` real stock minute bars
+- selected-symbol `0B` subscription with `refresh=1`
+- live current-bar OHLCV and tick-count update
+- actual account position and PnL display
+- no synthetic production data
+- emergency/position liquidation gated by broker readiness
+- Windows MSVC build and all headless tests
 
-- `TRADING_MODE=KIWOOM_MOCK` fail-closed configuration;
-- OAuth, WebSocket login, account-event registration, reconciliation, and order readiness;
-- `ka10080` real stock minute bars;
-- selected-symbol `0B` subscription with `refresh=1`;
-- live current-bar OHLCV and tick-count update;
-- actual account position and PnL display;
-- no synthetic production data;
-- emergency/position liquidation gated by broker readiness;
-- Windows MSVC build and all headless tests.
+## Permanent rendering rules
+
+- Financial X coordinates use actual bar order, not elapsed wall-clock time.
+- Every visible bar slot has one shared horizontal pitch across every pane.
+- Candle, volume, indicator histogram, marker, and future trade-result series must align to that common slot geometry.
+- Pane-local Y interaction belongs to the pane. The vertical timestamp crosshair may synchronize across panes, but a horizontal value crosshair must display the hovered pane's own value.
+- Value snapping is supplied through generic pane metadata such as `ValueGrid`; the renderer must not contain broker, exchange, symbol, or indicator-specific branches.
+- Drag, zoom, and crosshair behavior must remain functional while real `0B` updates arrive.
 
 ## Milestone M1 — architecture contracts and regression gates
 
 Deliverables:
 
-- `ARCHITECTURE_CONSTITUTION.md`;
-- feature execution levels and registry;
-- generic renderer document contract;
-- module performance metrics;
-- CI checks preventing forbidden dependencies and central feature-specific renderer branches;
-- headless tests for level transitions, dependencies, metrics, and render contracts.
+- `ARCHITECTURE_CONSTITUTION.md`
+- feature execution levels and registry
+- generic renderer document contract
+- module performance metrics
+- CI checks preventing forbidden dependencies and feature-specific renderer branches
+- headless tests for level transitions, dependencies, metrics, and render contracts
 
 Acceptance:
 
-- no user-visible behavior change;
-- all existing tests pass;
-- new contracts compile without Win32, ImGui, D3D, or Kiwoom dependencies.
+- no user-visible behavior change
+- all existing tests pass
+- new contracts compile without Win32, ImGui, D3D, or Kiwoom dependencies
 
-## Milestone M2 — extract MarketDataModule
+## Milestone M2 — MarketDataModule
 
-Move from `shell_main.cpp` into a major application module:
+Responsibilities:
 
-- request state;
-- current selected code and minute unit;
-- REST page application;
-- `0B` tick merge;
-- latest quote access;
-- continuation state;
-- subscription status;
-- event and timing metrics;
-- visible-range bar copy.
-
-The module exposes snapshots and command/event methods. It does not render and does not know ImGui/D3D.
+- request state
+- selected code and minute unit
+- REST page application
+- `0B` tick merge
+- latest quote access
+- continuation state
+- subscription status
+- event and timing metrics
+- immutable completed history plus live tail
 
 Acceptance:
 
-- `shell_main.cpp` no longer owns market-data mutexes, bars, tick counters, or tick-to-bar merge logic;
-- existing real-data tests remain valid;
-- new tests cover state transitions and thread-safe snapshots;
-- visible bar copying is bounded to the requested range instead of copying all history each frame.
+- `shell_main.cpp` owns no market-data mutex, bars, tick counters, or tick-to-bar merge logic
+- real-data tests remain valid
+- module state and snapshots are headless-testable
+- same-minute updates do not copy full history
 
-## Milestone M3 — extract generic chart renderer
+## Milestone M3 — generic chart renderer
 
 Create:
 
-- broker-independent `RenderDocument`;
-- price and volume panes;
-- candle and histogram series;
-- generic ImGui renderer consuming only that contract;
-- renderer state containing viewport, dirty revision, and interaction state.
+- broker-independent `RenderDocument`
+- price, volume, and future indicator panes
+- candle, line, histogram, marker, reference-line, and annotation series
+- generic ImGui renderer consuming only the render contract
+- renderer state containing viewport, dirty revision, and interaction state
 
 Acceptance:
 
-- renderer source contains no Kiwoom API IDs, indicator names, strategy names, or account concepts;
-- current stock chart looks and updates as before;
-- a fixture document renders without a live broker;
-- document builder and renderer are separately testable where possible.
+- renderer contains no Kiwoom API IDs, indicator names, strategy names, or account concepts
+- a fixture document renders without a live broker
+- document builder and renderer remain separately testable
 
-## Milestone M4 — FeatureRegistry and execution-level controls
+## Milestone M4 — FeatureRegistry and execution levels
 
-Register initial major features:
+Register:
 
-- market data;
-- chart workspace;
-- trading/account;
-- diagnostics.
+- market data
+- chart workspace
+- trading/account
+- diagnostics
 
-Add Off/Standby/Visible/Active controls and dependency validation.
+Execution levels:
+
+- Off
+- Standby
+- Visible
+- Active
 
 Acceptance:
 
-- Off market data blocks subscriptions and requests;
-- hidden chart workspace does not rebuild render documents;
-- trading/account remains independently available for liquidation when chart data is Off;
-- feature metrics are visible in diagnostics.
+- Off market data blocks subscriptions and requests
+- hidden workspace does not rebuild render documents
+- trading/account remains independently available for liquidation
+- feature metrics are visible in diagnostics
 
 ## Milestone M5 — application coordinator and thin shell
 
-Move command routing and runtime callbacks into an application coordinator.
-
 `shell_main.cpp` retains only:
 
-- Win32/D3D lifecycle;
-- ImGui frame lifecycle;
-- top-level composition;
-- device-loss handling;
-- calls to application/UI objects.
+- Win32/D3D lifecycle
+- ImGui frame lifecycle
+- top-level composition
+- device-loss handling
+- calls to application/UI objects
 
 Acceptance:
 
-- no market, strategy, order, or chart-domain mutation remains in `shell_main.cpp`;
-- command routing is headless-testable;
-- shell process startup and shutdown remain deterministic.
+- no market, strategy, order, or chart-domain mutation remains in `shell_main.cpp`
+- command routing is headless-testable
+- startup and shutdown remain deterministic
 
 ## Milestone M6 — chart viewport foundation
 
-Implemented on the generic renderer contract:
+Implemented:
 
-- full verified history remains available to the viewport;
-- compressed ordinal trading-time axis: each actual bar occupies one horizontal slot;
-- overnight, weekend, and session gaps do not consume empty horizontal pixels;
-- initial viewport opens the latest screen-sized bar window instead of compressing every loaded bar;
-- real timestamps remain on labels, crosshair, tooltip, and boundary annotations;
-- wheel zoom anchored at the mouse position;
-- right-button horizontal pan;
-- double-click reset and latest-bar auto-follow;
-- visible-range automatic value scale;
-- current-price line and label;
-- synchronized vertical crosshair across all panes in the same frame;
-- OHLCV and tick-count tooltip;
-- time and value axes;
-- headless viewport, trading-time-axis, and boundary tests registered in the complete suite.
+- ordinal trading-time axis
+- recent screen-sized initial window
+- wheel zoom anchored at mouse position
+- left or right horizontal drag pan
+- double-click reset and latest-bar auto-follow
+- visible-range automatic value scale
+- current-price line and label
+- synchronized vertical time crosshair across panes
+- pane-local horizontal value crosshair
+- OHLCV and tick-count tooltip
+- time and value axes
+- date and abnormal session-gap boundaries
+- immutable completed history and mutable live tail
+- common axis-slot body width for candles and histograms
+- generic `ValueGrid` cursor snapping
+- Korean stock quotation ladder configured by the market chart builder
+- integer value cursor for the volume pane
 
-Completed performance structure:
+M6 regression fixtures:
 
-- completed candle history is immutable shared storage;
-- the current live candle is a separate small tail value;
-- same-minute `0B` events update only the live tail and document metadata;
-- completed volume history is rebuilt only when a new minute promotes the prior live candle;
-- full loaded history remains available for zoom and pan without a per-tick full-vector copy;
-- ordinal timestamp lookup and date/session boundaries are cached by completed-history structure revision.
-
-Visual defect found during first local acceptance:
-
-- the original renderer mapped wall-clock elapsed milliseconds directly to pixels;
-- 900 one-minute bars spanning several calendar days were compressed into a few clusters separated by huge blank overnight/weekend regions;
-- the original initial viewport also displayed the complete 900-bar set instead of a usable recent window;
-- this was a renderer-coordinate defect, not missing or synthetic market data;
-- direct wall-clock X mapping is now prohibited by architecture verification.
-
-M6 remote verification after the fix:
-
-- verified branch HEAD: `aa55b0bbd1e6b396553c45da777b4030a9f4bd7e`;
-- Windows CI run: `30803999147`;
-- MSVC x64 shell build passed;
-- complete headless suite passed;
-- clean source-tree verification passed;
-- executable artifact digest: `sha256:a35f64979593c8ddd37341a3458e28dae7d1d02fa123c9c94b62aa85a44ac709`.
+- overnight wall-clock gaps consume one adjacent ordinal slot
+- duplicate and descending timestamps fail
+- candle and volume body widths are identical for the same visible axis span
+- body width respects zoom minimum and maximum
+- value-grid boundaries and nearest-step rounding
+- Korean equity bands: 1, 5, 10, 50, 100, 500, and 1,000 won
+- volume cursor rounds to integer units
+- architecture gate rejects forced nearest-close horizontal crosshair
+- architecture gate requires left/right drag capture
 
 Remaining M6 acceptance:
 
-- focused local visual/GPU confirmation that actual sessions are contiguous, the initial view shows recent bars, zoom/pan/reset work, and live `0B` does not reset a manual viewport.
+- one focused local visual/GPU test covering aligned volume width, left/right pan, wheel zoom, latest reset, price tick snapping, volume-pane cursor value, vertical crosshair alignment, and real `0B` viewport stability
 
 ## Milestone M7 — reusable indicator engine
 
 Create one batch/incremental engine and registry. Initial indicators:
 
-- SMA;
-- JMA;
-- VWAP;
-- OBV;
-- ADX.
+- SMA
+- JMA
+- VWAP
+- OBV
+- ADX
 
 Acceptance:
 
-- batch and incremental parity fixtures;
-- indicators publish standard Line/Histogram/ReferenceLine series;
-- renderer code does not change when indicators are added or removed;
-- feature execution level controls data acquisition, calculation, and rendering work.
+- batch and incremental parity fixtures
+- indicators publish standard Line/Histogram/ReferenceLine series
+- renderer code does not change when indicators are added or removed
+- feature level controls acquisition, calculation, and rendering work
 
 ## Milestone M8 — index and multi-symbol comparison
 
 Connect:
 
-- `ka20005` index minute bars;
-- `0I` real-time index values;
-- synchronized symbol/index time axes;
-- normalized return, relative strength, beta, and correlation series;
-- multiple chart workspaces sharing source data.
+- `ka20005` index minute bars
+- `0I` real-time index values
+- synchronized symbol/index time axes
+- normalized return, relative strength, beta, and correlation
+- multiple workspaces sharing source data
 
 Acceptance:
 
-- missing index data does not corrupt stock data;
-- comparison can be toggled Off without changing the main chart;
-- multi-symbol load and subscription limits are measured and enforced.
+- missing index data does not corrupt stock data
+- comparison can be Off without changing the main chart
+- multi-symbol limits are measured and enforced
 
-## Milestone M9 — strategy/replay/trade-result integration
+## Milestone M9 — strategy, replay, and trade results
 
 Use the same indicator and strategy code for replay, backtest, and real-time decisions. Publish:
 
-- signals;
-- order markers;
-- fills;
-- average-price lines;
-- stop/target lines;
-- per-symbol and portfolio results.
+- signals
+- orders and fills
+- average-price lines
+- stop and target lines
+- per-symbol and portfolio results
 
 Acceptance:
 
-- deterministic replay equals batch backtest under the same event stream;
-- live events use the same strategy evaluator;
-- chart result visualization is a renderer contribution, not renderer-specific strategy code.
+- deterministic replay equals batch backtest for the same event stream
+- live events use the same evaluator
+- chart result visualization remains a renderer contribution
 
 ## Continuous verification
 
 Every milestone runs:
 
-- core dependency boundary checks;
-- real-data-only production checks;
-- architecture regression checks;
-- MSVC x64 shell build;
-- full headless suite;
-- clean working-tree check;
-- executable artifact upload.
+- core dependency boundary checks
+- real-data-only production checks
+- architecture regression checks
+- MSVC x64 shell build
+- full headless suite
+- clean working-tree check
+- executable artifact upload
 
 ## User test policy
 
-Do not request a local pull merely because files changed. Request user testing only when the current milestone depends on visual interaction, actual Kiwoom payloads, physical reconnection, order/fill behavior, or soak performance.
+Do not request a local pull merely because files changed. Request testing only when the milestone depends on visual interaction, actual Kiwoom payloads, physical reconnection, order/fill behavior, or soak performance.

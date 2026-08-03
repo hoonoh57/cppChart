@@ -19,13 +19,25 @@ namespace trading::app
         Error
     };
 
+    struct ChartMarketSource final
+    {
+        std::shared_ptr<const std::vector<Bar>> completedBars;
+        Bar liveBar;
+        bool hasLiveBar = false;
+        std::size_t barCount = 0;
+        std::uint64_t revision = 0;
+        std::uint64_t completedRevision = 0;
+        std::uint64_t liveRevision = 0;
+    };
+
     struct ChartWorkspaceSnapshot final
     {
         ChartWorkspaceState state = ChartWorkspaceState::Empty;
         FeatureLevel level = FeatureLevel::Off;
         std::uint64_t sourceRevision = 0;
+        std::uint64_t completedRevision = 0;
         std::uint64_t documentRevision = 0;
-        std::size_t visibleBarLimit = 0;
+        std::size_t sourceBarCount = 0;
         std::size_t paneCount = 0;
         std::size_t seriesCount = 0;
         std::size_t retainedBytes = 0;
@@ -50,9 +62,7 @@ namespace trading::app
             const std::string& workspaceId,
             const std::string& title,
             const std::string& seriesId,
-            const std::vector<Bar>& visibleBars,
-            std::uint64_t sourceRevision,
-            std::size_t visibleBarLimit,
+            const ChartMarketSource& source,
             std::string& error);
 
         void SetError(const std::string& error);
@@ -60,8 +70,7 @@ namespace trading::app
         ChartWorkspaceSnapshot Snapshot() const;
 
         bool NeedsUpdate(
-            std::uint64_t sourceRevision,
-            std::size_t visibleBarLimit) const noexcept;
+            std::uint64_t sourceRevision) const noexcept;
 
         static const char* StateName(
             ChartWorkspaceState state) noexcept;
@@ -73,13 +82,20 @@ namespace trading::app
         static std::size_t EstimateRetainedBytes(
             const render::RenderDocument& document) noexcept;
 
+        static std::shared_ptr<const std::vector<render::HistogramPoint>>
+        BuildCompletedVolume(
+            const std::shared_ptr<const std::vector<Bar>>& completedBars);
+
         mutable std::mutex mutex_;
         FeatureLevel level_ = FeatureLevel::Visible;
         ChartWorkspaceState state_ = ChartWorkspaceState::Empty;
         std::uint64_t sourceRevision_ = 0;
+        std::uint64_t completedRevision_ = 0;
         std::uint64_t documentRevision_ = 0;
-        std::size_t visibleBarLimit_ = 0;
+        std::size_t sourceBarCount_ = 0;
         std::string error_;
+        std::shared_ptr<const std::vector<render::HistogramPoint>>
+            completedVolume_;
         std::shared_ptr<const render::RenderDocument> document_;
     };
 }

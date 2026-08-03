@@ -70,16 +70,18 @@ namespace trading
         const unsigned dayOfYear =
             dayOfEra -
             (365 * yearOfEra + yearOfEra / 4 - yearOfEra / 100);
-        const unsigned monthPrime = (5 * dayOfYear + 2) / 153;
-        const unsigned day =
-            dayOfYear - (153 * monthPrime + 2) / 5 + 1;
-        const unsigned month =
-            monthPrime + (monthPrime < 10 ? 3U : static_cast<unsigned>(-9));
+        const int monthPrime =
+            static_cast<int>((5 * dayOfYear + 2) / 153);
+        const int day = static_cast<int>(
+            dayOfYear -
+            (153U * static_cast<unsigned>(monthPrime) + 2U) / 5U +
+            1U);
+        const int month =
+            monthPrime + (monthPrime < 10 ? 3 : -9);
         year += month <= 2;
 
         const TradingDateYmd result = static_cast<TradingDateYmd>(
-            year * 10000 + static_cast<int>(month) * 100 +
-            static_cast<int>(day));
+            year * 10000 + month * 100 + day);
         return IsValidTradingDateYmd(result) ? result : 0;
     }
 

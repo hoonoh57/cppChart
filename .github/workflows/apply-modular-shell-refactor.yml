@@ -9,12 +9,19 @@ on:
       - scripts/apply_modular_shell_refactor.py
       - scripts/run_modular_shell_refactor.py
       - .github/workflows/apply-modular-shell-refactor.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/apply_modular_shell_refactor.py
+      - scripts/run_modular_shell_refactor.py
+      - .github/workflows/apply-modular-shell-refactor.yml
 
 permissions:
   contents: write
 
 concurrency:
-  group: apply-modular-shell-refactor
+  group: apply-modular-shell-refactor-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -73,6 +80,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "tests failed, exit code=$LASTEXITCODE" }
 
       - name: Commit verified modular refactor
+        if: github.event_name == 'push'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'

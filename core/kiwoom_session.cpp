@@ -34,9 +34,15 @@ namespace trading
         reconnectAttempt_ = 0;
         stopRequested_ = false;
 
-        if (config_.mode == RuntimeMode::LocalMock) {
-            state_ = KiwoomSessionState::Stopped;
-            return {};
+        if (config_.mode != RuntimeMode::KiwoomMock) {
+            state_ = KiwoomSessionState::ConfigurationError;
+            lastError_ =
+                "KIWOOM_MOCK runtime configuration is required";
+            return {
+                MakeAction(
+                    KiwoomSessionActionType::EnterObserveMode,
+                    lastError_)
+            };
         }
 
         if (!config_.HasKiwoomCredentials()) {

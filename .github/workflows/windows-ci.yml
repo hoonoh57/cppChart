@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -27,13 +27,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: p2/kiwoom-mock-gateway
-          fetch-depth: 0
-
-      - name: Apply minute chart API-ID correction
-        shell: pwsh
-        run: python .\scripts\fix_minute_chart_api_ids.py
 
       - name: Verify repository policy
         shell: pwsh
@@ -195,17 +188,13 @@ jobs:
             throw "headless tests failed, exit code=$LASTEXITCODE"
           }
 
-      - name: Commit verified correction
-        if: github.event_name == 'push'
+      - name: Verify clean source tree after build
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add core/kiwoom_market_data.cpp tests/kiwoom_market_data_tests.cpp
-          if (-not (git diff --cached --quiet)) {
-            git commit -m 'Correct Kiwoom minute chart API IDs'
-            git push origin HEAD:p2/kiwoom-mock-gateway
+          $changes = @(git status --porcelain)
+          if ($changes.Count -gt 0) {
+            throw "Build or tests modified tracked files:`n$($changes -join "`n")"
           }
 
       - name: Publish verified executable

@@ -1,4 +1,4 @@
-﻿#include "chart_workspace_module.h"
+#include "chart_workspace_module.h"
 
 #include "indicator_render_adapter.h"
 #include "../render/market_chart_builder.h"
@@ -291,6 +291,18 @@ namespace trading::app
                 indicatorRevision_ != indicatorRevision);
     }
 
+    bool ChartWorkspaceModule::NeedsUpdate(
+        std::uint64_t sourceRevision,
+        const IndicatorModuleSnapshot& indicatorSnapshot,
+        const IndicatorRenderAdapter& indicatorAdapter) const noexcept
+    {
+        return NeedsUpdate(
+            sourceRevision,
+            IndicatorCompositeRevision(
+                indicatorSnapshot,
+                indicatorAdapter));
+    }
+
     const char* ChartWorkspaceModule::StateName(
         ChartWorkspaceState state) noexcept
     {
@@ -306,9 +318,19 @@ namespace trading::app
         const IndicatorRenderAdapter& adapter) noexcept
     {
         std::uint64_t seed = snapshot.calculationRevision;
-        const std::uint64_t value = adapter.PlanRevision();
+        const std::uint64_t planRevision = adapter.PlanRevision();
         seed ^=
-            value + 0x9e3779b97f4a7c15ULL +
+            planRevision + 0x9e3779b97f4a7c15ULL +
+            (seed << 6U) + (seed >> 2U);
+        const std::uint64_t level =
+            static_cast<std::uint64_t>(snapshot.level);
+        seed ^=
+            level + 0x9e3779b97f4a7c15ULL +
+            (seed << 6U) + (seed >> 2U);
+        const std::uint64_t state =
+            static_cast<std::uint64_t>(snapshot.state);
+        seed ^=
+            state + 0x9e3779b97f4a7c15ULL +
             (seed << 6U) + (seed >> 2U);
         return seed;
     }

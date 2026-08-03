@@ -23,6 +23,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    app\feature_registry.cpp ^
    app\market_data_module.cpp ^
    app\chart_workspace_module.cpp ^
+   app\indicator_render_contributor.cpp ^
    render\chart_viewport.cpp ^
    render\time_axis.cpp ^
    render\value_grid.cpp ^

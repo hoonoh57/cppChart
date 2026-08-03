@@ -1,1 +1,2 @@
 Temporary trigger for the atomic indicator legend and property-grid patch.
+Retry after excluding workflow files from the generated code commit.

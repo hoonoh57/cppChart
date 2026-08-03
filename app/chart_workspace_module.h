@@ -13,6 +13,7 @@
 namespace trading::app
 {
     struct IndicatorModuleSnapshot;
+    class IndicatorRenderAdapter;
 
     enum class ChartWorkspaceState
     {
@@ -73,7 +74,8 @@ namespace trading::app
             const std::string& title,
             const std::string& seriesId,
             const ChartMarketSource& source,
-            const IndicatorModuleSnapshot* indicatorSnapshot,
+            const IndicatorModuleSnapshot& indicatorSnapshot,
+            IndicatorRenderAdapter& indicatorAdapter,
             std::string& error);
 
         void SetError(const std::string& error);
@@ -91,6 +93,19 @@ namespace trading::app
             ChartWorkspaceState state) noexcept;
 
     private:
+        bool UpdateMarketChartCore(
+            const std::string& workspaceId,
+            const std::string& title,
+            const std::string& seriesId,
+            const ChartMarketSource& source,
+            const IndicatorModuleSnapshot* indicatorSnapshot,
+            IndicatorRenderAdapter* indicatorAdapter,
+            std::string& error);
+
+        static std::uint64_t IndicatorCompositeRevision(
+            const IndicatorModuleSnapshot& snapshot,
+            const IndicatorRenderAdapter& adapter) noexcept;
+
         static std::size_t CountSeries(
             const render::RenderDocument& document) noexcept;
 

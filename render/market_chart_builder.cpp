@@ -8,7 +8,7 @@ namespace trading::render
         const std::string& workspaceId,
         const std::string& title,
         const std::string& seriesId,
-        const std::vector<Bar>& bars,
+        const MarketChartSource& source,
         std::uint64_t revision)
     {
         RenderDocument document;
@@ -24,7 +24,9 @@ namespace trading::render
         CandleSeries candles;
         candles.id = seriesId + ".candles";
         candles.label = title;
-        candles.bars = bars;
+        candles.bars.SetShared(
+            source.completedBars,
+            source.hasLiveBar ? &source.liveBar : nullptr);
         pricePane.candles.push_back(std::move(candles));
 
         Pane volumePane;
@@ -35,14 +37,20 @@ namespace trading::render
         HistogramSeries volume;
         volume.id = seriesId + ".volume";
         volume.label = "Volume";
-        volume.points.reserve(bars.size());
-        for (const Bar& bar : bars) {
-            HistogramPoint point;
-            point.timestampMs = bar.closeTimestampMs;
-            point.value = static_cast<double>(bar.volume);
-            point.positive = bar.close >= bar.open;
-            volume.points.push_back(point);
+
+        HistogramPoint liveVolume;
+        const HistogramPoint* liveVolumePointer = nullptr;
+        if (source.hasLiveBar) {
+            liveVolume.timestampMs = source.liveBar.closeTimestampMs;
+            liveVolume.value = static_cast<double>(source.liveBar.volume);
+            liveVolume.positive =
+                source.liveBar.close >= source.liveBar.open;
+            liveVolumePointer = &liveVolume;
         }
+
+        volume.points.SetShared(
+            source.completedVolume,
+            liveVolumePointer);
         volumePane.histograms.push_back(std::move(volume));
 
         document.panes.push_back(std::move(pricePane));

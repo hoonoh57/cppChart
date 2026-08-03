@@ -107,7 +107,7 @@ namespace trading::render
                 for (const LinePoint& point : series.points) {
                     if (
                         point.timestampMs <= 0 ||
-                        std::isinf(point.value) ||
+                        !std::isfinite(point.value) ||
                         previous >= point.timestampMs)
                     {
                         error = "line series point is invalid: " + series.id;

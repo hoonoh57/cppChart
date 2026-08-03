@@ -32,7 +32,7 @@ if errorlevel 1 exit /b 1
 call :build_and_run indicator_module_revision_tests.exe "tests\indicator_module_revision_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\sma_indicator.cpp core\jma_indicator.cpp core\obv_indicator.cpp core\adx_indicator.cpp core\vwap_indicator.cpp app\indicator_module.cpp"
 if errorlevel 1 exit /b 1
 
-call :build_and_run indicator_render_contributor_tests.exe "tests\indicator_render_contributor_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\sma_indicator.cpp core\jma_indicator.cpp core\obv_indicator.cpp core\adx_indicator.cpp core\vwap_indicator.cpp app\indicator_module.cpp app\indicator_render_contributor.cpp render\render_document.cpp"
+call :build_and_run indicator_render_adapter_tests.exe "tests\indicator_render_adapter_tests.cpp app\indicator_render_adapter.cpp render\render_document.cpp"
 if errorlevel 1 exit /b 1
 
 call :build_and_run feature_registry_tests.exe "tests\feature_registry_tests.cpp app\feature_registry.cpp"

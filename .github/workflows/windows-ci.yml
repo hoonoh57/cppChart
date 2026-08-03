@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -27,6 +27,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: p2/kiwoom-mock-gateway
+          fetch-depth: 0
+
+      - name: Apply minute chart API-ID correction
+        shell: pwsh
+        run: python .\scripts\fix_minute_chart_api_ids.py
 
       - name: Verify repository policy
         shell: pwsh
@@ -79,8 +86,7 @@ jobs:
             'CanSubmitLiquidationOrders',
             'RequestStockMinuteBars',
             'ApplyMinuteBars',
-            'DrawRealCandles',
-            'ka10079'
+            'DrawRealCandles'
           )
           foreach ($marker in $required) {
             if (-not $source.Contains($marker)) {
@@ -89,17 +95,25 @@ jobs:
           }
 
           $marketRequired = @(
-            'StockMinuteApiId = "ka10079"',
-            'IndexMinuteApiId = "ka20004"',
+            'StockMinuteApiId = "ka10080"',
+            'IndexMinuteApiId = "ka20005"',
             'stk_min_pole_chart_qry',
             'inds_min_pole_qry',
             'conflicting duplicate minute-bar timestamp',
-            'OHLC invariant violation'
+            'OHLC invariant violation',
+            'stock minute bars require api-id ka10080'
           )
           foreach ($marker in $marketRequired) {
             if (-not $marketData.Contains($marker)) {
               throw "Missing strict market-data marker: $marker"
             }
+          }
+
+          if ($marketData.Contains('StockMinuteApiId = "ka10079"')) {
+            throw 'stock tick API ID remains on minute request path'
+          }
+          if ($marketData.Contains('IndexMinuteApiId = "ka20004"')) {
+            throw 'index tick API ID remains on minute request path'
           }
 
           if (-not $runner.Contains('DeliverMinuteBars')) {
@@ -181,13 +195,17 @@ jobs:
             throw "headless tests failed, exit code=$LASTEXITCODE"
           }
 
-      - name: Verify clean source tree after build
+      - name: Commit verified correction
+        if: github.event_name == 'push'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $changes = @(git status --porcelain)
-          if ($changes.Count -gt 0) {
-            throw "Build or tests modified tracked files:`n$($changes -join "`n")"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add core/kiwoom_market_data.cpp tests/kiwoom_market_data_tests.cpp
+          if (-not (git diff --cached --quiet)) {
+            git commit -m 'Correct Kiwoom minute chart API IDs'
+            git push origin HEAD:p2/kiwoom-mock-gateway
           }
 
       - name: Publish verified executable

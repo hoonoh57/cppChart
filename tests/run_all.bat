@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 setlocal
 cd /d %~dp0\..
 
@@ -21,6 +21,16 @@ cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
   /Fe:kiwoom_protocol_tests.exe
 if errorlevel 1 exit /b 1
 kiwoom_protocol_tests.exe
+if errorlevel 1 exit /b 1
+
+
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
+  tests\kiwoom_market_data_tests.cpp ^
+  core\json_lite.cpp ^
+  core\kiwoom_market_data.cpp ^
+  /Fe:kiwoom_market_data_tests.exe
+if errorlevel 1 exit /b 1
+kiwoom_market_data_tests.exe
 if errorlevel 1 exit /b 1
 
 cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
@@ -111,6 +121,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
   tests\kiwoom_runtime_engine_tests.cpp ^
   core\json_lite.cpp ^
   core\kiwoom_protocol.cpp ^
+  core\kiwoom_market_data.cpp ^
   core\runtime_config.cpp ^
   core\kiwoom_session.cpp ^
   core\trading_state.cpp ^
@@ -129,6 +140,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
   tests\kiwoom_runtime_runner_tests.cpp ^
   core\json_lite.cpp ^
   core\kiwoom_protocol.cpp ^
+  core\kiwoom_market_data.cpp ^
   core\runtime_config.cpp ^
   core\kiwoom_session.cpp ^
   core\trading_state.cpp ^

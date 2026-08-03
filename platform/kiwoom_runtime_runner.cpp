@@ -32,6 +32,10 @@ namespace trading::platform
                 return "executions";
             case KiwoomRuntimeActionType::RequestAccountBalance:
                 return "balance";
+            case KiwoomRuntimeActionType::RequestStockMinuteBars:
+                return "stock-minute-bars";
+            case KiwoomRuntimeActionType::RequestIndexMinuteBars:
+                return "index-minute-bars";
             case KiwoomRuntimeActionType::SubmitOrderHttp:
                 return "order";
             default:
@@ -112,6 +116,50 @@ namespace trading::platform
 
         Log("SYS", "Kiwoom runtime stopped");
         WakeUi();
+    }
+
+    bool KiwoomRuntimeRunner::RequestStockMinuteBars(
+        const std::string& stockCode,
+        int minuteUnit,
+        const Continuation& continuation,
+        std::string& error)
+    {
+        if (!running_.load(std::memory_order_acquire)) {
+            error = "Kiwoom runtime is not running";
+            return false;
+        }
+
+        std::vector<KiwoomRuntimeAction> actions =
+            engine_.RequestStockMinuteBars(
+                stockCode,
+                minuteUnit,
+                continuation,
+                error);
+        if (actions.empty()) return false;
+        Enqueue(std::move(actions));
+        return true;
+    }
+
+    bool KiwoomRuntimeRunner::RequestIndexMinuteBars(
+        const std::string& indexCode,
+        int minuteUnit,
+        const Continuation& continuation,
+        std::string& error)
+    {
+        if (!running_.load(std::memory_order_acquire)) {
+            error = "Kiwoom runtime is not running";
+            return false;
+        }
+
+        std::vector<KiwoomRuntimeAction> actions =
+            engine_.RequestIndexMinuteBars(
+                indexCode,
+                minuteUnit,
+                continuation,
+                error);
+        if (actions.empty()) return false;
+        Enqueue(std::move(actions));
+        return true;
     }
 
     bool KiwoomRuntimeRunner::SubmitOrder(
@@ -337,6 +385,8 @@ namespace trading::platform
         case KiwoomRuntimeActionType::RequestOpenOrders:
         case KiwoomRuntimeActionType::RequestExecutions:
         case KiwoomRuntimeActionType::RequestAccountBalance:
+        case KiwoomRuntimeActionType::RequestStockMinuteBars:
+        case KiwoomRuntimeActionType::RequestIndexMinuteBars:
         case KiwoomRuntimeActionType::SubmitOrderHttp: {
             const RuntimeConfig config = engine_.ConfigSnapshot();
             const RuntimeTransportResponse response = transport_->SendRest(
@@ -345,7 +395,13 @@ namespace trading::platform
                 15000);
             const Continuation continuation = ReadContinuation(response);
 
-            if (action.type == KiwoomRuntimeActionType::RequestOpenOrders) {
+            if (
+                action.type == KiwoomRuntimeActionType::RequestStockMinuteBars ||
+                action.type == KiwoomRuntimeActionType::RequestIndexMinuteBars)
+            {
+                DeliverMinuteBars(action, response, continuation);
+            }
+            else if (action.type == KiwoomRuntimeActionType::RequestOpenOrders) {
                 Enqueue(engine_.OnOpenOrdersHttpResponse(
                     response.transportOk,
                     response.statusCode,
@@ -468,6 +524,73 @@ namespace trading::platform
             }
         }
         return result;
+    }
+
+    void KiwoomRuntimeRunner::DeliverMinuteBars(
+        const KiwoomRuntimeAction& action,
+        const RuntimeTransportResponse& response,
+        const Continuation& continuation)
+    {
+        MinuteBarsPage page;
+        page.instrument = action.marketInstrument;
+        page.code = action.marketCode;
+        page.minuteUnit = action.minuteUnit;
+
+        if (!response.transportOk) {
+            page.result.error = response.error.empty()
+                ? "minute-bar transport failed"
+                : "minute-bar transport failed: " + response.error;
+        }
+        else if (response.statusCode < 200 || response.statusCode >= 300) {
+            std::ostringstream message;
+            message << "minute-bar request failed: HTTP "
+                    << response.statusCode;
+            if (!response.body.empty()) {
+                message << "; response=" << response.body;
+            }
+            page.result.error = message.str();
+        }
+        else if (action.marketInstrument == MinuteBarInstrument::Stock) {
+            page = ParseStockMinuteBarsResponse(
+                action.marketCode,
+                action.minuteUnit,
+                response.body);
+        }
+        else {
+            page = ParseIndexMinuteBarsResponse(
+                action.marketCode,
+                action.minuteUnit,
+                response.body);
+        }
+
+        if (callbacks_.minuteBars) {
+            callbacks_.minuteBars(page, continuation);
+        }
+
+        if (page.result.ok) {
+            std::ostringstream message;
+            message
+                << (action.marketInstrument == MinuteBarInstrument::Stock
+                    ? "stock" : "index")
+                << " minute bars received: code="
+                << action.marketCode
+                << " unit="
+                << action.minuteUnit
+                << " rows="
+                << page.bars.size();
+            if (!continuation.nextKey.empty()) {
+                message << " continuation=" << continuation.continueYn;
+            }
+            Log("DATA", message.str());
+        }
+        else {
+            const std::string error = !page.result.error.empty()
+                ? page.result.error
+                : page.result.returnMessage;
+            Log("FAULT", error.empty()
+                ? "minute-bar response rejected"
+                : error);
+        }
     }
 
     void KiwoomRuntimeRunner::Log(

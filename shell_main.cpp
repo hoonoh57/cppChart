@@ -13,6 +13,8 @@
 #include <thread>
 #include <atomic>
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
@@ -197,7 +199,16 @@ static char g_symbolInput[32] = "";
 static int g_timeFrameIndex = 0;
 static double g_bootMilliseconds = 0.0;
 
+struct MarketDataView final
+{
+    std::string code;
+    int minuteUnit = 1;
+    std::vector<trading::Bar> bars;
+    trading::Continuation continuation;
+};
+
 static std::mutex g_marketDataMutex;
+static MarketDataView g_marketDataView;
 static std::string g_marketDataError =
     "실제 시세 백필과 실시간 체결 수신이 연결되지 않았습니다. "
     "합성 데이터는 제거되었으며 오류를 숨기지 않습니다.";
@@ -229,6 +240,85 @@ static std::string MarketDataErrorSnapshot()
 {
     std::lock_guard<std::mutex> lock(g_marketDataMutex);
     return g_marketDataError;
+}
+
+static MarketDataView MarketDataSnapshot()
+{
+    std::lock_guard<std::mutex> lock(g_marketDataMutex);
+    return g_marketDataView;
+}
+
+static void BeginMarketDataRequest(
+    const std::string& code,
+    int minuteUnit)
+{
+    {
+        std::lock_guard<std::mutex> lock(g_marketDataMutex);
+        g_marketDataView.code = code;
+        g_marketDataView.minuteUnit = minuteUnit;
+        g_marketDataView.bars.clear();
+        g_marketDataView.continuation = {};
+        g_marketDataError.clear();
+    }
+    g_marketDataState.store(
+        MarketDataState::Loading,
+        std::memory_order_release);
+    WakeFrames(60);
+}
+
+static void ApplyMinuteBars(
+    const trading::MinuteBarsPage& page,
+    const trading::Continuation& continuation)
+{
+    if (!page.result.ok) {
+        const std::string error = !page.result.error.empty()
+            ? page.result.error
+            : page.result.returnMessage;
+        SetMarketDataError(error.empty()
+            ? "실제 분봉 응답을 해석하지 못했습니다."
+            : error);
+        return;
+    }
+
+    if (page.bars.empty()) {
+        SetMarketDataError("실제 분봉 응답이 비어 있습니다.");
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(g_marketDataMutex);
+        g_marketDataView.code = page.code;
+        g_marketDataView.minuteUnit = page.minuteUnit;
+        g_marketDataView.bars = page.bars;
+        g_marketDataView.continuation = continuation;
+        g_marketDataError.clear();
+    }
+
+    g_marketDataState.store(
+        MarketDataState::Ready,
+        std::memory_order_release);
+    g_tradingState.UpdateCurrentPrice(
+        page.code,
+        page.bars.back().close);
+    WakeFrames(60);
+}
+
+static int MinuteUnitFromSelection(int selection) noexcept
+{
+    static constexpr int units[] = { 1, 3, 5, 10, 15, 30, 60 };
+    const int index = (std::max)(0, (std::min)(selection, 6));
+    return units[index];
+}
+
+static bool TryGetLatestMarketQuote(
+    std::string& code,
+    trading::PriceWon& price)
+{
+    const MarketDataView snapshot = MarketDataSnapshot();
+    if (snapshot.code.empty() || snapshot.bars.empty()) return false;
+    code = snapshot.code;
+    price = snapshot.bars.back().close;
+    return trading::IsValidPrice(price);
 }
 
 static const char* MarketDataStateLabel(MarketDataState state) noexcept
@@ -286,12 +376,18 @@ static bool CanSubmitBrokerOrders()
         g_runtimeRunner->Snapshot().orderSubmissionAllowed;
 }
 
-static bool CanSubmitEntryOrders()
+static bool CanActivateEntries()
 {
     return
         CanSubmitBrokerOrders() &&
         g_marketDataState.load(std::memory_order_acquire) ==
-            MarketDataState::Ready &&
+            MarketDataState::Ready;
+}
+
+static bool CanSubmitEntryOrders()
+{
+    return
+        CanActivateEntries() &&
         !g_observeMode.load(std::memory_order_acquire);
 }
 
@@ -329,7 +425,7 @@ static void DrawToolbar()
     ImGui::SameLine();
 
     const char* timeFrames[] = {
-        "1분", "3분", "5분", "10분", "30분", "일"};
+        "1분", "3분", "5분", "10분", "15분", "30분", "60분"};
     ImGui::SetNextItemWidth(90.0f);
     ImGui::Combo(
         "##timeframe",
@@ -442,46 +538,175 @@ static void DrawToolbar()
     }
 }
 
+static void DrawRealCandles(
+    const std::vector<trading::Bar>& bars,
+    ImVec2 size)
+{
+    if (bars.empty() || size.x < 80.0f || size.y < 80.0f) return;
+
+    const float volumeHeight = (std::max)(60.0f, size.y * 0.20f);
+    const float priceHeight = size.y - volumeHeight - 8.0f;
+    const int visibleCount = (std::max)(20, static_cast<int>(size.x / 7.0f));
+    const int first = (std::max)(
+        0,
+        static_cast<int>(bars.size()) - visibleCount);
+
+    trading::PriceWon minPrice = (std::numeric_limits<trading::PriceWon>::max)();
+    trading::PriceWon maxPrice = 0;
+    trading::Volume maxVolume = 1;
+    for (int index = first; index < static_cast<int>(bars.size()); ++index) {
+        minPrice = (std::min)(minPrice, bars[index].low);
+        maxPrice = (std::max)(maxPrice, bars[index].high);
+        maxVolume = (std::max)(maxVolume, bars[index].volume);
+    }
+
+    if (minPrice <= 0 || maxPrice <= minPrice) return;
+
+    ImGui::InvisibleButton("##real_candles", size);
+    const ImVec2 origin = ImGui::GetItemRectMin();
+    const ImVec2 end = ImGui::GetItemRectMax();
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(origin, end, IM_COL32(15, 16, 20, 255));
+    draw->AddRect(origin, end, IM_COL32(70, 72, 82, 255));
+
+    for (int grid = 1; grid < 5; ++grid) {
+        const float y = origin.y + priceHeight * grid / 5.0f;
+        draw->AddLine(
+            ImVec2(origin.x, y),
+            ImVec2(end.x, y),
+            IM_COL32(45, 47, 55, 255));
+    }
+
+    const float range = static_cast<float>(maxPrice - minPrice);
+    const int count = static_cast<int>(bars.size()) - first;
+    const float step = size.x / static_cast<float>((std::max)(1, count));
+    const float bodyWidth = (std::max)(1.0f, step * 0.58f);
+
+    const auto priceY = [&](trading::PriceWon price) {
+        return origin.y +
+            (static_cast<float>(maxPrice - price) / range) *
+                priceHeight;
+    };
+
+    for (int local = 0; local < count; ++local) {
+        const trading::Bar& bar = bars[first + local];
+        const float x = origin.x + step * (local + 0.5f);
+        const bool up = bar.close >= bar.open;
+        const ImU32 color = up
+            ? IM_COL32(235, 72, 72, 255)
+            : IM_COL32(70, 130, 240, 255);
+
+        draw->AddLine(
+            ImVec2(x, priceY(bar.high)),
+            ImVec2(x, priceY(bar.low)),
+            color,
+            1.0f);
+
+        float openY = priceY(bar.open);
+        float closeY = priceY(bar.close);
+        if (std::fabs(openY - closeY) < 1.0f) closeY = openY + 1.0f;
+        draw->AddRectFilled(
+            ImVec2(x - bodyWidth * 0.5f, (std::min)(openY, closeY)),
+            ImVec2(x + bodyWidth * 0.5f, (std::max)(openY, closeY)),
+            color);
+
+        const float volumeRatio = static_cast<float>(bar.volume) /
+            static_cast<float>(maxVolume);
+        const float volumeTop =
+            origin.y + priceHeight + 8.0f +
+            volumeHeight * (1.0f - volumeRatio);
+        draw->AddRectFilled(
+            ImVec2(x - bodyWidth * 0.5f, volumeTop),
+            ImVec2(x + bodyWidth * 0.5f, end.y),
+            color);
+    }
+}
+
 static void DrawMarketDataPanel()
 {
     ImGui::Begin("실제 시세");
-    ImGui::TextColored(
-        ImVec4(0.95f, 0.30f, 0.30f, 1.0f),
-        "실제 시세 데이터가 없습니다.");
-    ImGui::Spacing();
-    const std::string error = MarketDataErrorSnapshot();
-    ImGui::TextWrapped("%s", error.c_str());
-    ImGui::Spacing();
+    const MarketDataState state =
+        g_marketDataState.load(std::memory_order_acquire);
+    const MarketDataView snapshot = MarketDataSnapshot();
+
+    if (state != MarketDataState::Ready || snapshot.bars.empty()) {
+        ImGui::TextColored(
+            state == MarketDataState::Loading
+                ? ImVec4(0.95f, 0.72f, 0.25f, 1.0f)
+                : ImVec4(0.95f, 0.30f, 0.30f, 1.0f),
+            "%s",
+            MarketDataStateLabel(state));
+        const std::string error = MarketDataErrorSnapshot();
+        if (!error.empty()) {
+            ImGui::Spacing();
+            ImGui::TextWrapped("%s", error.c_str());
+        }
+        ImGui::End();
+        return;
+    }
+
+    const trading::Bar& latest = snapshot.bars.back();
+    ImGui::Text(
+        "%s | %d분 | 실제 ka10079 | %zu봉",
+        snapshot.code.c_str(),
+        snapshot.minuteUnit,
+        snapshot.bars.size());
+    ImGui::SameLine();
+    ImGui::Text(
+        "O %d  H %d  L %d  C %d  V %lld",
+        latest.open,
+        latest.high,
+        latest.low,
+        latest.close,
+        static_cast<long long>(latest.volume));
+
+    if (
+        snapshot.continuation.continueYn == "Y" ||
+        snapshot.continuation.continueYn == "y")
+    {
+        ImGui::TextDisabled(
+            "연속조회 가능: next-key가 수신되었습니다. 현재 화면은 검증된 첫 응답 페이지입니다.");
+    }
+
     ImGui::Separator();
-    ImGui::TextWrapped(
-        "차트, 스캐너, 진입 주문, 전략 가동은 실제 종목 분봉·KOSPI 분봉·"
-        "실시간 주식체결·업종지수 수신이 성공한 뒤에만 활성화됩니다.");
-    ImGui::TextWrapped(
-        "현재는 빈 화면이 정상이며, 이후 발생하는 인증·요청·파싱·연속조회·"
-        "시간정렬 오류를 실제 응답 기준으로 해결합니다.");
+    DrawRealCandles(snapshot.bars, ImGui::GetContentRegionAvail());
     ImGui::End();
 }
 
 static void DrawSymbolPool()
 {
     ImGui::Begin("종목풀");
-    ImGui::TextColored(
-        ImVec4(0.95f, 0.30f, 0.30f, 1.0f),
-        "실제 시세 종목 없음");
-    ImGui::TextWrapped(
-        "하드코딩 종목, 난수 가격, 임의 점수, 가짜 매매대상은 제거했습니다.");
+    const MarketDataView snapshot = MarketDataSnapshot();
+    if (snapshot.code.empty() || snapshot.bars.empty()) {
+        ImGui::TextColored(
+            ImVec4(0.95f, 0.30f, 0.30f, 1.0f),
+            "실제 시세 종목 없음");
+    }
+    else {
+        ImGui::BulletText(
+            "%s  %d분  %zu봉",
+            snapshot.code.c_str(),
+            snapshot.minuteUnit,
+            snapshot.bars.size());
+        ImGui::TextDisabled("합성 종목과 임의 점수는 생성하지 않습니다.");
+    }
     ImGui::End();
 }
 
 static void DrawScanner()
 {
     ImGui::Begin("스캐너");
-    ImGui::TextColored(
-        ImVec4(0.95f, 0.30f, 0.30f, 1.0f),
-        "실제 유니버스와 실제 시세가 없어 선별 결과를 만들지 않습니다.");
-    ImGui::TextWrapped(
-        "실제 데이터 파이프라인 오류를 해결하기 전에는 베타·상관·시차·"
-        "거래대금 점수를 계산하지 않습니다.");
+    const MarketDataView snapshot = MarketDataSnapshot();
+    if (snapshot.bars.empty()) {
+        ImGui::TextColored(
+            ImVec4(0.95f, 0.30f, 0.30f, 1.0f),
+            "실제 유니버스와 실제 시세가 없습니다.");
+    }
+    else {
+        ImGui::Text("실제 분봉 수신: %s", snapshot.code.c_str());
+        ImGui::TextWrapped(
+            "현재 단계에서는 한 종목의 실제 분봉만 검증합니다. 실제 유니버스가 연결되기 전에는 베타·상관·시차·거래대금 순위를 만들지 않습니다.");
+    }
     ImGui::End();
 }
 
@@ -489,9 +714,24 @@ static void DrawDashboard()
 {
     ImGui::Begin("대시보드");
 
-    ImGui::TextColored(
-        ImVec4(0.95f, 0.30f, 0.30f, 1.0f),
-        "진입용 실제 현재가 없음");
+    const MarketDataView market = MarketDataSnapshot();
+    const bool quoteReady = !market.code.empty() && !market.bars.empty();
+    const trading::PriceWon latestPrice = quoteReady
+        ? market.bars.back().close
+        : 0;
+
+    if (quoteReady) {
+        ImGui::Text(
+            "선택: %s  실제현재가 %d원",
+            market.code.c_str(),
+            latestPrice);
+    }
+    else {
+        ImGui::TextColored(
+            ImVec4(0.95f, 0.30f, 0.30f, 1.0f),
+            "진입용 실제 현재가 없음");
+    }
+
     ImGui::SameLine();
     ImGui::TextDisabled("| 주문수량");
     ImGui::SameLine();
@@ -506,12 +746,12 @@ static void DrawDashboard()
     }
 
     ImGui::SameLine();
-    const bool canEnter = CanSubmitEntryOrders();
+    const bool canEnter = CanSubmitEntryOrders() && quoteReady;
     if (!canEnter) ImGui::BeginDisabled();
     if (ImGui::Button("키움 모의매수")) {
         g_commandBus.Push(
             Cmd::MockBuy,
-            g_symbolInput,
+            market.code,
             g_orderQuantity);
     }
     if (!canEnter) ImGui::EndDisabled();
@@ -525,11 +765,19 @@ static void DrawDashboard()
     if (!canLiquidate) ImGui::EndDisabled();
 
     ImGui::SameLine();
-    if (!canEnter) ImGui::BeginDisabled();
-    if (ImGui::Button("전략 가동")) {
-        g_commandBus.Push(Cmd::ArmStrategy);
+    if (g_observeMode.load(std::memory_order_acquire)) {
+        const bool canActivate = CanActivateEntries();
+        if (!canActivate) ImGui::BeginDisabled();
+        if (ImGui::Button("진입 허용")) {
+            g_commandBus.Push(Cmd::ArmStrategy);
+        }
+        if (!canActivate) ImGui::EndDisabled();
     }
-    if (!canEnter) ImGui::EndDisabled();
+    else {
+        if (ImGui::Button("관망 전환")) {
+            g_commandBus.Push(Cmd::DisarmStrategy);
+        }
+    }
 
     const std::vector<trading::PositionSnapshot> positions =
         g_tradingState.SnapshotPositions();
@@ -541,10 +789,8 @@ static void DrawDashboard()
         totalEvaluation += position.EvaluationWon();
     }
 
-    const trading::MoneyWon unrealized =
-        totalEvaluation - totalCost;
-    const trading::MoneyWon realized =
-        g_tradingState.RealizedPnlWon();
+    const trading::MoneyWon unrealized = totalEvaluation - totalCost;
+    const trading::MoneyWon realized = g_tradingState.RealizedPnlWon();
     const double rate = totalCost > 0
         ? static_cast<double>(unrealized) /
             static_cast<double>(totalCost) * 100.0
@@ -565,8 +811,7 @@ static void DrawDashboard()
 
     if (positions.empty()) {
         ImGui::Separator();
-        ImGui::TextDisabled(
-            "키움 계좌대조 결과 보유 포지션이 없습니다.");
+        ImGui::TextDisabled("키움 계좌대조 결과 보유 포지션이 없습니다.");
         ImGui::End();
         return;
     }
@@ -587,8 +832,7 @@ static void DrawDashboard()
         ImGui::TableHeadersRow();
 
         for (const trading::PositionSnapshot& position : positions) {
-            const trading::MoneyWon pnl =
-                position.UnrealizedPnlWon();
+            const trading::MoneyWon pnl = position.UnrealizedPnlWon();
             const double pnlRate = position.costBasisWon > 0
                 ? static_cast<double>(pnl) /
                     static_cast<double>(position.costBasisWon) * 100.0
@@ -596,37 +840,22 @@ static void DrawDashboard()
 
             ImGui::TableNextRow();
             ImGui::PushID(position.code.c_str());
-
             ImGui::TableNextColumn();
             bool selected = position.selected;
             if (ImGui::Checkbox("##selected", &selected)) {
-                g_tradingState.SetSelected(
-                    position.code,
-                    selected);
+                g_tradingState.SetSelected(position.code, selected);
             }
-
             ImGui::TableNextColumn();
-            ImGui::Text(
-                "%s %s",
-                position.code.c_str(),
-                position.name.c_str());
+            ImGui::Text("%s %s", position.code.c_str(), position.name.c_str());
+            ImGui::TableNextColumn(); ImGui::Text("%d", position.quantity);
+            ImGui::TableNextColumn(); ImGui::Text("%.2f", position.AveragePriceWon());
+            ImGui::TableNextColumn(); ImGui::Text("%d", position.currentPriceWon);
+            ImGui::TableNextColumn(); ImGui::Text("%+.0f", static_cast<double>(pnl));
+            ImGui::TableNextColumn(); ImGui::Text("%+.2f%%", pnlRate);
             ImGui::TableNextColumn();
-            ImGui::Text("%d", position.quantity);
-            ImGui::TableNextColumn();
-            ImGui::Text("%.2f", position.AveragePriceWon());
-            ImGui::TableNextColumn();
-            ImGui::Text("%d", position.currentPriceWon);
-            ImGui::TableNextColumn();
-            ImGui::Text("%+.0f", static_cast<double>(pnl));
-            ImGui::TableNextColumn();
-            ImGui::Text("%+.2f%%", pnlRate);
-            ImGui::TableNextColumn();
-
             if (!canLiquidate) ImGui::BeginDisabled();
             if (ImGui::SmallButton("개별청산")) {
-                g_commandBus.Push(
-                    Cmd::LiquidatePosition,
-                    position.code);
+                g_commandBus.Push(Cmd::LiquidatePosition, position.code);
             }
             if (!canLiquidate) ImGui::EndDisabled();
             ImGui::PopID();
@@ -739,25 +968,77 @@ static void DrainCommands()
             if (command.arg.empty()) {
                 SetMarketDataError(
                     "종목코드가 비어 있어 실제 시세 조회를 시작할 수 없습니다.");
-                g_log.Add(
-                    "DATA",
-                    "실시세 조회 거부: 종목코드 없음");
+                g_log.Add("DATA", "실시세 조회 거부: 종목코드 없음");
+                break;
+            }
+            if (!g_runtimeRunner || !g_runtimeRunner->IsRunning()) {
+                SetMarketDataError("키움 런타임이 실행 중이 아닙니다.");
+                g_log.Add("DATA", "실시세 조회 거부: 키움 런타임 정지");
                 break;
             }
 
-            const std::string message =
-                "실제 시세 조회 어댑터가 연결되지 않았습니다: " +
-                command.arg;
-            SetMarketDataError(message);
-            g_log.Add("DATA", "%s", message.c_str());
+            const int minuteUnit = MinuteUnitFromSelection(command.i0);
+            BeginMarketDataRequest(command.arg, minuteUnit);
+            std::string error;
+            if (!g_runtimeRunner->RequestStockMinuteBars(
+                    command.arg,
+                    minuteUnit,
+                    {},
+                    error))
+            {
+                SetMarketDataError(error);
+                g_log.Add("FAULT", "ka10079 요청 실패: %s", error.c_str());
+            }
+            else {
+                g_log.Add(
+                    "DATA",
+                    "ka10079 실제 분봉 요청: %s %d분",
+                    command.arg.c_str(),
+                    minuteUnit);
+            }
             break;
         }
 
-        case Cmd::MockBuy:
-            g_orderLog.Add(
-                "REJECT",
-                "매수 거부: 실제 시세 준비 전에는 진입 주문을 제출하지 않습니다.");
+        case Cmd::MockBuy: {
+            if (!CanSubmitEntryOrders()) {
+                g_orderLog.Add(
+                    "REJECT",
+                    "매수 거부: 계좌대조·실제 시세·진입 허용 상태를 확인하세요.");
+                break;
+            }
+
+            std::string quoteCode;
+            trading::PriceWon quotePrice = 0;
+            if (!TryGetLatestMarketQuote(quoteCode, quotePrice) ||
+                quoteCode != command.arg)
+            {
+                g_orderLog.Add(
+                    "REJECT",
+                    "매수 거부: 선택 종목의 실제 현재가가 없습니다.");
+                break;
+            }
+
+            trading::OrderIntent intent;
+            intent.code = quoteCode;
+            intent.name = quoteCode;
+            intent.side = trading::StockOrderSide::Buy;
+            intent.type = trading::StockOrderType::Market;
+            intent.quantity = (std::max)(1, command.i0);
+
+            std::string error;
+            if (!g_runtimeRunner->SubmitOrder(intent, error)) {
+                g_orderLog.Add("REJECT", "키움 모의매수 거부: %s", error.c_str());
+            }
+            else {
+                g_orderLog.Add(
+                    "ORDER",
+                    "키움 모의매수 전송 %s %d주 시장가, 조회현재가=%d",
+                    quoteCode.c_str(),
+                    intent.quantity,
+                    quotePrice);
+            }
             break;
+        }
 
         case Cmd::LiquidatePosition: {
             if (!CanSubmitLiquidationOrders()) {
@@ -837,10 +1118,14 @@ static void DrainCommands()
         }
 
         case Cmd::ArmStrategy:
-            g_observeMode.store(true, std::memory_order_release);
-            g_log.Add(
-                "REJECT",
-                "전략 가동 거부: 실제 시세 준비 전입니다.");
+            if (!CanActivateEntries()) {
+                g_observeMode.store(true, std::memory_order_release);
+                g_log.Add("REJECT", "진입 허용 거부: 계좌대조와 실제 시세가 필요합니다.");
+            }
+            else {
+                g_observeMode.store(false, std::memory_order_release);
+                g_log.Add("CMD", "실제 시세 기반 진입 허용");
+            }
             break;
 
         case Cmd::DisarmStrategy:
@@ -848,11 +1133,24 @@ static void DrainCommands()
             g_log.Add("CMD", "관망 전환");
             break;
 
-        case Cmd::ResetFeed:
-            SetMarketDataError(
-                "실제 시세 피드 재연결 기능이 아직 연결되지 않았습니다.");
-            g_log.Add("DATA", "실시세 피드 리셋 실패");
+        case Cmd::ResetFeed: {
+            const MarketDataView snapshot = MarketDataSnapshot();
+            if (snapshot.code.empty()) {
+                SetMarketDataError("재조회할 실제 종목코드가 없습니다.");
+                break;
+            }
+            BeginMarketDataRequest(snapshot.code, snapshot.minuteUnit);
+            std::string error;
+            if (!g_runtimeRunner || !g_runtimeRunner->RequestStockMinuteBars(
+                    snapshot.code, snapshot.minuteUnit, {}, error))
+            {
+                SetMarketDataError(error);
+            }
+            else {
+                g_log.Add("DATA", "ka10079 실제 분봉 재조회: %s", snapshot.code.c_str());
+            }
             break;
+        }
 
         default:
             g_log.Add("CMD", "미구현 커맨드");
@@ -1209,6 +1507,25 @@ int WINAPI wWinMain(
             g_observeMode.store(
                 enabled,
                 std::memory_order_release);
+        };
+        callbacks.minuteBars = [](
+            const trading::MinuteBarsPage& page,
+            const trading::Continuation& continuation) {
+            ApplyMinuteBars(page, continuation);
+            if (page.result.ok) {
+                g_log.Add(
+                    "DATA",
+                    "실제 분봉 적용 완료: %s %d분 %zu봉",
+                    page.code.c_str(),
+                    page.minuteUnit,
+                    page.bars.size());
+            }
+            else {
+                const std::string error = !page.result.error.empty()
+                    ? page.result.error
+                    : page.result.returnMessage;
+                g_log.Add("FAULT", "실제 분봉 오류: %s", error.c_str());
+            }
         };
 
         g_runtimeRunner =

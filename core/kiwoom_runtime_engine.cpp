@@ -1,4 +1,4 @@
-#include "kiwoom_runtime_engine.h"
+﻿#include "kiwoom_runtime_engine.h"
 
 #include "json_lite.h"
 
@@ -364,6 +364,38 @@ namespace trading
         lastError_.clear();
         return TranslateSessionActionsLocked(
             session_.OnReconciliationCompleted(true));
+    }
+
+    std::vector<KiwoomRuntimeAction>
+    KiwoomRuntimeEngine::RequestStockMinuteBars(
+        const std::string& stockCode,
+        int minuteUnit,
+        const Continuation& continuation,
+        std::string& error)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return RequestMinuteBarsLocked(
+            MinuteBarInstrument::Stock,
+            stockCode,
+            minuteUnit,
+            continuation,
+            error);
+    }
+
+    std::vector<KiwoomRuntimeAction>
+    KiwoomRuntimeEngine::RequestIndexMinuteBars(
+        const std::string& indexCode,
+        int minuteUnit,
+        const Continuation& continuation,
+        std::string& error)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return RequestMinuteBarsLocked(
+            MinuteBarInstrument::Index,
+            indexCode,
+            minuteUnit,
+            continuation,
+            error);
     }
 
     std::vector<KiwoomRuntimeAction>
@@ -736,6 +768,53 @@ namespace trading
             session_.OnReconciliationCompleted(
                 false,
                 lastError_));
+    }
+
+    std::vector<KiwoomRuntimeAction>
+    KiwoomRuntimeEngine::RequestMinuteBarsLocked(
+        MinuteBarInstrument instrument,
+        const std::string& code,
+        int minuteUnit,
+        const Continuation& continuation,
+        std::string& error)
+    {
+        if (accessToken_.empty()) {
+            error = "access token is not available for market data";
+            return {};
+        }
+
+        RestRequest request;
+        if (instrument == MinuteBarInstrument::Stock) {
+            request = BuildStockMinuteBarsRestRequest(
+                code,
+                minuteUnit,
+                accessToken_,
+                true,
+                continuation,
+                error);
+        }
+        else {
+            request = BuildIndexMinuteBarsRestRequest(
+                code,
+                minuteUnit,
+                accessToken_,
+                continuation,
+                error);
+        }
+
+        if (!error.empty()) return {};
+
+        KiwoomRuntimeAction action = MakeRestActionLocked(
+            instrument == MinuteBarInstrument::Stock
+                ? KiwoomRuntimeActionType::RequestStockMinuteBars
+                : KiwoomRuntimeActionType::RequestIndexMinuteBars,
+            std::move(request));
+        action.marketInstrument = instrument;
+        action.marketCode = code;
+        action.minuteUnit = minuteUnit;
+        action.continuation = continuation;
+        error.clear();
+        return { std::move(action) };
     }
 
     KiwoomRuntimeAction KiwoomRuntimeEngine::MakeRestActionLocked(

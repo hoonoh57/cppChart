@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 
 $productionFiles = @(
     '.\shell_main.cpp',
@@ -6,7 +6,9 @@ $productionFiles = @(
     '.\core\runtime_config.cpp',
     '.\core\kiwoom_session.cpp',
     '.\core\kiwoom_runtime_engine.h',
-    '.\core\kiwoom_runtime_engine.cpp'
+    '.\core\kiwoom_runtime_engine.cpp',
+    '.\core\kiwoom_market_data.h',
+    '.\core\kiwoom_market_data.cpp'
 )
 
 $forbiddenMarkers = @(
@@ -36,7 +38,9 @@ $requiredMarkers = @(
     'MarketDataState::Error',
     '합성 데이터는 제거되었으며 오류를 숨기지 않습니다',
     'CanSubmitEntryOrders',
-    'CanSubmitLiquidationOrders'
+    'CanSubmitLiquidationOrders',
+    'RequestStockMinuteBars',
+    'ka10079'
 )
 
 foreach ($marker in $requiredMarkers) {

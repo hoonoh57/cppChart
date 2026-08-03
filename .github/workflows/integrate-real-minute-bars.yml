@@ -6,12 +6,14 @@ on:
       - p2/kiwoom-mock-gateway
     paths:
       - scripts/integrate_real_minute_bars.py
+      - scripts/repair_real_minute_integration.py
       - .github/workflows/integrate-real-minute-bars.yml
   pull_request:
     branches:
       - main
     paths:
       - scripts/integrate_real_minute_bars.py
+      - scripts/repair_real_minute_integration.py
       - .github/workflows/integrate-real-minute-bars.yml
 
 permissions:
@@ -32,6 +34,10 @@ jobs:
         with:
           ref: p2/kiwoom-mock-gateway
           fetch-depth: 0
+
+      - name: Repair migration boundaries
+        shell: pwsh
+        run: python .\scripts\repair_real_minute_integration.py
 
       - name: Integrate real minute bars
         shell: pwsh
@@ -78,7 +84,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git reset .github/workflows/integrate-real-minute-bars.yml scripts/integrate_real_minute_bars.py
+          git reset .github/workflows/integrate-real-minute-bars.yml scripts/integrate_real_minute_bars.py scripts/repair_real_minute_integration.py
           if (-not (git diff --cached --quiet)) {
             git commit -m 'Integrate real Kiwoom minute-bar data path'
             git push origin HEAD:p2/kiwoom-mock-gateway

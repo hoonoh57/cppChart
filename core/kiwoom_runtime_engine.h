@@ -40,7 +40,7 @@ namespace trading
 
     struct KiwoomRuntimeSnapshot final
     {
-        RuntimeMode mode = RuntimeMode::LocalMock;
+        RuntimeMode mode = RuntimeMode::Unconfigured;
         KiwoomSessionState sessionState = KiwoomSessionState::Stopped;
         bool tokenAvailable = false;
         bool reconciliationInProgress = false;

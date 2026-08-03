@@ -688,9 +688,7 @@ static void DrawMarketDataPanel()
 
     ImGui::Separator();
     const ImVec2 available = ImGui::GetContentRegionAvail();
-    const std::size_t visibleLimit = static_cast<std::size_t>((std::max)(
-        20,
-        static_cast<int>(available.x / 7.0f)));
+    const std::size_t visibleLimit = snapshot.barCount;
 
     const double started = NowSeconds();
     if (g_chartWorkspaceModule.NeedsUpdate(

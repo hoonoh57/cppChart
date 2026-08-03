@@ -1,4 +1,4 @@
-#include "render_document_renderer.h"
+﻿#include "render_document_renderer.h"
 
 #include <algorithm>
 #include <cmath>
@@ -48,6 +48,13 @@ namespace trading::ui
                 minimum = (std::min)(minimum, value);
                 maximum = (std::max)(maximum, value);
             }
+        };
+
+        struct PaneGeometry final
+        {
+            ImVec2 plotOrigin;
+            ImVec2 plotEnd;
+            bool valid = false;
         };
 
         void IncludeTimestamp(
@@ -433,7 +440,8 @@ namespace trading::ui
             EpochMillis minimumSpanMs,
             bool drawTimeAxis,
             ImVec2 size,
-            RenderSurfaceState& state)
+            RenderSurfaceState& state,
+            std::vector<PaneGeometry>& paneGeometries)
         {
             if (size.x < 130.0f || size.y < 50.0f) return;
 
@@ -455,6 +463,11 @@ namespace trading::ui
             const ImVec2 plotEnd(
                 plotOrigin.x + plotWidth,
                 plotOrigin.y + plotHeight);
+            PaneGeometry geometry;
+            geometry.plotOrigin = plotOrigin;
+            geometry.plotEnd = plotEnd;
+            geometry.valid = true;
+            paneGeometries.push_back(geometry);
             ImDrawList* draw = ImGui::GetWindowDrawList();
 
             draw->AddRectFilled(
@@ -715,21 +728,6 @@ namespace trading::ui
                     plotHeight);
             }
 
-            if (state.crosshairVisible &&
-                InTimeRange(state.crosshairTimestampMs, visibleRange))
-            {
-                const float crossX = MapX(
-                    state.crosshairTimestampMs,
-                    visibleRange,
-                    plotOrigin.x,
-                    plotWidth);
-                draw->AddLine(
-                    ImVec2(crossX, plotOrigin.y),
-                    ImVec2(crossX, plotEnd.y),
-                    IM_COL32(205, 208, 220, 180),
-                    1.0f);
-            }
-
             if (ImGui::IsItemHovered()) {
                 const Bar* nearest = NearestVisibleBar(
                     pane,
@@ -817,6 +815,8 @@ namespace trading::ui
                 document.panes.size() - 1));
         const float availableHeight =
             (std::max)(0.0f, size.y - spacing);
+        std::vector<PaneGeometry> paneGeometries;
+        paneGeometries.reserve(document.panes.size());
 
         for (std::size_t index = 0; index < document.panes.size(); ++index) {
             const render::Pane& pane = document.panes[index];
@@ -831,9 +831,31 @@ namespace trading::ui
                 minimumSpanMs,
                 index + 1 == document.panes.size(),
                 ImVec2(size.x, paneHeight),
-                surfaceState);
+                surfaceState,
+                paneGeometries);
             if (index + 1 < document.panes.size()) {
                 ImGui::Dummy(ImVec2(0.0f, 0.0f));
+            }
+        }
+
+        if (
+            surfaceState.crosshairVisible &&
+            InTimeRange(surfaceState.crosshairTimestampMs, visibleRange))
+        {
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            for (const PaneGeometry& geometry : paneGeometries) {
+                if (!geometry.valid) continue;
+                const float width = geometry.plotEnd.x - geometry.plotOrigin.x;
+                const float crossX = MapX(
+                    surfaceState.crosshairTimestampMs,
+                    visibleRange,
+                    geometry.plotOrigin.x,
+                    width);
+                draw->AddLine(
+                    ImVec2(crossX, geometry.plotOrigin.y),
+                    ImVec2(crossX, geometry.plotEnd.y),
+                    IM_COL32(205, 208, 220, 180),
+                    1.0f);
             }
         }
 

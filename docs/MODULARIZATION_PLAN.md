@@ -1,4 +1,4 @@
-# cppChart Modularization and Performance Plan
+﻿# cppChart Modularization and Performance Plan
 
 ## Goal
 
@@ -115,18 +115,26 @@ Acceptance:
 
 ## Milestone M6 — chart viewport foundation
 
-On the generic renderer contract implement:
+Implemented on the generic renderer contract:
 
+- full verified history remains available to the viewport;
 - visible time range;
-- wheel zoom;
-- horizontal pan;
-- auto/manual value scale;
+- wheel zoom anchored at the mouse position;
+- right-button horizontal pan;
+- double-click reset and latest-bar auto-follow;
+- visible-range automatic value scale;
 - current-price line and label;
-- crosshair and OHLCV tooltip;
-- date/session boundaries;
-- synchronized interaction state for future multi-chart use.
+- synchronized vertical crosshair across all panes in the same frame;
+- OHLCV and tick-count tooltip;
+- time and value axes;
+- headless viewport state tests registered in the complete test suite.
 
-Acceptance requires local visual/GPU testing and is the first planned user-intervention point after remote refactoring.
+Remaining before the local visual acceptance request:
+
+- session/date boundary rendering;
+- immutable completed-history plus mutable live-tail sharing so `0B` does not rebuild or copy the complete history on every tick;
+- final Windows CI verification after the live-tail split;
+- one focused visual/GPU test covering zoom, pan, crosshair, latest-bar follow, feature levels, and real `0B` updates.
 
 ## Milestone M7 — reusable indicator engine
 

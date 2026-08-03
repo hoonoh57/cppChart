@@ -137,11 +137,17 @@ Completed performance structure:
 - completed volume history is rebuilt only when a new minute promotes the prior live candle;
 - full loaded history remains available for zoom and pan without a per-tick full-vector copy.
 
-Remaining before the local visual acceptance request:
+M6 remote implementation complete:
 
-- session/date boundary rendering;
+- calendar-date changes and abnormal session gaps are detected by a broker-independent render utility;
+- boundaries are cached by completed-history structure revision and are not recomputed on every same-minute `0B` tick;
+- boundary lines render through the generic pane renderer;
+- headless date, gap, duplicate, and reverse-timestamp fixtures are registered in the complete suite.
+
+Remaining M6 acceptance:
+
 - final Windows CI verification;
-- one focused visual/GPU test covering zoom, pan, crosshair, latest-bar follow, feature levels, and real `0B` updates.
+- one focused local visual/GPU test covering zoom, pan, crosshair, latest-bar follow, date/session boundaries, feature levels, and real `0B` updates.
 
 ## Milestone M7 — reusable indicator engine
 

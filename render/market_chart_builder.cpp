@@ -1,4 +1,4 @@
-#include "market_chart_builder.h"
+﻿#include "market_chart_builder.h"
 
 #include <utility>
 
@@ -15,6 +15,7 @@ namespace trading::render
         document.workspaceId = workspaceId;
         document.title = title;
         document.revision = revision;
+        document.structureRevision = source.completedRevision;
 
         Pane pricePane;
         pricePane.id = workspaceId + ".price";

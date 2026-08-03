@@ -68,10 +68,17 @@ Completed after the first M6 checkpoint:
 - same-minute `0B` updates do not copy the complete loaded history;
 - a new minute promotes the old live bar and rebuilds completed volume history once.
 
+M6 remote implementation is complete:
+
+- calendar-date and abnormal session-gap boundaries are generic renderer data;
+- boundary calculation is cached by completed-history structure revision;
+- same-minute `0B` events do not recompute boundaries or copy completed history;
+- viewport, boundary, market-data, workspace, and runtime tests are in the complete suite.
+
 Still required before asking the user to test:
 
-1. add session/date boundary rendering;
-2. run Windows MSVC build and the complete headless suite;
+1. run the final Windows MSVC build and complete headless suite;
+2. restore verification-only CI and remove one-shot migration files;
 3. record the verified HEAD and CI run below.
 
 ## User-test policy

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "../core/market_types.h"
 
@@ -338,6 +338,7 @@ namespace trading::render
     struct RenderDocument final
     {
         std::uint64_t revision = 0;
+        std::uint64_t structureRevision = 0;
         std::string workspaceId;
         std::string title;
         std::vector<Pane> panes;

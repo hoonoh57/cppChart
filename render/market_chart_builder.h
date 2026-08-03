@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "render_document.h"
 
@@ -14,6 +14,7 @@ namespace trading::render
         std::shared_ptr<const std::vector<Bar>> completedBars;
         Bar liveBar;
         bool hasLiveBar = false;
+        std::uint64_t completedRevision = 0;
         std::shared_ptr<const std::vector<HistogramPoint>> completedVolume;
     };
 

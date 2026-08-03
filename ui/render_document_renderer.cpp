@@ -105,6 +105,23 @@ namespace trading::ui
             return result;
         }
 
+        std::vector<EpochMillis> PrimaryCandleTimestamps(
+            const render::RenderDocument& document)
+        {
+            for (const render::Pane& pane : document.panes) {
+                for (const render::CandleSeries& series : pane.candles) {
+                    if (!series.visible || series.bars.empty()) continue;
+                    std::vector<EpochMillis> result;
+                    result.reserve(series.bars.size());
+                    for (const Bar& bar : series.bars) {
+                        result.push_back(bar.closeTimestampMs);
+                    }
+                    return result;
+                }
+            }
+            return {};
+        }
+
         EpochMillis MinimumViewportSpan(
             const render::RenderDocument& document) noexcept
         {
@@ -503,6 +520,36 @@ namespace trading::ui
                     IM_COL32(45, 47, 55, 255));
             }
 
+            for (const render::TimeBoundary& boundary : state.timeBoundaries) {
+                if (!InTimeRange(boundary.timestampMs, visibleRange)) continue;
+                const float x = MapX(
+                    boundary.timestampMs,
+                    visibleRange,
+                    plotOrigin.x,
+                    plotWidth);
+                const bool calendarDate =
+                    boundary.kind == render::TimeBoundaryKind::CalendarDate;
+                draw->AddLine(
+                    ImVec2(x, plotOrigin.y),
+                    ImVec2(x, plotEnd.y),
+                    calendarDate
+                        ? IM_COL32(145, 150, 172, 190)
+                        : IM_COL32(105, 110, 126, 135),
+                    calendarDate ? 1.5f : 1.0f);
+
+                if (drawTimeAxis) {
+                    std::string label = calendarDate
+                        ? FormatTimestamp(boundary.timestampMs).substr(0, 5)
+                        : std::string("gap");
+                    draw->AddText(
+                        ImVec2(x + 3.0f, plotOrigin.y + 3.0f),
+                        calendarDate
+                            ? IM_COL32(205, 208, 224, 230)
+                            : IM_COL32(145, 148, 162, 200),
+                        label.c_str());
+                }
+            }
+
             std::size_t visibleCandleCount = 0;
             for (const render::CandleSeries& series : pane.candles) {
                 if (!series.visible) continue;
@@ -776,6 +823,15 @@ namespace trading::ui
 
         const EpochMillis minimumSpanMs =
             MinimumViewportSpan(document);
+        const std::uint64_t boundaryStructureRevision =
+            document.structureRevision != 0
+                ? document.structureRevision
+                : document.revision;
+        if (surfaceState.boundaryRevision != boundaryStructureRevision) {
+            surfaceState.timeBoundaries = render::FindTimeBoundaries(
+                PrimaryCandleTimestamps(document));
+            surfaceState.boundaryRevision = boundaryStructureRevision;
+        }
         if (!surfaceState.viewport.initialized) {
             render::ResetViewport(
                 surfaceState.viewport,

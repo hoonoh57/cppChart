@@ -1,4 +1,4 @@
-#include "chart_workspace_module.h"
+﻿#include "chart_workspace_module.h"
 
 #include "../render/market_chart_builder.h"
 
@@ -118,6 +118,7 @@ namespace trading::app
         renderSource.completedBars = source.completedBars;
         renderSource.liveBar = source.liveBar;
         renderSource.hasLiveBar = source.hasLiveBar;
+        renderSource.completedRevision = source.completedRevision;
         renderSource.completedVolume = completedVolume;
 
         render::RenderDocument candidate =

@@ -39,6 +39,14 @@ chart_viewport_tests.exe
 if errorlevel 1 exit /b 1
 
 cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
+  tests\time_boundaries_tests.cpp ^
+  render\time_boundaries.cpp ^
+  /Fe:time_boundaries_tests.exe
+if errorlevel 1 exit /b 1
+time_boundaries_tests.exe
+if errorlevel 1 exit /b 1
+
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
   tests\market_data_module_tests.cpp ^
   core\json_lite.cpp ^
   core\kiwoom_market_data.cpp ^

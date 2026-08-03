@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <new>
 #include <string>
 
@@ -16,6 +17,7 @@ namespace trading::indicators
             double e2 = 0.0;
             double lastJma = 0.0;
             double warmSum = 0.0;
+            int direction = 0;
             int count = 0;
             bool initialized = false;
         };
@@ -36,12 +38,13 @@ namespace trading::indicators
             return std::nearbyint(value * scale) / scale;
         }
 
-        double StepJma(
+        void StepJma(
             JmaCalculationState& state,
             int period,
             int phase,
             int power,
-            double source) noexcept
+            double source,
+            IndicatorValue& result) noexcept
         {
             if (!state.initialized) {
                 state.e0 = source;
@@ -73,8 +76,30 @@ namespace trading::indicators
                     state.warmSum / static_cast<double>(state.count),
                     10000.0)
                 : RoundTo(state.e2 + state.lastJma, 10000.0);
+
+            const double previous = state.lastJma;
+            if (current > previous) state.direction = 1;
+            else if (current < previous) state.direction = -1;
+            else if (state.direction == 0) state.direction = 1;
+
+            const float slope = previous != 0.0
+                ? static_cast<float>(RoundTo(
+                    (current / previous - 1.0) * 100.0,
+                    10.0))
+                : 0.0f;
             state.lastJma = current;
-            return current;
+
+            const float value = static_cast<float>(current);
+            const double missing =
+                static_cast<double>((std::numeric_limits<float>::quiet_NaN)());
+            result.SetOutput(JmaValueOutput, static_cast<double>(value));
+            result.SetOutput(
+                JmaUpOutput,
+                state.direction == 1 ? static_cast<double>(value) : missing);
+            result.SetOutput(
+                JmaDownOutput,
+                state.direction == -1 ? static_cast<double>(value) : missing);
+            result.SetOutput(JmaSlopeOutput, static_cast<double>(slope));
         }
 
         void ResetJma(void* opaque) noexcept
@@ -120,13 +145,13 @@ namespace trading::indicators
                 state.hasTimestamp = true;
             }
 
-            result.value = StepJma(
+            StepJma(
                 state.current,
                 state.period,
                 state.phase,
                 state.power,
-                static_cast<double>(bar.close));
-            result.ready = true;
+                static_cast<double>(bar.close),
+                result);
             return result;
         }
 

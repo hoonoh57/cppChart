@@ -3,17 +3,19 @@ name: Windows CI
 on:
   push:
     branches:
-      - p2/kiwoom-mock-gateway
+      - main
+      - p1/modularize-shell
+      - 'p2/**'
   pull_request:
     branches:
       - main
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: windows-ci-m6-${{ github.ref }}
+  group: windows-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -23,17 +25,8 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Checkout development branch
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: p2/kiwoom-mock-gateway
-          fetch-depth: 0
-
-      - name: Apply pending M6 migrations
-        shell: pwsh
-        run: |
-          python .\scripts\finish_m6_live_tail.py
-          python .\scripts\complete_m6_boundaries.py
 
       - name: Verify repository policy
         shell: pwsh
@@ -59,11 +52,13 @@ jobs:
           .\scripts\verify_real_data_only.ps1
           .\scripts\verify_modular_architecture.ps1
 
-      - name: Verify M6 contracts
+      - name: Verify integrated runtime and M6 contracts
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $source = Get-Content .\shell_main.cpp -Raw
+          $runner = Get-Content .\platform\kiwoom_runtime_runner.cpp -Raw
+          $marketCore = Get-Content .\core\kiwoom_market_data.cpp -Raw
           $marketModule = Get-Content .\app\market_data_module.cpp -Raw
           $chartModule = Get-Content .\app\chart_workspace_module.cpp -Raw
           $renderer = Get-Content .\ui\render_document_renderer.cpp -Raw
@@ -72,14 +67,23 @@ jobs:
           $boundaries = Get-Content .\render\time_boundaries.cpp -Raw
           $runAll = Get-Content .\tests\run_all.bat -Raw
           $build = Get-Content .\build.bat -Raw
+          $runnerTests = Get-Content .\tests\kiwoom_runtime_runner_tests.cpp -Raw
+          $transport = Get-Content .\platform\winhttp_transport.cpp -Raw
 
           foreach ($marker in @(
+            'CPPCHART_SHARED_RUNTIME_INTEGRATED',
+            'CPPCHART_REAL_DATA_ONLY',
+            'CPPCHART_MAJOR_FEATURE_MODULES',
+            'CPPCHART_GENERIC_RENDER_DOCUMENT',
+            'MarketDataModule g_marketDataModule',
+            'ChartWorkspaceModule g_chartWorkspaceModule',
+            'FeatureRegistry g_featureRegistry',
             'MarketDataSeriesSnapshot marketSeries',
             'ChartMarketSource chartSource',
             'DrawRenderDocument',
             'RecordPresentedFrame')) {
             if (-not $source.Contains($marker)) {
-              throw "Missing shell M6 marker: $marker"
+              throw "Missing integrated shell marker: $marker"
             }
           }
           foreach ($marker in @('CopyVisibleBars(visibleLimit)', 'const std::vector<trading::Bar> visibleBars')) {
@@ -88,6 +92,15 @@ jobs:
             }
           }
 
+          foreach ($marker in @(
+            'StockMinuteApiId = "ka10080"',
+            'IndexMinuteApiId = "ka20005"',
+            'DecodeStockTradeRecord',
+            'MergeStockTradeIntoMinuteBars')) {
+            if (-not $marketCore.Contains($marker)) {
+              throw "Missing strict market-data marker: $marker"
+            }
+          }
           foreach ($marker in @(
             'completedBars_',
             'liveBar_',
@@ -150,6 +163,17 @@ jobs:
               throw "Generic renderer contains feature-specific marker: $marker"
             }
           }
+          if (-not $runner.Contains('DeliverMinuteBars') -or
+              -not $runner.Contains('SubscribeStockTrades') -or
+              -not $runner.Contains('UnsubscribeStockTrades')) {
+            throw 'Kiwoom minute and 0B runtime integration is incomplete'
+          }
+          if (-not $runnerTests.Contains('must not return after reconnect')) {
+            throw '0B reconnect regression gate is missing'
+          }
+          if (-not $transport.Contains('CPPCHART_CONTINUATION_HEADERS')) {
+            throw 'WinHTTP continuation headers are missing'
+          }
           if ($source.Contains('ImGui::GetIO().Framerate')) {
             throw 'ImGui smoothed FPS is exposed as actual render rate'
           }
@@ -181,17 +205,13 @@ jobs:
           & cmd.exe /d /s /c "`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && call tests\run_all.bat"
           if ($LASTEXITCODE -ne 0) { throw "tests failed, exit code=$LASTEXITCODE" }
 
-      - name: Commit verified M6 implementation
-        if: github.event_name == 'pull_request'
+      - name: Verify clean source tree after build
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add render/render_document.h render/market_chart_builder.h render/market_chart_builder.cpp app/chart_workspace_module.cpp ui/render_document_renderer.cpp build.bat tests/run_all.bat docs/MODULARIZATION_PLAN.md docs/SESSION_HANDOFF.md
-          if (-not (git diff --cached --quiet)) {
-            git commit -m 'Complete generic chart viewport boundaries'
-            git push origin HEAD:p2/kiwoom-mock-gateway
+          $changes = @(git status --porcelain)
+          if ($changes.Count -gt 0) {
+            throw "Build or tests modified tracked files:`n$($changes -join "`n")"
           }
 
       - name: Publish verified executable

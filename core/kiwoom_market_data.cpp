@@ -1,4 +1,4 @@
-#include "kiwoom_market_data.h"
+﻿#include "kiwoom_market_data.h"
 
 #include "json_lite.h"
 
@@ -14,8 +14,8 @@ namespace trading
     namespace
     {
         constexpr const char* ChartPath = "/api/dostk/chart";
-        constexpr const char* StockMinuteApiId = "ka10079";
-        constexpr const char* IndexMinuteApiId = "ka20004";
+        constexpr const char* StockMinuteApiId = "ka10080";
+        constexpr const char* IndexMinuteApiId = "ka20005";
 
         std::string Trim(const std::string& value)
         {
@@ -394,8 +394,43 @@ namespace trading
                 parsed.value.Find(arrayKey);
             if (rows == nullptr) {
                 response.result.ok = false;
-                response.result.error =
-                    "required response array is missing: " + arrayKey;
+
+                if (
+                    instrument == MinuteBarInstrument::Stock &&
+                    parsed.value.Find("stk_tic_chart_qry") != nullptr)
+                {
+                    response.result.error =
+                        "received stock tick-chart response from api-id ka10079; "
+                        "stock minute bars require api-id ka10080";
+                    return response;
+                }
+
+                if (
+                    instrument == MinuteBarInstrument::Index &&
+                    (
+                        parsed.value.Find("inds_tic_pole_qry") != nullptr ||
+                        parsed.value.Find("inds_tic_chart_qry") != nullptr))
+                {
+                    response.result.error =
+                        "received index tick-chart response from api-id ka20004; "
+                        "index minute bars require api-id ka20005";
+                    return response;
+                }
+
+                std::ostringstream message;
+                message
+                    << "required response array is missing: "
+                    << arrayKey
+                    << "; response keys=";
+
+                bool firstKey = true;
+                for (const auto& entry : parsed.value.AsObject()) {
+                    if (!firstKey) message << ',';
+                    message << entry.first;
+                    firstKey = false;
+                }
+
+                response.result.error = message.str();
                 return response;
             }
             if (!rows->IsArray()) {

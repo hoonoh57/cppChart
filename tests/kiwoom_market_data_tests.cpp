@@ -32,7 +32,7 @@ namespace
 
         Check(error.empty(), "stock minute request must build");
         Check(request.path == "/api/dostk/chart", "chart path mismatch");
-        Check(request.apiId == "ka10079", "stock minute api-id mismatch");
+        Check(request.apiId == "ka10080", "stock minute api-id mismatch");
         Check(request.headers.at("authorization") == "Bearer token",
               "authorization header mismatch");
         Check(request.body.find("\"stk_cd\":\"005930\"") != std::string::npos,
@@ -87,7 +87,7 @@ namespace
             trading::BuildIndexMinuteBarsRestRequest(
                 "001", 1, "token", {}, error);
         Check(error.empty(), "index request must build");
-        Check(request.apiId == "ka20004", "index minute api-id mismatch");
+        Check(request.apiId == "ka20005", "index minute api-id mismatch");
         Check(request.body.find("\"inds_cd\":\"001\"") != std::string::npos,
               "index code body mismatch");
 
@@ -108,6 +108,16 @@ namespace
         Check(!missing.result.ok, "missing array must fail");
         Check(missing.result.error.find("stk_min_pole_chart_qry") != std::string::npos,
               "missing array error must name the field");
+
+        const trading::MinuteBarsPage wrongApi =
+            trading::ParseStockMinuteBarsResponse(
+                "005930",
+                1,
+                "{\"return_code\":0,\"stk_tic_chart_qry\":[]}");
+        Check(!wrongApi.result.ok,
+              "tick-chart response must not be accepted as minute bars");
+        Check(wrongApi.result.error.find("ka10080") != std::string::npos,
+              "wrong API-ID error must identify ka10080");
 
         const trading::MinuteBarsPage broken =
             trading::ParseStockMinuteBarsResponse(

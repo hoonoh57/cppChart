@@ -187,6 +187,9 @@ if ($renderer.Contains('static_cast<double>(nearest->close)')) {
 
 $indicatorContract = Get-Content '.\core\indicator_engine.h' -Raw
 $requiredIndicatorContractMarkers = @(
+    'MaxIndicatorOutputs',
+    'struct IndicatorValue final',
+    'SetOutput(',
     'struct IndicatorSpec final',
     'class IndicatorInstance final',
     'class IndicatorRegistry final',
@@ -208,7 +211,7 @@ $indicatorContracts = @(
             'RegisterSmaIndicator',
             'bar.closeTimestampMs == state.latestTimestampMs',
             'state.sum += close - state.window[state.latestIndex]',
-            'IndicatorFault::TimestampMovedBackward')
+            'result.SetOutput(')
     },
     @{
         Path = '.\core\jma_indicator.cpp'
@@ -217,16 +220,21 @@ $indicatorContracts = @(
             'RegisterJmaIndicator',
             'state.current = state.beforeLatest',
             'StepJma(',
-            'std::nearbyint')
+            'std::nearbyint',
+            'JmaUpOutput',
+            'JmaDownOutput',
+            'JmaSlopeOutput')
     },
     @{
         Path = '.\core\obv_indicator.cpp'
         Name = 'OBV'
         Markers = @(
             'RegisterObvIndicator',
-            'state.current = state.beforeLatest',
-            'bar.volume < 0',
-            'state.previousClose')
+            'RestoreBeforeLatest(',
+            'PushSignal(',
+            'ObvSignalOutput',
+            'ObvDirectionOutput',
+            'bar.volume < 0')
     },
     @{
         Path = '.\core\adx_indicator.cpp'
@@ -235,7 +243,8 @@ $indicatorContracts = @(
             'RegisterAdxIndicator',
             'state.current = state.beforeLatest',
             'smoothedTrueRange',
-            'ConsumeDx(')
+            'ConsumeDx(',
+            'result.SetOutput(AdxValueOutput')
     }
 )
 foreach ($contract in $indicatorContracts) {
@@ -249,6 +258,7 @@ foreach ($contract in $indicatorContracts) {
 
 $indicatorTests = Get-Content '.\tests\indicator_engine_tests.cpp' -Raw
 $requiredIndicatorTestMarkers = @(
+    'fixed output frame readiness mask mismatch',
     'batch/incremental value parity mismatch',
     'same-timestamp update must replace the mutable live tail',
     'failed batch calculation must not expose partial results'
@@ -263,16 +273,18 @@ $specializedIndicatorTests = @(
     @{
         Path = '.\tests\jma_indicator_tests.cpp'
         Markers = @(
-            'JMA legacy fixture mismatch',
+            'JMA legacy Value fixture mismatch',
+            'JMA must publish Value/Up/Down/Slope',
             'same-timestamp JMA update must replace the live tail',
-            'JMA batch/incremental value parity mismatch')
+            'JMA output parity mismatch')
     },
     @{
         Path = '.\tests\obv_indicator_tests.cpp'
         Markers = @(
-            'OBV legacy fixture mismatch',
+            'OBV legacy value fixture mismatch',
+            'OBV must publish OBV/Signal/Direction',
             'same-timestamp OBV update must replace the live tail',
-            'OBV batch/incremental value parity mismatch')
+            'OBV output parity mismatch')
     },
     @{
         Path = '.\tests\adx_indicator_tests.cpp'
@@ -307,4 +319,4 @@ foreach ($marker in @(
     }
 }
 
-Write-Host 'Major-feature modules, accepted M6 chart contracts, and the M7 SMA/JMA/OBV/ADX batch-incremental foundation are verified.'
+Write-Host 'Major-feature modules, accepted M6 chart contracts, and the M7 SMA/JMA/OBV/ADX multi-output batch-incremental foundation are verified.'

@@ -21,7 +21,7 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 
 
 shell = read("shell_main.cpp")
-old = '''    const ImVec2 available = ImGui::GetContentRegionAvail();
+old_shell = '''    const ImVec2 available = ImGui::GetContentRegionAvail();
     const std::size_t visibleLimit = snapshot.barCount;
 
     const double started = NowSeconds();
@@ -41,7 +41,7 @@ old = '''    const ImVec2 available = ImGui::GetContentRegionAvail();
                 visibleLimit,
                 chartError))
 '''
-new = '''    const ImVec2 available = ImGui::GetContentRegionAvail();
+new_shell = '''    const ImVec2 available = ImGui::GetContentRegionAvail();
     const trading::app::MarketDataSeriesSnapshot marketSeries =
         g_marketDataModule.SeriesSnapshot();
 
@@ -65,24 +65,35 @@ new = '''    const ImVec2 available = ImGui::GetContentRegionAvail();
                 chartSource,
                 chartError))
 '''
-shell = replace_once(shell, old, new, "shell live-tail chart source")
-write("shell_main.cpp", shell)
+if "ChartMarketSource chartSource" not in shell:
+    shell = replace_once(
+        shell,
+        old_shell,
+        new_shell,
+        "shell live-tail chart source",
+    )
+    write("shell_main.cpp", shell)
+    print("Integrated shared history/live tail into shell_main.cpp")
+else:
+    print("shell_main.cpp live-tail integration already present")
+
 
 verify = read("scripts/verify_modular_architecture.ps1")
-old_forbidden = '''    'static trading::render::RenderDocument g_mainRenderDocument'
+if "Shared immutable history/live-tail render contract is missing" not in verify:
+    old_forbidden = '''    'static trading::render::RenderDocument g_mainRenderDocument'
 )'''
-new_forbidden = '''    'static trading::render::RenderDocument g_mainRenderDocument',
+    new_forbidden = '''    'static trading::render::RenderDocument g_mainRenderDocument',
     'CopyVisibleBars(visibleLimit)',
     'const std::vector<trading::Bar> visibleBars'
 )'''
-verify = replace_once(
-    verify,
-    old_forbidden,
-    new_forbidden,
-    "forbid full history copying in shell",
-)
+    verify = replace_once(
+        verify,
+        old_forbidden,
+        new_forbidden,
+        "forbid full history copying in shell",
+    )
 
-contract_anchor = '''foreach ($marker in $forbiddenContractMarkers) {
+    contract_anchor = '''foreach ($marker in $forbiddenContractMarkers) {
     if ($renderContract.ToLowerInvariant().Contains($marker)) {
         throw "Render contract contains platform or broker dependency: $marker"
     }
@@ -90,7 +101,7 @@ contract_anchor = '''foreach ($marker in $forbiddenContractMarkers) {
 
 Write-Host 'Major-feature modules and generic renderer boundary verified.'
 '''
-contract_new = '''foreach ($marker in $forbiddenContractMarkers) {
+    contract_new = '''foreach ($marker in $forbiddenContractMarkers) {
     if ($renderContract.ToLowerInvariant().Contains($marker)) {
         throw "Render contract contains platform or broker dependency: $marker"
     }
@@ -124,30 +135,73 @@ foreach ($marker in $requiredMarketMarkers) {
 
 Write-Host 'Major-feature modules, generic renderer, and immutable-history live-tail boundary verified.'
 '''
-verify = replace_once(
-    verify,
-    contract_anchor,
-    contract_new,
-    "shared-tail architecture verification",
-)
-write("scripts/verify_modular_architecture.ps1", verify)
+    verify = replace_once(
+        verify,
+        contract_anchor,
+        contract_new,
+        "shared-tail architecture verification",
+    )
+    write("scripts/verify_modular_architecture.ps1", verify)
+    print("Strengthened modular architecture verification")
+else:
+    print("modular architecture live-tail verification already present")
+
 
 plan = read("docs/MODULARIZATION_PLAN.md")
-plan = plan.replace(
-    '- immutable completed-history plus mutable live-tail sharing so `0B` does not rebuild or copy the complete history on every tick;\n',
-    '- completed immutable history and mutable live tail are shared separately, so same-minute `0B` updates reuse all completed candle and volume storage;\n',
-)
-plan = plan.replace(
-    'Remaining before the local visual acceptance request:\n\n- session/date boundary rendering;\n- completed immutable history and mutable live tail are shared separately, so same-minute `0B` updates reuse all completed candle and volume storage;\n- final Windows CI verification after the live-tail split;\n- one focused visual/GPU test covering zoom, pan, crosshair, latest-bar follow, feature levels, and real `0B` updates.\n',
-    'Completed performance structure:\n\n- completed candle history is immutable shared storage;\n- the current live candle is a separate small tail value;\n- same-minute `0B` events update only the live tail and document metadata;\n- completed volume history is rebuilt only when a new minute promotes the prior live candle;\n- full loaded history remains available for zoom and pan without a per-tick full-vector copy.\n\nRemaining before the local visual acceptance request:\n\n- session/date boundary rendering;\n- final Windows CI verification;\n- one focused visual/GPU test covering zoom, pan, crosshair, latest-bar follow, feature levels, and real `0B` updates.\n',
-)
-write("docs/MODULARIZATION_PLAN.md", plan)
+old_plan = '''Remaining before the local visual acceptance request:
+
+- session/date boundary rendering;
+- immutable completed-history plus mutable live-tail sharing so `0B` does not rebuild or copy the complete history on every tick;
+- final Windows CI verification after the live-tail split;
+- one focused visual/GPU test covering zoom, pan, crosshair, latest-bar follow, feature levels, and real `0B` updates.
+'''
+new_plan = '''Completed performance structure:
+
+- completed candle history is immutable shared storage;
+- the current live candle is a separate small tail value;
+- same-minute `0B` events update only the live tail and document metadata;
+- completed volume history is rebuilt only when a new minute promotes the prior live candle;
+- full loaded history remains available for zoom and pan without a per-tick full-vector copy.
+
+Remaining before the local visual acceptance request:
+
+- session/date boundary rendering;
+- final Windows CI verification;
+- one focused visual/GPU test covering zoom, pan, crosshair, latest-bar follow, feature levels, and real `0B` updates.
+'''
+if old_plan in plan:
+    plan = plan.replace(old_plan, new_plan, 1)
+    write("docs/MODULARIZATION_PLAN.md", plan)
+    print("Updated M6 performance plan")
+else:
+    print("M6 performance plan already updated or evolved")
+
 
 handoff = read("docs/SESSION_HANDOFF.md")
-handoff = handoff.replace(
-    'Still required before asking the user to test:\n\n1. split completed immutable history from the mutable live bar;\n2. share completed history into render documents without copying on every `0B`;\n3. add session/date boundary rendering;\n4. run Windows MSVC build and the complete headless suite;\n5. record the verified HEAD and CI run below.\n',
-    'Completed after the first M6 checkpoint:\n\n- completed immutable history is separate from the mutable live bar;\n- render documents share completed candle and volume history;\n- same-minute `0B` updates do not copy the complete loaded history;\n- a new minute promotes the old live bar and rebuilds completed volume history once.\n\nStill required before asking the user to test:\n\n1. add session/date boundary rendering;\n2. run Windows MSVC build and the complete headless suite;\n3. record the verified HEAD and CI run below.\n',
-)
-write("docs/SESSION_HANDOFF.md", handoff)
+old_handoff = '''Still required before asking the user to test:
 
-print("Integrated immutable completed history and mutable live tails into the shell")
+1. split completed immutable history from the mutable live bar;
+2. share completed history into render documents without copying on every `0B`;
+3. add session/date boundary rendering;
+4. run Windows MSVC build and the complete headless suite;
+5. record the verified HEAD and CI run below.
+'''
+new_handoff = '''Completed after the first M6 checkpoint:
+
+- completed immutable history is separate from the mutable live bar;
+- render documents share completed candle and volume history;
+- same-minute `0B` updates do not copy the complete loaded history;
+- a new minute promotes the old live bar and rebuilds completed volume history once.
+
+Still required before asking the user to test:
+
+1. add session/date boundary rendering;
+2. run Windows MSVC build and the complete headless suite;
+3. record the verified HEAD and CI run below.
+'''
+if old_handoff in handoff:
+    handoff = handoff.replace(old_handoff, new_handoff, 1)
+    write("docs/SESSION_HANDOFF.md", handoff)
+    print("Updated M6 session handoff")
+else:
+    print("M6 session handoff already updated or evolved")

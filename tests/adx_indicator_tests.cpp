@@ -121,14 +121,16 @@ int main()
     Check(batch.size() == rising.size(),
           "ADX batch output size mismatch");
     for (std::size_t index = 0; index < 5U; ++index) {
-        Check(!batch[index].ready,
+        Check(!batch[index].IsReady(AdxValueOutput),
               "ADX must remain in Wilder warm-up before the sixth bar");
     }
-    Check(batch[5].ready && batch[6].ready,
-          "ADX must become ready after period DX samples");
-    CheckNear(batch[5].value, 100.0,
+    Check(
+        batch[5].IsReady(AdxValueOutput) &&
+        batch[6].IsReady(AdxValueOutput),
+        "ADX must become ready after period DX samples");
+    CheckNear(batch[5].Value(AdxValueOutput), 100.0,
               "initial rising ADX fixture mismatch");
-    CheckNear(batch[6].value, 100.0,
+    CheckNear(batch[6].Value(AdxValueOutput), 100.0,
               "smoothed rising ADX fixture mismatch");
 
     IndicatorInstance incremental = registry.Create(AdxSpec(3), error);
@@ -138,13 +140,15 @@ int main()
         const IndicatorValue value = incremental.Update(rising[index]);
         Check(value.timestampMs == batch[index].timestampMs,
               "ADX batch/incremental timestamp parity mismatch");
-        Check(value.ready == batch[index].ready,
+        Check(value.readyMask == batch[index].readyMask,
               "ADX batch/incremental readiness parity mismatch");
         Check(value.fault == batch[index].fault,
               "ADX batch/incremental fault parity mismatch");
-        if (value.ready) {
-            CheckNear(value.value, batch[index].value,
-                      "ADX batch/incremental value parity mismatch");
+        if (value.IsReady(AdxValueOutput)) {
+            CheckNear(
+                value.Value(AdxValueOutput),
+                batch[index].Value(AdxValueOutput),
+                "ADX batch/incremental value parity mismatch");
         }
     }
 
@@ -161,11 +165,15 @@ int main()
     IndicatorValue value = live.Update(replacedBars.back());
     Check(value.replaced,
           "same-timestamp ADX update must replace the live tail");
-    Check(value.ready == expectedReplacement.ready,
-          "ADX replacement readiness mismatch");
-    if (value.ready) {
-        CheckNear(value.value, expectedReplacement.value,
-                  "ADX replacement state mismatch");
+    Check(
+        value.IsReady(AdxValueOutput) ==
+            expectedReplacement.IsReady(AdxValueOutput),
+        "ADX replacement readiness mismatch");
+    if (value.IsReady(AdxValueOutput)) {
+        CheckNear(
+            value.Value(AdxValueOutput),
+            expectedReplacement.Value(AdxValueOutput),
+            "ADX replacement state mismatch");
     }
 
     const Bar appended = MakeBar(12, 13, 11, 12, 7000);
@@ -174,11 +182,15 @@ int main()
     value = live.Update(appended);
     Check(!value.replaced,
           "new ADX timestamp must append instead of replace");
-    Check(value.ready == expectedAppend.ready,
-          "ADX post-replacement readiness mismatch");
-    if (value.ready) {
-        CheckNear(value.value, expectedAppend.value,
-                  "ADX post-replacement state mismatch");
+    Check(
+        value.IsReady(AdxValueOutput) ==
+            expectedAppend.IsReady(AdxValueOutput),
+        "ADX post-replacement readiness mismatch");
+    if (value.IsReady(AdxValueOutput)) {
+        CheckNear(
+            value.Value(AdxValueOutput),
+            expectedAppend.Value(AdxValueOutput),
+            "ADX post-replacement state mismatch");
     }
 
     const IndicatorValue backward =
@@ -196,7 +208,7 @@ int main()
 
     live.Reset();
     value = live.Update(rising.front());
-    Check(!value.ready && !value.replaced,
+    Check(!value.IsReady(AdxValueOutput) && !value.replaced,
           "ADX reset must restore Wilder warm-up state");
 
     std::puts("[PASS] adx_indicator_tests");

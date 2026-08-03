@@ -7,8 +7,11 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $requiredFiles = @(
     'app\indicator_module.h',
     'app\indicator_module.cpp',
+    'app\indicator_render_contributor.h',
+    'app\indicator_render_contributor.cpp',
     'tests\indicator_module_tests.cpp',
-    'tests\indicator_module_revision_tests.cpp'
+    'tests\indicator_module_revision_tests.cpp',
+    'tests\indicator_render_contributor_tests.cpp'
 )
 foreach ($relative in $requiredFiles) {
     if (-not (Test-Path (Join-Path $repoRoot $relative))) {
@@ -46,6 +49,33 @@ if ($implementation.Contains('calculationRevision_ = 0;')) {
     throw 'Indicator calculation revision must remain monotonic across Off/reconfigure invalidation'
 }
 
+$contributorHeader = Get-Content (
+    Join-Path $repoRoot 'app\indicator_render_contributor.h') -Raw
+foreach ($marker in @(
+    'IndicatorRenderContributionStats',
+    'AppendIndicatorRenderContributions(',
+    'render::RenderDocument& document')) {
+    if (-not $contributorHeader.Contains($marker)) {
+        throw "Indicator render contribution contract is missing: $marker"
+    }
+}
+
+$contributor = Get-Content (
+    Join-Path $repoRoot 'app\indicator_render_contributor.cpp') -Raw
+foreach ($marker in @(
+    'BuildLinePoints(',
+    'BuildHistogramPoints(',
+    'AddSegmentedLine(',
+    'JmaUpOutput',
+    'ObvDirectionOutput',
+    'AdxValueOutput',
+    'VwapUpper2Output',
+    'render::ValidateRenderDocument(document, error)')) {
+    if (-not $contributor.Contains($marker)) {
+        throw "Generic indicator render mapping is missing: $marker"
+    }
+}
+
 $cacheTests = Get-Content (
     Join-Path $repoRoot 'tests\indicator_module_tests.cpp') -Raw
 foreach ($marker in @(
@@ -70,14 +100,31 @@ foreach ($marker in @(
     }
 }
 
+$contributionTests = Get-Content (
+    Join-Path $repoRoot 'tests\indicator_render_contributor_tests.cpp') -Raw
+foreach ($marker in @(
+    'SMA must publish a standard price line',
+    'JMA Up must publish segmented standard lines',
+    'VWAP Upper2 must publish a standard price line',
+    'OBV must publish Direction histogram',
+    'ADX must publish 20 and 25 reference lines',
+    'Off indicator contribution must publish no work',
+    'indicator contribution without price pane must fail closed')) {
+    if (-not $contributionTests.Contains($marker)) {
+        throw "Indicator render contribution regression coverage is missing: $marker"
+    }
+}
+
 $runAll = Get-Content (Join-Path $repoRoot 'tests\run_all.bat') -Raw
 foreach ($marker in @(
     'indicator_module_tests.exe',
     'indicator_module_revision_tests.exe',
-    'app\indicator_module.cpp')) {
+    'indicator_render_contributor_tests.exe',
+    'app\indicator_module.cpp',
+    'app\indicator_render_contributor.cpp')) {
     if (-not $runAll.Contains($marker)) {
-        throw "Indicator module test is not in the complete suite: $marker"
+        throw "Indicator module/contributor test is not in the complete suite: $marker"
     }
 }
 
-Write-Host 'Indicator module execution-level, cache, and monotonic revision contracts passed.' -ForegroundColor Green
+Write-Host 'Indicator module execution-level, cache, revision, and generic render contribution contracts passed.' -ForegroundColor Green

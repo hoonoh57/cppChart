@@ -1,51 +1,52 @@
 #pragma once
 
-#include "../core/market_types.h"
-
 namespace trading::render
 {
+    using AxisCoordinate = double;
+
     struct ChartViewport final
     {
-        EpochMillis visibleStartMs = 0;
-        EpochMillis visibleEndMs = 0;
+        AxisCoordinate visibleStart = 0.0;
+        AxisCoordinate visibleEnd = 0.0;
         bool initialized = false;
         bool autoScroll = true;
 
-        EpochMillis SpanMs() const noexcept
+        AxisCoordinate Span() const noexcept
         {
-            return visibleEndMs > visibleStartMs
-                ? visibleEndMs - visibleStartMs
-                : 0;
+            return visibleEnd > visibleStart
+                ? visibleEnd - visibleStart
+                : 0.0;
         }
     };
 
     void ResetViewport(
         ChartViewport& viewport,
-        EpochMillis dataStartMs,
-        EpochMillis dataEndMs) noexcept;
+        AxisCoordinate dataStart,
+        AxisCoordinate dataEnd,
+        AxisCoordinate preferredSpan = 0.0) noexcept;
 
     void FollowLatest(
         ChartViewport& viewport,
-        EpochMillis dataStartMs,
-        EpochMillis dataEndMs) noexcept;
+        AxisCoordinate dataStart,
+        AxisCoordinate dataEnd) noexcept;
 
     void ClampViewport(
         ChartViewport& viewport,
-        EpochMillis dataStartMs,
-        EpochMillis dataEndMs,
-        EpochMillis minimumSpanMs) noexcept;
+        AxisCoordinate dataStart,
+        AxisCoordinate dataEnd,
+        AxisCoordinate minimumSpan) noexcept;
 
     void ZoomViewport(
         ChartViewport& viewport,
-        EpochMillis dataStartMs,
-        EpochMillis dataEndMs,
+        AxisCoordinate dataStart,
+        AxisCoordinate dataEnd,
         double anchorRatio,
         double wheelSteps,
-        EpochMillis minimumSpanMs) noexcept;
+        AxisCoordinate minimumSpan) noexcept;
 
     void PanViewport(
         ChartViewport& viewport,
-        EpochMillis dataStartMs,
-        EpochMillis dataEndMs,
+        AxisCoordinate dataStart,
+        AxisCoordinate dataEnd,
         double visibleSpanFraction) noexcept;
 }

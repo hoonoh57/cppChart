@@ -21,6 +21,17 @@ namespace trading::render
         pricePane.id = workspaceId + ".price";
         pricePane.title = "Price";
         pricePane.heightWeight = 0.80f;
+        pricePane.valueDecimals = 0;
+        pricePane.cursorGrid.enabled = true;
+        pricePane.cursorGrid.bands = {
+            { 2000.0, 1.0 },
+            { 5000.0, 5.0 },
+            { 20000.0, 10.0 },
+            { 50000.0, 50.0 },
+            { 200000.0, 100.0 },
+            { 500000.0, 500.0 }
+        };
+        pricePane.cursorGrid.fallbackStep = 1000.0;
 
         CandleSeries candles;
         candles.id = seriesId + ".candles";
@@ -34,6 +45,9 @@ namespace trading::render
         volumePane.id = workspaceId + ".volume";
         volumePane.title = "Volume";
         volumePane.heightWeight = 0.20f;
+        volumePane.valueDecimals = 0;
+        volumePane.cursorGrid.enabled = true;
+        volumePane.cursorGrid.fallbackStep = 1.0;
 
         HistogramSeries volume;
         volume.id = seriesId + ".volume";

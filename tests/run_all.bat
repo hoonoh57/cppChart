@@ -39,6 +39,22 @@ chart_viewport_tests.exe
 if errorlevel 1 exit /b 1
 
 cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
+  tests\value_grid_tests.cpp ^
+  render\value_grid.cpp ^
+  /Fe:value_grid_tests.exe
+if errorlevel 1 exit /b 1
+value_grid_tests.exe
+if errorlevel 1 exit /b 1
+
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
+  tests\series_geometry_tests.cpp ^
+  render\series_geometry.cpp ^
+  /Fe:series_geometry_tests.exe
+if errorlevel 1 exit /b 1
+series_geometry_tests.exe
+if errorlevel 1 exit /b 1
+
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
   tests\time_axis_tests.cpp ^
   render\time_axis.cpp ^
   /Fe:time_axis_tests.exe

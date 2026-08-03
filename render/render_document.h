@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "../core/market_types.h"
+#include "value_grid.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -317,6 +318,8 @@ namespace trading::render
         PaneValueScale valueScale = PaneValueScale::Auto;
         double fixedMinimum = 0.0;
         double fixedMaximum = 0.0;
+        ValueGrid cursorGrid;
+        int valueDecimals = 2;
         std::vector<CandleSeries> candles;
         std::vector<LineSeries> lines;
         std::vector<HistogramSeries> histograms;

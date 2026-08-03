@@ -1,5 +1,8 @@
 ﻿#include "render_document_renderer.h"
 
+#include "../render/series_geometry.h"
+#include "../render/value_grid.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -322,6 +325,41 @@ namespace trading::ui
                 (std::max)(MinimumVisibleSpan, desiredBars - 1.0));
         }
 
+        void FormatPaneValue(
+            char* buffer,
+            std::size_t bufferSize,
+            double value,
+            int decimals)
+        {
+            decimals = (std::max)(0, (std::min)(8, decimals));
+            std::snprintf(buffer, bufferSize, "%.*f", decimals, value);
+        }
+
+        void DrawCursorValueLabel(
+            ImDrawList* draw,
+            const ImVec2& plotOrigin,
+            const ImVec2& plotEnd,
+            float y,
+            double value,
+            int decimals)
+        {
+            char label[64]{};
+            FormatPaneValue(label, sizeof(label), value, decimals);
+            draw->AddLine(
+                ImVec2(plotOrigin.x, y),
+                ImVec2(plotEnd.x, y),
+                IM_COL32(205, 208, 220, 150),
+                1.0f);
+            draw->AddRectFilled(
+                ImVec2(plotEnd.x + 2.0f, y - 9.0f),
+                ImVec2(plotEnd.x + ValueAxisWidth - 2.0f, y + 9.0f),
+                IM_COL32(65, 68, 80, 245));
+            draw->AddText(
+                ImVec2(plotEnd.x + 5.0f, y - 7.0f),
+                IM_COL32(235, 237, 244, 255),
+                label);
+        }
+
         void DrawValueAxis(
             ImDrawList* draw,
             const ValueRange& values,
@@ -383,10 +421,11 @@ namespace trading::ui
             const render::OrdinalTimeAxis& axis,
             const AxisRange& dataRange,
             double defaultVisibleSpan,
+            const render::Pane& pane,
             const ValueRange& values,
             RenderSurfaceState& state)
         {
-            if (!ImGui::IsItemHovered()) return;
+            if (!ImGui::IsItemHovered() && !ImGui::IsItemActive()) return;
 
             ImGuiIO& io = ImGui::GetIO();
             const double mouseRatio = (std::max)(
@@ -406,7 +445,11 @@ namespace trading::ui
                 state.dirty = true;
             }
 
-            if (ImGui::IsMouseDragging(ImGuiMouseButton_Right, 1.0f)) {
+            const bool draggingLeft =
+                ImGui::IsMouseDragging(ImGuiMouseButton_Left, 1.0f);
+            const bool draggingRight =
+                ImGui::IsMouseDragging(ImGuiMouseButton_Right, 1.0f);
+            if (draggingLeft || draggingRight) {
                 render::PanViewport(
                     state.viewport,
                     dataRange.minimum,
@@ -416,7 +459,8 @@ namespace trading::ui
                 state.dirty = true;
             }
 
-            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+            if (!draggingLeft &&
+                ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                 render::ResetViewport(
                     state.viewport,
                     dataRange.minimum,
@@ -431,11 +475,17 @@ namespace trading::ui
             state.crosshairVisible = true;
             state.crosshairTimestampMs =
                 axis.TimestampForCoordinate(crosshairCoordinate);
-            state.crosshairValue = UnmapY(
+            const double rawCrosshairValue = UnmapY(
                 io.MousePos.y,
                 values,
                 plotOrigin.y,
                 plotHeight);
+            state.crosshairValue = render::QuantizeValue(
+                pane.cursorGrid,
+                rawCrosshairValue);
+            state.crosshairValue = (std::max)(
+                values.minimum,
+                (std::min)(values.maximum, state.crosshairValue));
         }
 
         void DrawPane(
@@ -457,7 +507,11 @@ namespace trading::ui
             const ValueRange values = PaneValueRange(pane, axis, visibleRange);
 
             ImGui::PushID(pane.id.c_str());
-            ImGui::InvisibleButton("##surface", size);
+            ImGui::InvisibleButton(
+                "##surface",
+                size,
+                ImGuiButtonFlags_MouseButtonLeft |
+                    ImGuiButtonFlags_MouseButtonRight);
             const ImVec2 surfaceOrigin = ImGui::GetItemRectMin();
             const ImVec2 plotOrigin = surfaceOrigin;
             const ImVec2 plotEnd(
@@ -491,8 +545,12 @@ namespace trading::ui
                 axis,
                 dataRange,
                 defaultVisibleSpan,
+                pane,
                 values,
                 state);
+
+            const bool paneHovered =
+                ImGui::IsItemHovered() || ImGui::IsItemActive();
 
             for (int grid = 1; grid < 5; ++grid) {
                 const float y =
@@ -533,24 +591,9 @@ namespace trading::ui
                 }
             }
 
-            std::size_t visibleCandleCount = 0;
-            for (const render::CandleSeries& series : pane.candles) {
-                if (!series.visible) continue;
-                for (const Bar& bar : series.bars) {
-                    if (InAxisRange(bar.closeTimestampMs, axis, visibleRange)) {
-                        ++visibleCandleCount;
-                    }
-                }
-            }
-            const float candleBodyWidth = (std::min)(
-                18.0f,
-                (std::max)(
-                    1.0f,
-                    plotWidth /
-                        static_cast<float>((std::max)(
-                            static_cast<std::size_t>(1),
-                            visibleCandleCount)) *
-                        0.58f));
+            const float seriesBodyWidth = render::SeriesBodyWidth(
+                plotWidth,
+                visibleRange.Span());
 
             for (const render::HistogramSeries& series : pane.histograms) {
                 if (!series.visible) continue;
@@ -574,10 +617,10 @@ namespace trading::ui
                         plotHeight);
                     draw->AddRectFilled(
                         ImVec2(
-                            x - candleBodyWidth * 0.5f,
+                            x - seriesBodyWidth * 0.5f,
                             (std::min)(y, zeroY)),
                         ImVec2(
-                            x + candleBodyWidth * 0.5f,
+                            x + seriesBodyWidth * 0.5f,
                             (std::max)(y, zeroY)),
                         ToImColor(
                             point.positive
@@ -624,10 +667,10 @@ namespace trading::ui
                     }
                     draw->AddRectFilled(
                         ImVec2(
-                            x - candleBodyWidth * 0.5f,
+                            x - seriesBodyWidth * 0.5f,
                             (std::min)(openY, closeY)),
                         ImVec2(
-                            x + candleBodyWidth * 0.5f,
+                            x + seriesBodyWidth * 0.5f,
                             (std::max)(openY, closeY)),
                         color);
                 }
@@ -759,23 +802,26 @@ namespace trading::ui
                     plotHeight);
             }
 
-            if (ImGui::IsItemHovered()) {
+            if (paneHovered) {
+                const float crossY = MapY(
+                    state.crosshairValue,
+                    values,
+                    plotOrigin.y,
+                    plotHeight);
+                DrawCursorValueLabel(
+                    draw,
+                    plotOrigin,
+                    plotEnd,
+                    crossY,
+                    state.crosshairValue,
+                    pane.valueDecimals);
+
                 const Bar* nearest = NearestVisibleBar(
                     pane,
                     state.crosshairTimestampMs,
                     axis,
                     visibleRange);
                 if (nearest != nullptr) {
-                    const float crossY = MapY(
-                        static_cast<double>(nearest->close),
-                        values,
-                        plotOrigin.y,
-                        plotHeight);
-                    draw->AddLine(
-                        ImVec2(plotOrigin.x, crossY),
-                        ImVec2(plotEnd.x, crossY),
-                        IM_COL32(205, 208, 220, 130),
-                        1.0f);
                     ImGui::BeginTooltip();
                     ImGui::TextUnformatted(
                         FormatTimestamp(nearest->closeTimestampMs).c_str());

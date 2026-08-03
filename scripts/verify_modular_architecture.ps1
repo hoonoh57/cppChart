@@ -15,6 +15,10 @@ $requiredFiles = @(
     '.\render\time_axis.cpp',
     '.\render\render_document.h',
     '.\render\render_document.cpp',
+    '.\render\value_grid.h',
+    '.\render\value_grid.cpp',
+    '.\render\series_geometry.h',
+    '.\render\series_geometry.cpp',
     '.\render\market_chart_builder.h',
     '.\render\market_chart_builder.cpp',
     '.\ui\render_document_renderer.h',
@@ -148,4 +152,20 @@ foreach ($marker in $requiredMarketMarkers) {
     }
 }
 
-Write-Host 'Major-feature modules, immutable live-tail storage, and compressed trading-time rendering verified.'
+$requiredInteractionMarkers = @(
+    'ImGuiButtonFlags_MouseButtonLeft',
+    'ImGuiButtonFlags_MouseButtonRight',
+    'draggingLeft || draggingRight',
+    'QuantizeValue(',
+    'SeriesBodyWidth('
+)
+foreach ($marker in $requiredInteractionMarkers) {
+    if (-not $renderer.Contains($marker)) {
+        throw "Chart interaction contract is missing: $marker"
+    }
+}
+if ($renderer.Contains('static_cast<double>(nearest->close)')) {
+    throw 'Horizontal crosshair must not be forced to nearest candle close'
+}
+
+Write-Host 'Major-feature modules, immutable live-tail storage, compressed trading-time rendering, and pane-aware interaction verified.'

@@ -5,6 +5,16 @@
 
 namespace trading::app
 {
+    namespace
+    {
+        bool IsVisibleLevel(FeatureLevel level) noexcept
+        {
+            return
+                level == FeatureLevel::Visible ||
+                level == FeatureLevel::Active;
+        }
+    }
+
     MarketDataModule::MarketDataModule()
         : error_(
             "실제 시세 백필과 실시간 체결 수신이 연결되지 않았습니다. "
@@ -22,12 +32,18 @@ namespace trading::app
         if (level == FeatureLevel::Off) {
             code_.clear();
             bars_.clear();
+            bars_.shrink_to_fit();
             continuation_ = {};
             state_ = MarketDataState::Disconnected;
             error_.clear();
             ++revision_;
             stockTradeTickCount_.store(0, std::memory_order_release);
             lastStockTradeTimestampMs_.store(0, std::memory_order_release);
+            stockTradeSubscriptionRequested_.store(
+                false,
+                std::memory_order_release);
+        }
+        else if (level == FeatureLevel::Standby) {
             stockTradeSubscriptionRequested_.store(
                 false,
                 std::memory_order_release);
@@ -58,8 +74,11 @@ namespace trading::app
         }
 
         std::lock_guard<std::mutex> lock(mutex_);
-        if (level_ == FeatureLevel::Off) {
-            error = "시장 데이터 기능이 Off 상태입니다.";
+        if (!IsVisibleLevel(level_)) {
+            error =
+                level_ == FeatureLevel::Off
+                    ? "시장 데이터 기능이 Off 상태입니다."
+                    : "시장 데이터 기능이 Standby 상태입니다.";
             return false;
         }
 
@@ -85,6 +104,16 @@ namespace trading::app
     {
         MarketDataApplyResult result;
 
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!IsVisibleLevel(level_)) {
+                result.stale = true;
+                result.error =
+                    "비활성 시장 데이터 기능의 분봉 응답을 무시했습니다.";
+                return result;
+            }
+        }
+
         if (!page.result.ok) {
             result.error = !page.result.error.empty()
                 ? page.result.error
@@ -102,8 +131,10 @@ namespace trading::app
         }
 
         std::lock_guard<std::mutex> lock(mutex_);
-        if (level_ == FeatureLevel::Off) {
-            result.error = "시장 데이터 기능이 Off 상태입니다.";
+        if (!IsVisibleLevel(level_)) {
+            result.stale = true;
+            result.error =
+                "수신 중 기능 수준이 변경되어 분봉 응답을 무시했습니다.";
             return result;
         }
         if (!code_.empty() && page.code != code_) {
@@ -133,8 +164,10 @@ namespace trading::app
         MarketDataApplyResult result;
 
         std::lock_guard<std::mutex> lock(mutex_);
-        if (level_ == FeatureLevel::Off) {
-            result.error = "시장 데이터 기능이 Off 상태입니다.";
+        if (!IsVisibleLevel(level_)) {
+            result.stale = true;
+            result.error =
+                "비활성 시장 데이터 기능의 실시간 체결을 무시했습니다.";
             return result;
         }
         if (code_.empty() || bars_.empty() || code_ != tick.code) {
@@ -193,8 +226,9 @@ namespace trading::app
     void MarketDataModule::SetStockTradeSubscriptionRequested(
         bool requested) noexcept
     {
+        std::lock_guard<std::mutex> lock(mutex_);
         stockTradeSubscriptionRequested_.store(
-            requested,
+            requested && IsVisibleLevel(level_),
             std::memory_order_release);
     }
 
@@ -204,7 +238,7 @@ namespace trading::app
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (
-            level_ == FeatureLevel::Off ||
+            !IsVisibleLevel(level_) ||
             state_ != MarketDataState::Ready ||
             code_.empty() ||
             bars_.empty())
@@ -258,7 +292,7 @@ namespace trading::app
         if (maximumCount == 0) return {};
 
         std::lock_guard<std::mutex> lock(mutex_);
-        if (level_ == FeatureLevel::Off || bars_.empty()) return {};
+        if (!IsVisibleLevel(level_) || bars_.empty()) return {};
 
         const std::size_t count =
             (std::min)(maximumCount, bars_.size());

@@ -118,7 +118,10 @@ Acceptance:
 Implemented on the generic renderer contract:
 
 - full verified history remains available to the viewport;
-- visible time range;
+- compressed ordinal trading-time axis: each actual bar occupies one horizontal slot;
+- overnight, weekend, and session gaps do not consume empty horizontal pixels;
+- initial viewport opens the latest screen-sized bar window instead of compressing every loaded bar;
+- real timestamps remain on labels, crosshair, tooltip, and boundary annotations;
 - wheel zoom anchored at the mouse position;
 - right-button horizontal pan;
 - double-click reset and latest-bar auto-follow;
@@ -127,7 +130,7 @@ Implemented on the generic renderer contract:
 - synchronized vertical crosshair across all panes in the same frame;
 - OHLCV and tick-count tooltip;
 - time and value axes;
-- headless viewport state tests registered in the complete test suite.
+- headless viewport, trading-time-axis, and boundary tests registered in the complete suite.
 
 Completed performance structure:
 
@@ -135,19 +138,29 @@ Completed performance structure:
 - the current live candle is a separate small tail value;
 - same-minute `0B` events update only the live tail and document metadata;
 - completed volume history is rebuilt only when a new minute promotes the prior live candle;
-- full loaded history remains available for zoom and pan without a per-tick full-vector copy.
+- full loaded history remains available for zoom and pan without a per-tick full-vector copy;
+- ordinal timestamp lookup and date/session boundaries are cached by completed-history structure revision.
 
-M6 remote implementation complete:
+Visual defect found during first local acceptance:
 
-- calendar-date changes and abnormal session gaps are detected by a broker-independent render utility;
-- boundaries are cached by completed-history structure revision and are not recomputed on every same-minute `0B` tick;
-- boundary lines render through the generic pane renderer;
-- headless date, gap, duplicate, and reverse-timestamp fixtures are registered in the complete suite.
+- the original renderer mapped wall-clock elapsed milliseconds directly to pixels;
+- 900 one-minute bars spanning several calendar days were compressed into a few clusters separated by huge blank overnight/weekend regions;
+- the original initial viewport also displayed the complete 900-bar set instead of a usable recent window;
+- this was a renderer-coordinate defect, not missing or synthetic market data;
+- direct wall-clock X mapping is now prohibited by architecture verification.
+
+M6 remote verification after the fix:
+
+- verified branch HEAD: `aa55b0bbd1e6b396553c45da777b4030a9f4bd7e`;
+- Windows CI run: `30803999147`;
+- MSVC x64 shell build passed;
+- complete headless suite passed;
+- clean source-tree verification passed;
+- executable artifact digest: `sha256:a35f64979593c8ddd37341a3458e28dae7d1d02fa123c9c94b62aa85a44ac709`.
 
 Remaining M6 acceptance:
 
-- final Windows CI verification;
-- one focused local visual/GPU test covering zoom, pan, crosshair, latest-bar follow, date/session boundaries, feature levels, and real `0B` updates.
+- focused local visual/GPU confirmation that actual sessions are contiguous, the initial view shows recent bars, zoom/pan/reset work, and live `0B` does not reset a manual viewport.
 
 ## Milestone M7 — reusable indicator engine
 

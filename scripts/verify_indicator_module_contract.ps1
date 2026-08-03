@@ -9,9 +9,12 @@ $requiredFiles = @(
     'app\indicator_module.cpp',
     'app\indicator_render_adapter.h',
     'app\indicator_render_adapter.cpp',
+    'app\chart_workspace_module.h',
+    'app\chart_workspace_module.cpp',
     'tests\indicator_module_tests.cpp',
     'tests\indicator_module_revision_tests.cpp',
-    'tests\indicator_render_adapter_tests.cpp'
+    'tests\indicator_render_adapter_tests.cpp',
+    'tests\chart_workspace_indicator_tests.cpp'
 )
 foreach ($relative in $requiredFiles) {
     if (-not (Test-Path (Join-Path $repoRoot $relative))) {
@@ -95,6 +98,31 @@ if (-not $renderContract.Contains('SharedTailSeries<LinePoint> points')) {
     throw 'LineSeries must share immutable completed history and a mutable live tail'
 }
 
+$workspaceHeader = Get-Content (
+    Join-Path $repoRoot 'app\chart_workspace_module.h') -Raw
+foreach ($marker in @(
+    'std::uint64_t indicatorRevision = 0',
+    'const IndicatorModuleSnapshot& indicatorSnapshot',
+    'IndicatorRenderAdapter& indicatorAdapter',
+    'IndicatorCompositeRevision(')) {
+    if (-not $workspaceHeader.Contains($marker)) {
+        throw "Indicator-aware chart workspace contract is missing: $marker"
+    }
+}
+
+$workspace = Get-Content (
+    Join-Path $repoRoot 'app\chart_workspace_module.cpp') -Raw
+foreach ($marker in @(
+    'indicatorAdapter->Apply(',
+    'indicatorRevision_ == nextIndicatorRevision',
+    'IndicatorCompositeRevision(',
+    'indicatorSnapshot->level',
+    'indicator render contribution failed')) {
+    if (-not $workspace.Contains($marker)) {
+        throw "Chart workspace indicator composition invariant is missing: $marker"
+    }
+}
+
 $cacheTests = Get-Content (
     Join-Path $repoRoot 'tests\indicator_module_tests.cpp') -Raw
 foreach ($marker in @(
@@ -132,16 +160,31 @@ foreach ($marker in @(
     }
 }
 
+$workspaceTests = Get-Content (
+    Join-Path $repoRoot 'tests\chart_workspace_indicator_tests.cpp') -Raw
+foreach ($marker in @(
+    'indicator revision change must publish a new document',
+    'indicator-only update must reuse completed render points',
+    'render plan revision must invalidate workspace document',
+    'Off indicator snapshot must remove indicator contributions',
+    'failed indicator contribution must retain last good document')) {
+    if (-not $workspaceTests.Contains($marker)) {
+        throw "Chart workspace indicator regression coverage is missing: $marker"
+    }
+}
+
 $runAll = Get-Content (Join-Path $repoRoot 'tests\run_all.bat') -Raw
 foreach ($marker in @(
     'indicator_module_tests.exe',
     'indicator_module_revision_tests.exe',
     'indicator_render_adapter_tests.exe',
+    'chart_workspace_indicator_tests.exe',
     'app\indicator_module.cpp',
-    'app\indicator_render_adapter.cpp')) {
+    'app\indicator_render_adapter.cpp',
+    'app\chart_workspace_module.cpp')) {
     if (-not $runAll.Contains($marker)) {
-        throw "Indicator module/adapter test is not in the complete suite: $marker"
+        throw "Indicator module/adapter/workspace test is not in the complete suite: $marker"
     }
 }
 
-Write-Host 'Indicator module execution-level, cache, monotonic revision, and generic cached render adapter contracts passed.' -ForegroundColor Green
+Write-Host 'Indicator module cache, monotonic revision, generic render adapter, and chart workspace composition contracts passed.' -ForegroundColor Green

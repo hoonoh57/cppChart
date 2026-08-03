@@ -1,0 +1,64 @@
+name: Apply indicator legend patch
+
+on:
+  push:
+    branches:
+      - p2/kiwoom-mock-gateway
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-indicator-legend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: p2/kiwoom-mock-gateway
+          fetch-depth: 1
+
+      - name: Apply patch atomically
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          @'
+          from pathlib import Path
+          path = Path('.github/workflows/windows-ci.yml')
+          text = path.read_text(encoding='utf-8-sig')
+          old = 'permissions:\n  contents: read\n'
+          if text.count(old) != 1:
+              raise RuntimeError('windows-ci permissions marker mismatch')
+          text = text.replace(old, 'permissions:\n  contents: write\n', 1)
+          checkout = '      - name: Checkout\n        uses: actions/checkout@v4\n'
+          if text.count(checkout) != 1:
+              raise RuntimeError('windows-ci checkout marker mismatch')
+          temporary = (
+              checkout + '\n'
+              '      # BEGIN TEMP INDICATOR LEGEND APPLY\n'
+              '      # Temporary marker removed by the atomic patch script.\n'
+              '      # END TEMP INDICATOR LEGEND APPLY\n'
+          )
+          text = text.replace(checkout, temporary, 1)
+          path.write_text(text, encoding='utf-8-sig', newline='')
+          '@ | python -
+
+          python .\scripts\apply_indicator_legend_properties.py
+          if ($LASTEXITCODE -ne 0) {
+            throw 'indicator legend/property patch failed'
+          }
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .\.github\workflows\apply-indicator-legend.yml
+          git add -A
+          git commit -m 'Add interactive indicator legends and properties'
+          git push origin HEAD:p2/kiwoom-mock-gateway

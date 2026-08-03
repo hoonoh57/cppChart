@@ -114,6 +114,10 @@ namespace trading::platform
             const std::string& stockCode,
             std::string& error);
 
+        bool UnsubscribeStockTrades(
+            const std::string& stockCode,
+            std::string& error);
+
         bool SubmitOrder(
             const OrderIntent& intent,
             std::string& error);

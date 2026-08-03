@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -34,10 +35,27 @@ namespace trading::app
         Continuation continuation;
         std::string error;
         std::uint64_t revision = 0;
+        std::uint64_t completedRevision = 0;
+        std::uint64_t liveRevision = 0;
         std::uint64_t stockTradeTickCount = 0;
         EpochMillis lastStockTradeTimestampMs = 0;
         bool stockTradeSubscriptionRequested = false;
         std::size_t retainedBytes = 0;
+    };
+
+    struct MarketDataSeriesSnapshot final
+    {
+        MarketDataState state = MarketDataState::Disconnected;
+        FeatureLevel level = FeatureLevel::Off;
+        std::string code;
+        int minuteUnit = 1;
+        std::shared_ptr<const std::vector<Bar>> completedBars;
+        Bar liveBar;
+        bool hasLiveBar = false;
+        std::size_t barCount = 0;
+        std::uint64_t revision = 0;
+        std::uint64_t completedRevision = 0;
+        std::uint64_t liveRevision = 0;
     };
 
     struct MarketDataApplyResult final
@@ -85,6 +103,8 @@ namespace trading::app
 
         MarketDataSnapshot Snapshot() const;
 
+        MarketDataSeriesSnapshot SeriesSnapshot() const;
+
         std::vector<Bar> CopyVisibleBars(
             std::size_t maximumCount) const;
 
@@ -94,15 +114,21 @@ namespace trading::app
         static EpochMillis KstSessionDateStart(
             EpochMillis timestampMs) noexcept;
 
+        static std::shared_ptr<const std::vector<Bar>> EmptyCompletedBars();
+
         mutable std::mutex mutex_;
         MarketDataState state_ = MarketDataState::Error;
         FeatureLevel level_ = FeatureLevel::Visible;
         std::string code_;
         int minuteUnit_ = 1;
-        std::vector<Bar> bars_;
+        std::shared_ptr<const std::vector<Bar>> completedBars_;
+        Bar liveBar_;
+        bool hasLiveBar_ = false;
         Continuation continuation_;
         std::string error_;
         std::uint64_t revision_ = 0;
+        std::uint64_t completedRevision_ = 0;
+        std::uint64_t liveRevision_ = 0;
         std::atomic<std::uint64_t> stockTradeTickCount_{ 0 };
         std::atomic<EpochMillis> lastStockTradeTimestampMs_{ 0 };
         std::atomic<bool> stockTradeSubscriptionRequested_{ false };

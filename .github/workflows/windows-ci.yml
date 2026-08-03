@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -28,28 +28,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Apply staged indicator shell wiring
-        if: hashFiles('scripts/apply_indicator_shell_wiring.py') != ''
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          git fetch origin p2/kiwoom-mock-gateway
-          git switch -C p2/kiwoom-mock-gateway origin/p2/kiwoom-mock-gateway
-          python .\scripts\apply_indicator_shell_wiring.py
-          if ($LASTEXITCODE -ne 0) { throw 'indicator shell wiring failed' }
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .\shell_main.cpp .\build.bat
-          git rm .\scripts\apply_indicator_shell_wiring.py
-          git commit -m 'Wire indicators into production chart shell'
-          git push origin HEAD:p2/kiwoom-mock-gateway
-
       - name: Verify repository policy
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           git diff --check
           if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
+          if (Test-Path .\scripts\apply_indicator_shell_wiring.py) {
+            throw 'temporary indicator shell wiring script must not remain'
+          }
           $trackedSecrets = @(
             git ls-files |
               Where-Object {
@@ -68,7 +55,7 @@ jobs:
           .\scripts\verify_real_data_only.ps1
           .\scripts\verify_modular_architecture.ps1
 
-      - name: Verify integrated runtime and M6 contracts
+      - name: Verify integrated runtime, M6, and M7 shell contracts
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -93,9 +80,17 @@ jobs:
             'CPPCHART_GENERIC_RENDER_DOCUMENT',
             'MarketDataModule g_marketDataModule',
             'ChartWorkspaceModule g_chartWorkspaceModule',
+            'IndicatorModule g_indicatorModule',
+            'IndicatorRenderAdapter g_indicatorRenderAdapter',
             'FeatureRegistry g_featureRegistry',
+            'InitialIndicatorSpecs()',
+            '"indicators"',
             'MarketDataSeriesSnapshot marketSeries',
             'ChartMarketSource chartSource',
+            'IndicatorMarketSource indicatorSource',
+            'g_indicatorModule.Update(',
+            'indicatorSnapshot,',
+            'g_indicatorRenderAdapter,',
             'DrawRenderDocument',
             'RecordPresentedFrame')) {
             if (-not $source.Contains($marker)) {
@@ -105,6 +100,22 @@ jobs:
           foreach ($marker in @('CopyVisibleBars(visibleLimit)', 'const std::vector<trading::Bar> visibleBars')) {
             if ($source.Contains($marker)) {
               throw "Full-history copy remains in the live render path: $marker"
+            }
+          }
+
+          foreach ($marker in @(
+            'core\indicator_engine.cpp',
+            'core\sma_indicator.cpp',
+            'core\jma_indicator.cpp',
+            'core\obv_indicator.cpp',
+            'core\adx_indicator.cpp',
+            'core\vwap_indicator.cpp',
+            'app\indicator_module.cpp',
+            'app\indicator_render_adapter.cpp',
+            'app\default_indicator_render_plan.cpp',
+            'app\indicator_workspace_coordinator.cpp')) {
+            if (-not $build.Contains($marker)) {
+              throw "M7 production source is not linked into shell.exe: $marker"
             }
           }
 
@@ -187,7 +198,7 @@ jobs:
             throw 'render interaction utilities are not linked into shell.exe'
           }
 
-          foreach ($marker in @('Kiwoom', 'ka10080', 'StockTradeTick', 'OrderIntent', 'TradingState', 'SMA', 'JMA', 'VWAP', 'Strategy')) {
+          foreach ($marker in @('Kiwoom', 'ka10080', 'StockTradeTick', 'OrderIntent', 'TradingState', 'SMA', 'JMA', 'VWAP', 'OBV', 'ADX', 'Strategy')) {
             if ($renderer.Contains($marker)) {
               throw "Generic renderer contains feature-specific marker: $marker"
             }

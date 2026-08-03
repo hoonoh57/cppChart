@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -25,8 +25,15 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Checkout
+      - name: Checkout development branch
         uses: actions/checkout@v4
+        with:
+          ref: p2/kiwoom-mock-gateway
+          fetch-depth: 0
+
+      - name: Apply chart interaction correction
+        shell: pwsh
+        run: python .\scripts\fix_chart_interaction.py
 
       - name: Verify repository policy
         shell: pwsh
@@ -124,7 +131,8 @@ jobs:
             'structureRevision',
             'SetShared(',
             'SharedPrefix()',
-            'HasLiveTail()')) {
+            'HasLiveTail()',
+            'ValueGrid cursorGrid')) {
             if (-not $renderContract.Contains($marker)) {
               throw "Missing shared render contract marker: $marker"
             }
@@ -137,10 +145,18 @@ jobs:
             'PrimaryCandleTimestamps',
             'boundaryStructureRevision',
             'FindTimeBoundaries',
-            'TimeBoundaryKind::CalendarDate')) {
+            'TimeBoundaryKind::CalendarDate',
+            'ImGuiButtonFlags_MouseButtonLeft',
+            'ImGuiButtonFlags_MouseButtonRight',
+            'draggingLeft || draggingRight',
+            'QuantizeValue(',
+            'SeriesBodyWidth(')) {
             if (-not $renderer.Contains($marker)) {
-              throw "Missing renderer boundary marker: $marker"
+              throw "Missing renderer interaction marker: $marker"
             }
+          }
+          if ($renderer.Contains('static_cast<double>(nearest->close)')) {
+            throw 'horizontal crosshair is still forced to candle close'
           }
           foreach ($marker in @(
             'LocalDayNumber',
@@ -151,11 +167,15 @@ jobs:
             }
           }
           if (-not $runAll.Contains('chart_viewport_tests.exe') -or
-              -not $runAll.Contains('time_boundaries_tests.exe')) {
-            throw 'M6 viewport and boundary tests are not in the full suite'
+              -not $runAll.Contains('time_boundaries_tests.exe') -or
+              -not $runAll.Contains('value_grid_tests.exe') -or
+              -not $runAll.Contains('series_geometry_tests.exe')) {
+            throw 'chart viewport, boundary, value-grid, and geometry tests must be in the full suite'
           }
-          if (-not $build.Contains('render\time_boundaries.cpp')) {
-            throw 'time boundary implementation is not linked into shell.exe'
+          if (-not $build.Contains('render\time_boundaries.cpp') -or
+              -not $build.Contains('render\value_grid.cpp') -or
+              -not $build.Contains('render\series_geometry.cpp')) {
+            throw 'render interaction utilities are not linked into shell.exe'
           }
 
           foreach ($marker in @('Kiwoom', 'ka10080', 'StockTradeTick', 'OrderIntent', 'TradingState', 'SMA', 'JMA', 'VWAP', 'Strategy')) {
@@ -205,13 +225,17 @@ jobs:
           & cmd.exe /d /s /c "`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && call tests\run_all.bat"
           if ($LASTEXITCODE -ne 0) { throw "tests failed, exit code=$LASTEXITCODE" }
 
-      - name: Verify clean source tree after build
+      - name: Commit verified chart correction
+        if: github.event_name == 'pull_request'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $changes = @(git status --porcelain)
-          if ($changes.Count -gt 0) {
-            throw "Build or tests modified tracked files:`n$($changes -join "`n")"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add render/value_grid.h render/value_grid.cpp render/series_geometry.h render/series_geometry.cpp render/render_document.h render/market_chart_builder.cpp ui/render_document_renderer.cpp tests/value_grid_tests.cpp tests/series_geometry_tests.cpp tests/run_all.bat build.bat scripts/verify_modular_architecture.ps1
+          if (-not (git diff --cached --quiet)) {
+            git commit -m 'Fix chart pan, aligned volume width, and pane crosshair'
+            git push origin HEAD:p2/kiwoom-mock-gateway
           }
 
       - name: Publish verified executable

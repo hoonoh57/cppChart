@@ -9,6 +9,10 @@ $requiredFiles = @(
     '.\app\market_data_module.cpp',
     '.\app\chart_workspace_module.h',
     '.\app\chart_workspace_module.cpp',
+    '.\render\chart_viewport.h',
+    '.\render\chart_viewport.cpp',
+    '.\render\time_axis.h',
+    '.\render\time_axis.cpp',
     '.\render\render_document.h',
     '.\render\render_document.cpp',
     '.\render\market_chart_builder.h',
@@ -101,6 +105,35 @@ foreach ($marker in $requiredSharedTailMarkers) {
     }
 }
 
+$timeAxis = Get-Content '.\render\time_axis.cpp' -Raw
+$requiredTimeAxisMarkers = @(
+    'OrdinalTimeAxis::Reset',
+    'CoordinateForTimestamp',
+    'TimestampForCoordinate',
+    'timestamps must be strictly increasing'
+)
+foreach ($marker in $requiredTimeAxisMarkers) {
+    if (-not $timeAxis.Contains($marker)) {
+        throw "Compressed ordinal time-axis contract is missing: $marker"
+    }
+}
+
+$requiredRendererAxisMarkers = @(
+    'OrdinalTimeAxis',
+    'DefaultVisibleSpan',
+    'timeAxisRevision',
+    'CoordinateForTimestamp',
+    'TimestampForCoordinate'
+)
+foreach ($marker in $requiredRendererAxisMarkers) {
+    if (-not $renderer.Contains($marker)) {
+        throw "Renderer is not using the compressed trading-time axis: $marker"
+    }
+}
+if ($renderer.Contains('timestamp - range.minimum')) {
+    throw 'Renderer still maps wall-clock elapsed time directly to horizontal pixels'
+}
+
 $marketModule = Get-Content '.\app\market_data_module.cpp' -Raw
 $requiredMarketMarkers = @(
     'completedBars_',
@@ -115,4 +148,4 @@ foreach ($marker in $requiredMarketMarkers) {
     }
 }
 
-Write-Host 'Major-feature modules, generic renderer, and immutable-history live-tail boundary verified.'
+Write-Host 'Major-feature modules, immutable live-tail storage, and compressed trading-time rendering verified.'

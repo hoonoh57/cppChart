@@ -21,6 +21,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    core\kiwoom_runtime_engine.cpp ^
    app\feature_registry.cpp ^
    app\market_data_module.cpp ^
+   app\chart_workspace_module.cpp ^
    render\render_document.cpp ^
    render\market_chart_builder.cpp ^
    ui\render_document_renderer.cpp ^

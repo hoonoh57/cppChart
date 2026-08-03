@@ -40,7 +40,7 @@ $requiredMarkers = @(
     'CanSubmitEntryOrders',
     'CanSubmitLiquidationOrders',
     'RequestStockMinuteBars',
-    'ka10079'
+    'ka10080'
 )
 
 foreach ($marker in $requiredMarkers) {

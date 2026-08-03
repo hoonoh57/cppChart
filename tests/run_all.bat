@@ -65,6 +65,9 @@ if errorlevel 1 exit /b 1
 call :build_and_run chart_workspace_module_tests.exe "tests\chart_workspace_module_tests.cpp render\render_document.cpp render\market_chart_builder.cpp app\indicator_render_adapter.cpp app\chart_workspace_module.cpp"
 if errorlevel 1 exit /b 1
 
+call :build_and_run chart_workspace_indicator_tests.exe "tests\chart_workspace_indicator_tests.cpp render\render_document.cpp render\market_chart_builder.cpp app\indicator_render_adapter.cpp app\chart_workspace_module.cpp"
+if errorlevel 1 exit /b 1
+
 call :build_and_run kiwoom_realtime_subscription_tests.exe "tests\kiwoom_realtime_subscription_tests.cpp core\json_lite.cpp core\kiwoom_realtime_subscription.cpp"
 if errorlevel 1 exit /b 1
 

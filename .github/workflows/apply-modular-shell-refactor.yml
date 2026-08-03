@@ -88,5 +88,7 @@ jobs:
           git add shell_main.cpp tests/run_all.bat
           if (-not (git diff --cached --quiet)) {
             git commit -m 'Extract market data and generic renderer contracts'
+            git fetch origin p2/kiwoom-mock-gateway
+            git rebase origin/p2/kiwoom-mock-gateway
             git push origin HEAD:p2/kiwoom-mock-gateway
           }

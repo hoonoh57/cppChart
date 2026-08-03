@@ -1,5 +1,6 @@
 name: Integrate real minute bars
 
+# Executes the checked-in migration only after this workflow exists on the branch.
 on:
   push:
     branches:

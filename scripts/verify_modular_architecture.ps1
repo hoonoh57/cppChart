@@ -19,6 +19,8 @@ $requiredFiles = @(
     '.\core\obv_indicator.cpp',
     '.\core\adx_indicator.h',
     '.\core\adx_indicator.cpp',
+    '.\core\vwap_indicator.h',
+    '.\core\vwap_indicator.cpp',
     '.\render\chart_viewport.h',
     '.\render\chart_viewport.cpp',
     '.\render\time_axis.h',
@@ -37,7 +39,8 @@ $requiredFiles = @(
     '.\tests\indicator_engine_tests.cpp',
     '.\tests\jma_indicator_tests.cpp',
     '.\tests\obv_indicator_tests.cpp',
-    '.\tests\adx_indicator_tests.cpp'
+    '.\tests\adx_indicator_tests.cpp',
+    '.\tests\vwap_indicator_tests.cpp'
 )
 
 foreach ($file in $requiredFiles) {
@@ -245,6 +248,17 @@ $indicatorContracts = @(
             'smoothedTrueRange',
             'ConsumeDx(',
             'result.SetOutput(AdxValueOutput')
+    },
+    @{
+        Path = '.\core\vwap_indicator.cpp'
+        Name = 'VWAP'
+        Markers = @(
+            'RegisterVwapIndicator',
+            'IsValidTradingDateYmd(',
+            'state.current = state.beforeLatest',
+            'priceSquaredVolume',
+            'VwapUpper1Output',
+            'VwapLower2Output')
     }
 )
 foreach ($contract in $indicatorContracts) {
@@ -292,6 +306,14 @@ $specializedIndicatorTests = @(
             'Wilder warm-up',
             'same-timestamp ADX update must replace the live tail',
             'ADX batch/incremental value parity mismatch')
+    },
+    @{
+        Path = '.\tests\vwap_indicator_tests.cpp'
+        Markers = @(
+            'VWAP must publish Value/Upper1/Lower1/Upper2/Lower2',
+            'trading-date change must reset VWAP',
+            'same-timestamp VWAP update must replace the live tail',
+            'VWAP batch/incremental output parity mismatch')
     }
 )
 foreach ($test in $specializedIndicatorTests) {
@@ -309,14 +331,16 @@ foreach ($marker in @(
     'jma_indicator_tests.exe',
     'obv_indicator_tests.exe',
     'adx_indicator_tests.exe',
+    'vwap_indicator_tests.exe',
     'core\indicator_engine.cpp',
     'core\sma_indicator.cpp',
     'core\jma_indicator.cpp',
     'core\obv_indicator.cpp',
-    'core\adx_indicator.cpp')) {
+    'core\adx_indicator.cpp',
+    'core\vwap_indicator.cpp')) {
     if (-not $runAll.Contains($marker)) {
         throw "Indicator engine is not in the complete headless suite: $marker"
     }
 }
 
-Write-Host 'Major-feature modules, accepted M6 chart contracts, and the M7 SMA/JMA/OBV/ADX multi-output batch-incremental foundation are verified.'
+Write-Host 'Major-feature modules, accepted M6 chart contracts, and the M7 SMA/JMA/OBV/ADX/VWAP multi-output batch-incremental foundation are verified.'

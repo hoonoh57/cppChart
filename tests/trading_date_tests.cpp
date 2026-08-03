@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
 
 namespace
 {
@@ -48,6 +49,40 @@ int main()
         "KST next-day trading-date conversion mismatch");
     Check(KstTradingDateYmdFromEpoch(0) == 0,
           "missing timestamp must not invent a trading date");
+
+    Bar parsed;
+    parsed.open = 70000;
+    parsed.high = 70100;
+    parsed.low = 69900;
+    parsed.close = 70050;
+    parsed.volume = 1000;
+    parsed.closeTimestampMs =
+        Kst20260803MidnightUtcMs + 9LL * 60LL * 60LL * 1000LL;
+    parsed.tickCount = 1;
+    Check(parsed.tradingDateYmd == 0,
+          "partially constructed bar must not mutate implicitly");
+
+    std::vector<Bar> normalized;
+    normalized.push_back(parsed);
+    Check(normalized.back().tradingDateYmd == 20260803,
+          "bar storage boundary must normalize missing trading date");
+
+    Bar explicitInvalid = parsed;
+    explicitInvalid.tradingDateYmd = 20260230;
+    normalized.push_back(explicitInvalid);
+    Check(normalized.back().tradingDateYmd == 20260230,
+          "explicit invalid trading date must remain visible for fail-closed validation");
+
+    const Bar aggregateCompatible(
+        70000,
+        70100,
+        69900,
+        70050,
+        1000,
+        Kst20260803MidnightUtcMs,
+        1);
+    Check(aggregateCompatible.tradingDateYmd == 20260803,
+          "bar value constructor must normalize trading date");
 
     std::puts("[PASS] trading_date_tests");
     return 0;

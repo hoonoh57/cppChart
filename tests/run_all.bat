@@ -14,7 +14,6 @@ if errorlevel 1 exit /b 1
 core_tests.exe
 if errorlevel 1 exit /b 1
 
-
 cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
   tests\feature_registry_tests.cpp ^
   app\feature_registry.cpp ^
@@ -42,6 +41,16 @@ market_data_module_tests.exe
 if errorlevel 1 exit /b 1
 
 cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
+  tests\chart_workspace_module_tests.cpp ^
+  render\render_document.cpp ^
+  render\market_chart_builder.cpp ^
+  app\chart_workspace_module.cpp ^
+  /Fe:chart_workspace_module_tests.exe
+if errorlevel 1 exit /b 1
+chart_workspace_module_tests.exe
+if errorlevel 1 exit /b 1
+
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
   tests\kiwoom_protocol_tests.cpp ^
   core\json_lite.cpp ^
   core\kiwoom_protocol.cpp ^
@@ -49,7 +58,6 @@ cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
 if errorlevel 1 exit /b 1
 kiwoom_protocol_tests.exe
 if errorlevel 1 exit /b 1
-
 
 cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
   tests\kiwoom_market_data_tests.cpp ^

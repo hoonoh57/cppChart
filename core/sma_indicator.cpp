@@ -48,6 +48,7 @@ namespace trading::indicators
 
             IndicatorValue result;
             result.timestampMs = bar.closeTimestampMs;
+            result.outputCount = 1;
 
             if (
                 !IsValidPrice(bar.close) ||
@@ -94,11 +95,10 @@ namespace trading::indicators
                 state.hasTimestamp = true;
             }
 
-            result.ready =
-                state.count == static_cast<std::size_t>(state.period);
-            if (result.ready) {
-                result.value =
-                    state.sum / static_cast<double>(state.period);
+            if (state.count == static_cast<std::size_t>(state.period)) {
+                result.SetOutput(
+                    0,
+                    state.sum / static_cast<double>(state.period));
             }
             return result;
         }

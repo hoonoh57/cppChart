@@ -1,3 +1,4 @@
+# deterministic one-shot refactor gate
 name: Apply modular shell refactor
 
 on:

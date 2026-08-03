@@ -104,6 +104,11 @@ namespace trading
         const std::vector<std::string>& items,
         const std::vector<std::string>& realTimeTypes);
 
+    std::string BuildWebSocketRemovalMessage(
+        const std::string& groupNumber,
+        const std::vector<std::string>& items,
+        const std::vector<std::string>& realTimeTypes);
+
     bool IsWebSocketPingMessage(
         const std::string& json);
 

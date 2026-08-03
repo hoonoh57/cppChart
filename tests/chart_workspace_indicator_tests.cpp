@@ -150,6 +150,11 @@ int main()
     ChartWorkspaceModule workspace;
     IndicatorModuleSnapshot firstIndicators =
         IndicatorSnapshot(completed, 10100.0, 20);
+    Check(workspace.NeedsUpdate(
+              market.revision,
+              firstIndicators,
+              adapter),
+          "empty indicator-aware workspace must need an update");
     Check(workspace.UpdateMarketChart(
               "main",
               "005930",
@@ -169,6 +174,11 @@ int main()
           "market candles, volume, and SMA line must be present");
     Check(first.indicatorRevision != 0U,
           "workspace must retain composite indicator revision");
+    Check(!workspace.NeedsUpdate(
+              market.revision,
+              firstIndicators,
+              adapter),
+          "unchanged indicator snapshot and plan must not rebuild");
     const auto firstPrefix =
         IndicatorLine(first).points.SharedPrefix();
     Check(firstPrefix.get() != nullptr && firstPrefix->size() == 2U,
@@ -178,6 +188,11 @@ int main()
 
     IndicatorModuleSnapshot liveReplacement =
         IndicatorSnapshot(completed, 10150.0, 21);
+    Check(workspace.NeedsUpdate(
+              market.revision,
+              liveReplacement,
+              adapter),
+          "indicator calculation revision must invalidate workspace");
     Check(workspace.UpdateMarketChart(
               "main",
               "005930",
@@ -203,6 +218,11 @@ int main()
 
     Check(adapter.Configure(RenderPlan(2.5f), error),
           "updated indicator render plan configuration failed");
+    Check(workspace.NeedsUpdate(
+              market.revision,
+              liveReplacement,
+              adapter),
+          "render-plan revision must invalidate workspace");
     Check(workspace.UpdateMarketChart(
               "main",
               "005930",
@@ -220,6 +240,11 @@ int main()
 
     IndicatorModuleSnapshot offIndicators =
         IndicatorSnapshot(nullptr, 0.0, 22, FeatureLevel::Off);
+    Check(workspace.NeedsUpdate(
+              market.revision,
+              offIndicators,
+              adapter),
+          "indicator execution-level change must invalidate workspace");
     Check(workspace.UpdateMarketChart(
               "main",
               "005930",
@@ -234,6 +259,11 @@ int main()
           "Off indicator snapshot must remove indicator contributions");
     Check(marketOnly.document->panes[0].lines.empty(),
           "Off indicator snapshot must remove price overlays");
+    Check(workspace.NeedsUpdate(
+              market.revision,
+              liveReplacement,
+              adapter),
+          "Visible indicator reactivation must invalidate market-only document");
 
     IndicatorRenderPlan missingPlan = RenderPlan();
     missingPlan.bindings[0].indicatorId = "missing";

@@ -40,7 +40,50 @@ shell_path.write_text(shell, encoding="utf-8-sig", newline="")
 build = build_path.read_text(encoding="utf-8-sig")
 if "core\\indicator_engine.cpp" in build:
     fail("indicator build wiring is already present")
-build = replace_once(build, '  core\\json_lite.cpp ^\n', '  core\\json_lite.cpp ^\n  core\\indicator_engine.cpp ^\n  core\\sma_indicator.cpp ^\n  core\\jma_indicator.cpp ^\n  core\\obv_indicator.cpp ^\n  core\\adx_indicator.cpp ^\n  core\\vwap_indicator.cpp ^\n', "indicator core build sources")
-build = replace_once(build, '  app\\market_data_module.cpp ^\n  app\\chart_workspace_module.cpp ^\n  app\\indicator_render_adapter.cpp ^\n', '  app\\market_data_module.cpp ^\n  app\\chart_workspace_module.cpp ^\n  app\\indicator_module.cpp ^\n  app\\indicator_render_adapter.cpp ^\n  app\\default_indicator_render_plan.cpp ^\n  app\\indicator_workspace_coordinator.cpp ^\n', "indicator app build sources")
+
+def insert_after_source(text: str, source: str, additions: list[str]) -> str:
+    marker = source + " ^\n"
+    count = text.count(marker)
+    if count != 1:
+        fail(f"build source {source}: expected one match, found {count}")
+    position = text.index(marker)
+    line_start = text.rfind("\n", 0, position) + 1
+    indent = text[line_start:position]
+    insertion = "".join(indent + item + " ^\n" for item in additions)
+    return text[:position + len(marker)] + insertion + text[position + len(marker):]
+
+def insert_before_source(text: str, source: str, additions: list[str]) -> str:
+    marker = source + " ^\n"
+    count = text.count(marker)
+    if count != 1:
+        fail(f"build source {source}: expected one match, found {count}")
+    position = text.index(marker)
+    line_start = text.rfind("\n", 0, position) + 1
+    indent = text[line_start:position]
+    insertion = "".join(indent + item + " ^\n" for item in additions)
+    return text[:line_start] + insertion + text[line_start:]
+
+build = insert_after_source(
+    build,
+    "core\\json_lite.cpp",
+    [
+        "core\\indicator_engine.cpp",
+        "core\\sma_indicator.cpp",
+        "core\\jma_indicator.cpp",
+        "core\\obv_indicator.cpp",
+        "core\\adx_indicator.cpp",
+        "core\\vwap_indicator.cpp",
+    ])
+build = insert_before_source(
+    build,
+    "app\\indicator_render_adapter.cpp",
+    ["app\\indicator_module.cpp"])
+build = insert_after_source(
+    build,
+    "app\\indicator_render_adapter.cpp",
+    [
+        "app\\default_indicator_render_plan.cpp",
+        "app\\indicator_workspace_coordinator.cpp",
+    ])
 build_path.write_text(build, encoding="utf-8-sig", newline="")
 print("indicator shell wiring applied")

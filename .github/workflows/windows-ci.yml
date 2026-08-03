@@ -64,6 +64,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $source = Get-Content .\shell_main.cpp -Raw
           $runner = Get-Content .\platform\kiwoom_runtime_runner.cpp -Raw
+          $marketData = Get-Content .\core\kiwoom_market_data.cpp -Raw
           $transport = Get-Content .\platform\winhttp_transport.cpp -Raw
           $required = @(
             'CPPCHART_SHARED_RUNTIME_INTEGRATED',
@@ -75,12 +76,34 @@ jobs:
             'trading::KiwoomRuntimeEngine g_runtimeEngine',
             'WinHttpKiwoomTransport',
             'CanSubmitEntryOrders',
-            'CanSubmitLiquidationOrders'
+            'CanSubmitLiquidationOrders',
+            'RequestStockMinuteBars',
+            'ApplyMinuteBars',
+            'DrawRealCandles',
+            'ka10079'
           )
           foreach ($marker in $required) {
             if (-not $source.Contains($marker)) {
               throw "Missing integrated runtime marker: $marker"
             }
+          }
+
+          $marketRequired = @(
+            'StockMinuteApiId = "ka10079"',
+            'IndexMinuteApiId = "ka20004"',
+            'stk_min_pole_chart_qry',
+            'inds_min_pole_qry',
+            'conflicting duplicate minute-bar timestamp',
+            'OHLC invariant violation'
+          )
+          foreach ($marker in $marketRequired) {
+            if (-not $marketData.Contains($marker)) {
+              throw "Missing strict market-data marker: $marker"
+            }
+          }
+
+          if (-not $runner.Contains('DeliverMinuteBars')) {
+            throw 'Minute-bar responses are not delivered to the UI callback'
           }
 
           if (-not $transport.Contains('CPPCHART_CONTINUATION_HEADERS')) {

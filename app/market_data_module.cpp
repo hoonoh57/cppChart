@@ -13,6 +13,11 @@ namespace trading::app
                 level == FeatureLevel::Visible ||
                 level == FeatureLevel::Active;
         }
+
+        std::size_t DynamicStringBytes(const std::string& value) noexcept
+        {
+            return value.empty() ? 0 : value.capacity();
+        }
     }
 
     MarketDataModule::MarketDataModule()
@@ -266,10 +271,10 @@ namespace trading::app
             result.revision = revision_;
             result.retainedBytes =
                 bars_.capacity() * sizeof(Bar) +
-                code_.capacity() +
-                error_.capacity() +
-                continuation_.continueYn.capacity() +
-                continuation_.nextKey.capacity();
+                DynamicStringBytes(code_) +
+                DynamicStringBytes(error_) +
+                DynamicStringBytes(continuation_.continueYn) +
+                DynamicStringBytes(continuation_.nextKey);
             if (!bars_.empty()) {
                 result.latestBar = bars_.back();
                 result.hasLatestBar = true;

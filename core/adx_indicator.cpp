@@ -191,6 +191,7 @@ namespace trading::indicators
 
             IndicatorValue result;
             result.timestampMs = bar.closeTimestampMs;
+            result.outputCount = 1;
 
             if (!IsValidBar(bar)) {
                 result.fault = IndicatorFault::InvalidInput;
@@ -217,12 +218,15 @@ namespace trading::indicators
                 state.hasTimestamp = true;
             }
 
+            bool ready = false;
+            double value = 0.0;
             StepAdx(
                 state.current,
                 state.period,
                 bar,
-                result.ready,
-                result.value);
+                ready,
+                value);
+            if (ready) result.SetOutput(AdxValueOutput, value);
             return result;
         }
 

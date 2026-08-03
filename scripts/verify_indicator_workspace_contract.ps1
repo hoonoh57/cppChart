@@ -54,7 +54,7 @@ $adapter = Get-Content (
 foreach ($marker in @(
     'for (const IndicatorReferenceBinding& reference : plan.references)',
     'pane->referenceLines.push_back(',
-    'duplicate indicator render element id',
+    'duplicate indicator render id',
     'line.points.SetShared(',
     'histogram.points.SetShared(')) {
     if (-not $adapter.Contains($marker)) {

@@ -50,17 +50,27 @@ namespace
 
     void TestRuntimeConfig()
     {
-        std::map<std::string, std::string> localValues;
-        localValues["TRADING_MODE"] = "LOCAL_MOCK";
+        std::map<std::string, std::string> emptyValues;
+        trading::ConfigLoadResult missingMode =
+            trading::BuildRuntimeConfig(emptyValues, "missing.env");
 
-        trading::ConfigLoadResult local =
-            trading::BuildRuntimeConfig(localValues, "local.env");
+        Check(!missingMode.ok,
+              "missing TRADING_MODE must fail closed");
+        Check(missingMode.config.mode ==
+                  trading::RuntimeMode::Unconfigured,
+              "missing mode must remain unconfigured");
 
-        Check(local.ok, "LOCAL_MOCK configuration must be valid");
-        Check(local.config.mode == trading::RuntimeMode::LocalMock,
-              "LOCAL_MOCK mode mismatch");
-        Check(local.config.sourcePath == "local.env",
-              "configuration source path mismatch");
+        std::map<std::string, std::string> removedLocalValues;
+        removedLocalValues["TRADING_MODE"] = "LOCAL_MOCK";
+        trading::ConfigLoadResult removedLocal =
+            trading::BuildRuntimeConfig(
+                removedLocalValues,
+                "local.env");
+
+        Check(!removedLocal.ok,
+              "removed LOCAL_MOCK mode must be rejected");
+        Check(removedLocal.error.find("removed") != std::string::npos,
+              "LOCAL_MOCK rejection must explain its removal");
 
         std::map<std::string, std::string> mockValues;
         mockValues["TRADING_MODE"] = "KIWOOM_MOCK";
@@ -88,19 +98,14 @@ namespace
               "default mock WebSocket URL mismatch");
 
         mockValues.erase("KIWOOM_MOCK_SECRET_KEY");
-        trading::ConfigLoadResult missing =
+        trading::ConfigLoadResult missingCredential =
             trading::BuildRuntimeConfig(mockValues);
 
-        Check(!missing.ok,
+        Check(!missingCredential.ok,
               "KIWOOM_MOCK without credentials must fail");
-        Check(missing.error.find("App Key") != std::string::npos,
+        Check(missingCredential.error.find("App Key") !=
+                  std::string::npos,
               "missing credentials error mismatch");
-
-        mockValues["TRADING_MODE"] = "UNKNOWN";
-        trading::ConfigLoadResult invalidMode =
-            trading::BuildRuntimeConfig(mockValues);
-
-        Check(!invalidMode.ok, "unknown runtime mode must fail");
     }
 }
 

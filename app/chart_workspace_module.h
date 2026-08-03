@@ -89,6 +89,11 @@ namespace trading::app
             std::uint64_t sourceRevision,
             std::uint64_t indicatorRevision) const noexcept;
 
+        bool NeedsUpdate(
+            std::uint64_t sourceRevision,
+            const IndicatorModuleSnapshot& indicatorSnapshot,
+            const IndicatorRenderAdapter& indicatorAdapter) const noexcept;
+
         static const char* StateName(
             ChartWorkspaceState state) noexcept;
 

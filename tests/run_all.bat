@@ -26,6 +26,9 @@ if errorlevel 1 exit /b 1
 call :build_and_run vwap_indicator_tests.exe "tests\vwap_indicator_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\vwap_indicator.cpp"
 if errorlevel 1 exit /b 1
 
+call :build_and_run indicator_module_tests.exe "tests\indicator_module_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\sma_indicator.cpp core\jma_indicator.cpp core\obv_indicator.cpp core\adx_indicator.cpp core\vwap_indicator.cpp app\indicator_module.cpp"
+if errorlevel 1 exit /b 1
+
 call :build_and_run feature_registry_tests.exe "tests\feature_registry_tests.cpp app\feature_registry.cpp"
 if errorlevel 1 exit /b 1
 

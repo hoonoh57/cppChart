@@ -1,5 +1,6 @@
 name: Add crosshair time label
 
+# Trigger after the workflow file exists on the development branch.
 on:
   push:
     branches:

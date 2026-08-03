@@ -525,7 +525,7 @@ old_reset = '''        case Cmd::ResetFeed: {
             if (!g_runtimeRunner || !g_runtimeRunner->RequestStockMinuteBars(
                     snapshot.code, snapshot.minuteUnit, {}, error))
             {
-                SetMarketDataError(error);
+                g_marketDataModule.SetError(error);
             }
             else {
                 g_log.Add("DATA", "ka10080 실제 분봉 재조회: %s", snapshot.code.c_str());

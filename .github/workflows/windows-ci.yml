@@ -65,6 +65,7 @@ jobs:
           $source = Get-Content .\shell_main.cpp -Raw
           $runner = Get-Content .\platform\kiwoom_runtime_runner.cpp -Raw
           $marketData = Get-Content .\core\kiwoom_market_data.cpp -Raw
+          $runnerTests = Get-Content .\tests\kiwoom_runtime_runner_tests.cpp -Raw
           $transport = Get-Content .\platform\winhttp_transport.cpp -Raw
           $required = @(
             'CPPCHART_SHARED_RUNTIME_INTEGRATED',
@@ -121,6 +122,9 @@ jobs:
           if (-not $runner.Contains('SubscribeStockTrades') -or
               -not $runner.Contains('{ "0B" }')) {
             throw 'Selected-stock 0B subscription is not integrated'
+          }
+          if (-not $runnerTests.Contains('message.find("\"refresh\":\"1\"")')) {
+            throw '0B registration does not have a keep-existing regression gate'
           }
 
           if (-not $transport.Contains('CPPCHART_CONTINUATION_HEADERS')) {

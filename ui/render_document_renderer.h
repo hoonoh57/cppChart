@@ -2,6 +2,7 @@
 
 #include "../render/chart_viewport.h"
 #include "../render/render_document.h"
+#include "../render/time_axis.h"
 #include "../render/time_boundaries.h"
 
 #include "imgui.h"
@@ -15,6 +16,9 @@ namespace trading::ui
         std::uint64_t renderedRevision = 0;
         bool dirty = true;
         render::ChartViewport viewport;
+        render::OrdinalTimeAxis timeAxis;
+        std::uint64_t timeAxisRevision = 0;
+        double defaultVisibleSpan = 0.0;
         bool crosshairVisible = false;
         EpochMillis crosshairTimestampMs = 0;
         double crosshairValue = 0.0;

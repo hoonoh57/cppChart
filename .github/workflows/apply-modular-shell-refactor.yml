@@ -7,6 +7,7 @@ on:
       - p2/kiwoom-mock-gateway
     paths:
       - scripts/apply_modular_shell_refactor.py
+      - scripts/run_modular_shell_refactor.py
       - .github/workflows/apply-modular-shell-refactor.yml
 
 permissions:
@@ -14,7 +15,7 @@ permissions:
 
 concurrency:
   group: apply-modular-shell-refactor
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   migrate-build-test-commit:
@@ -30,7 +31,7 @@ jobs:
 
       - name: Apply deterministic modular refactor
         shell: pwsh
-        run: python .\scripts\apply_modular_shell_refactor.py
+        run: python .\scripts\run_modular_shell_refactor.py
 
       - name: Verify modular architecture
         shell: pwsh

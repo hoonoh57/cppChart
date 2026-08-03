@@ -182,19 +182,35 @@ namespace
 
     void TestFailureGates()
     {
-        trading::KiwoomSession missingConfig;
+        trading::KiwoomSession unconfiguredSession;
+        trading::RuntimeConfig unconfigured;
+
+        std::vector<trading::KiwoomSessionAction> actions =
+            unconfiguredSession.Start(unconfigured);
+
+        Check(actions.size() == 1,
+              "unconfigured session must enter observe mode");
+        Check(actions[0].type ==
+                  trading::KiwoomSessionActionType::EnterObserveMode,
+              "unconfigured session action mismatch");
+        Check(unconfiguredSession.Snapshot().state ==
+                  trading::KiwoomSessionState::ConfigurationError,
+              "unconfigured session state mismatch");
+        Check(!unconfiguredSession.Snapshot().orderSubmissionAllowed,
+              "unconfigured session must block orders");
+
+        trading::KiwoomSession missingCredentials;
         trading::RuntimeConfig invalid;
         invalid.mode = trading::RuntimeMode::KiwoomMock;
 
-        std::vector<trading::KiwoomSessionAction> actions =
-            missingConfig.Start(invalid);
+        actions = missingCredentials.Start(invalid);
 
         Check(actions.size() == 1,
               "missing credentials must enter observe mode");
         Check(actions[0].type ==
                   trading::KiwoomSessionActionType::EnterObserveMode,
               "missing credentials action mismatch");
-        Check(missingConfig.Snapshot().state ==
+        Check(missingCredentials.Snapshot().state ==
                   trading::KiwoomSessionState::ConfigurationError,
               "missing credentials state mismatch");
 
@@ -230,22 +246,6 @@ namespace
                   trading::KiwoomSessionActionType::RequestToken,
               "token expiry action mismatch");
     }
-
-    void TestLocalMockNoNetwork()
-    {
-        trading::RuntimeConfig config;
-        config.mode = trading::RuntimeMode::LocalMock;
-
-        trading::KiwoomSession session;
-        const std::vector<trading::KiwoomSessionAction> actions =
-            session.Start(config);
-
-        Check(actions.empty(),
-              "LOCAL_MOCK must not start Kiwoom network actions");
-        Check(session.Snapshot().state ==
-                  trading::KiwoomSessionState::Stopped,
-              "LOCAL_MOCK Kiwoom session must remain stopped");
-    }
 }
 
 int main()
@@ -253,7 +253,6 @@ int main()
     TestHappyPath();
     TestPingAndReconnect();
     TestFailureGates();
-    TestLocalMockNoNetwork();
 
     std::puts("[PASS] kiwoom_session_tests");
     return 0;

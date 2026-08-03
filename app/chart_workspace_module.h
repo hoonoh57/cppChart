@@ -12,6 +12,8 @@
 
 namespace trading::app
 {
+    struct IndicatorModuleSnapshot;
+
     enum class ChartWorkspaceState
     {
         Empty,
@@ -36,6 +38,7 @@ namespace trading::app
         FeatureLevel level = FeatureLevel::Off;
         std::uint64_t sourceRevision = 0;
         std::uint64_t completedRevision = 0;
+        std::uint64_t indicatorRevision = 0;
         std::uint64_t documentRevision = 0;
         std::size_t sourceBarCount = 0;
         std::size_t paneCount = 0;
@@ -65,12 +68,24 @@ namespace trading::app
             const ChartMarketSource& source,
             std::string& error);
 
+        bool UpdateMarketChart(
+            const std::string& workspaceId,
+            const std::string& title,
+            const std::string& seriesId,
+            const ChartMarketSource& source,
+            const IndicatorModuleSnapshot* indicatorSnapshot,
+            std::string& error);
+
         void SetError(const std::string& error);
 
         ChartWorkspaceSnapshot Snapshot() const;
 
         bool NeedsUpdate(
             std::uint64_t sourceRevision) const noexcept;
+
+        bool NeedsUpdate(
+            std::uint64_t sourceRevision,
+            std::uint64_t indicatorRevision) const noexcept;
 
         static const char* StateName(
             ChartWorkspaceState state) noexcept;
@@ -91,6 +106,7 @@ namespace trading::app
         ChartWorkspaceState state_ = ChartWorkspaceState::Empty;
         std::uint64_t sourceRevision_ = 0;
         std::uint64_t completedRevision_ = 0;
+        std::uint64_t indicatorRevision_ = 0;
         std::uint64_t documentRevision_ = 0;
         std::size_t sourceBarCount_ = 0;
         std::string error_;

@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -43,21 +44,41 @@ namespace
         };
     }
 
+    trading::app::ChartMarketSource MakeSource(
+        const std::vector<trading::Bar>& bars,
+        std::uint64_t revision,
+        std::uint64_t completedRevision)
+    {
+        trading::app::ChartMarketSource source;
+        auto completed = std::make_shared<std::vector<trading::Bar>>();
+        if (bars.size() > 1) {
+            completed->assign(bars.begin(), bars.end() - 1);
+        }
+        source.completedBars = completed;
+        source.liveBar = bars.back();
+        source.hasLiveBar = true;
+        source.barCount = bars.size();
+        source.revision = revision;
+        source.completedRevision = completedRevision;
+        source.liveRevision = revision;
+        return source;
+    }
+
     void TestBuildAndImmutableSnapshot()
     {
         trading::app::ChartWorkspaceModule module;
         std::string error;
         const std::vector<trading::Bar> bars = MakeBars();
+        trading::app::ChartMarketSource source =
+            MakeSource(bars, 7, 1);
 
-        Check(module.NeedsUpdate(7, 3),
+        Check(module.NeedsUpdate(7),
               "empty workspace must need an update");
         Check(module.UpdateMarketChart(
                   "main",
                   "000660",
                   "000660",
-                  bars,
-                  7,
-                  3,
+                  source,
                   error),
               "chart workspace build failed");
 
@@ -73,16 +94,19 @@ namespace
               "market chart must contain two standard series");
         Check(first.document->panes[0].candles[0].bars.size() == 3,
               "workspace candle count mismatch");
-        Check(!module.NeedsUpdate(7, 3),
+        Check(first.document->panes[0].candles[0].bars.SharedPrefix() ==
+                  source.completedBars,
+              "workspace must retain the immutable completed history pointer");
+        Check(first.document->panes[0].candles[0].bars.HasLiveTail(),
+              "workspace must publish a separate live candle tail");
+        Check(!module.NeedsUpdate(7),
               "unchanged workspace must not rebuild");
 
         Check(module.UpdateMarketChart(
                   "main",
                   "000660",
                   "000660",
-                  bars,
-                  7,
-                  3,
+                  source,
                   error),
               "idempotent workspace update failed");
         const trading::app::ChartWorkspaceSnapshot second =
@@ -90,36 +114,70 @@ namespace
         Check(second.document == first.document,
               "unchanged update must retain immutable document");
 
-        std::vector<trading::Bar> changed = bars;
-        changed.back().close = 10300;
-        changed.back().high = 10400;
+        trading::app::ChartMarketSource liveChanged = source;
+        liveChanged.liveBar.close = 10300;
+        liveChanged.liveBar.high = 10400;
+        liveChanged.revision = 8;
+        liveChanged.liveRevision = 8;
+
         Check(module.UpdateMarketChart(
                   "main",
                   "000660",
                   "000660",
-                  changed,
-                  8,
-                  3,
+                  liveChanged,
                   error),
-              "changed workspace update failed");
+              "live-tail workspace update failed");
         const trading::app::ChartWorkspaceSnapshot third =
             module.Snapshot();
         Check(third.document != first.document,
-              "changed source revision must publish a new document");
+              "changed live revision must publish a new document");
         Check(third.documentRevision > first.documentRevision,
               "document revision must increase");
+        Check(third.document->panes[0].candles[0].bars.SharedPrefix() ==
+                  source.completedBars,
+              "live tick must reuse completed candle history");
+        Check(third.document->panes[1].histograms[0].points.SharedPrefix() ==
+                  first.document->panes[1].histograms[0].points.SharedPrefix(),
+              "live tick must reuse completed volume history");
+        Check(third.document->panes[0].candles[0].bars.back().close == 10300,
+              "live candle tail was not updated");
         Check(third.retainedBytes > 0,
               "ready workspace must report retained bytes");
+
+        std::vector<trading::Bar> nextBars = bars;
+        nextBars.back() = liveChanged.liveBar;
+        nextBars.push_back(MakeBar(4000, 10400, 40));
+        trading::app::ChartMarketSource nextMinute =
+            MakeSource(nextBars, 9, 2);
+
+        Check(module.UpdateMarketChart(
+                  "main",
+                  "000660",
+                  "000660",
+                  nextMinute,
+                  error),
+              "new-minute workspace update failed");
+        const trading::app::ChartWorkspaceSnapshot fourth =
+            module.Snapshot();
+        Check(fourth.completedRevision == 2,
+              "new minute must advance completed revision");
+        Check(fourth.document->panes[0].candles[0].bars.SharedPrefix() ==
+                  nextMinute.completedBars,
+              "new minute must publish the new completed history");
+        Check(fourth.document->panes[1].histograms[0].points.SharedPrefix() !=
+                  third.document->panes[1].histograms[0].points.SharedPrefix(),
+              "new minute must rebuild completed volume history once");
     }
 
     void TestExecutionLevels()
     {
         trading::app::ChartWorkspaceModule module;
         std::string error;
-        const std::vector<trading::Bar> bars = MakeBars();
+        const trading::app::ChartMarketSource source =
+            MakeSource(MakeBars(), 1, 1);
 
         Check(module.UpdateMarketChart(
-                  "main", "000660", "000660", bars, 1, 3, error),
+                  "main", "000660", "000660", source, error),
               "initial workspace build failed");
         const auto ready = module.Snapshot();
 
@@ -130,17 +188,21 @@ namespace
         const auto standby = module.Snapshot();
         Check(standby.document == ready.document,
               "Standby must retain the immutable render document");
-        Check(!module.NeedsUpdate(2, 3),
+        Check(!module.NeedsUpdate(2),
               "Standby must suppress render-document rebuilds");
+
+        trading::app::ChartMarketSource changed = source;
+        changed.revision = 2;
+        changed.liveRevision = 2;
         Check(!module.UpdateMarketChart(
-                  "main", "000660", "000660", bars, 2, 3, error),
+                  "main", "000660", "000660", changed, error),
               "Standby must reject document updates");
 
         Check(module.SetLevel(
                   trading::app::FeatureLevel::Visible,
                   error),
               "Visible transition failed");
-        Check(module.NeedsUpdate(2, 3),
+        Check(module.NeedsUpdate(2),
               "Visible must detect changed source revision");
 
         Check(module.SetLevel(
@@ -161,15 +223,15 @@ namespace
         trading::app::ChartWorkspaceModule module;
         std::string error;
         std::vector<trading::Bar> invalid = MakeBars();
-        invalid[1].closeTimestampMs = invalid[0].closeTimestampMs;
+        invalid[2].closeTimestampMs = invalid[1].closeTimestampMs;
+        const trading::app::ChartMarketSource source =
+            MakeSource(invalid, 1, 1);
 
         Check(!module.UpdateMarketChart(
                   "main",
                   "000660",
                   "000660",
-                  invalid,
-                  1,
-                  3,
+                  source,
                   error),
               "invalid render document must fail");
         Check(module.Snapshot().state ==

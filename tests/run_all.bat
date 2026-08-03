@@ -14,6 +14,33 @@ if errorlevel 1 exit /b 1
 core_tests.exe
 if errorlevel 1 exit /b 1
 
+
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
+  tests\feature_registry_tests.cpp ^
+  app\feature_registry.cpp ^
+  /Fe:feature_registry_tests.exe
+if errorlevel 1 exit /b 1
+feature_registry_tests.exe
+if errorlevel 1 exit /b 1
+
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
+  tests\render_document_tests.cpp ^
+  render\render_document.cpp ^
+  /Fe:render_document_tests.exe
+if errorlevel 1 exit /b 1
+render_document_tests.exe
+if errorlevel 1 exit /b 1
+
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
+  tests\market_data_module_tests.cpp ^
+  core\json_lite.cpp ^
+  core\kiwoom_market_data.cpp ^
+  app\market_data_module.cpp ^
+  /Fe:market_data_module_tests.exe
+if errorlevel 1 exit /b 1
+market_data_module_tests.exe
+if errorlevel 1 exit /b 1
+
 cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
   tests\kiwoom_protocol_tests.cpp ^
   core\json_lite.cpp ^

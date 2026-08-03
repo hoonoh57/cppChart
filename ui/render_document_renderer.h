@@ -2,8 +2,11 @@
 
 #include "../render/chart_viewport.h"
 #include "../render/render_document.h"
+#include "../render/time_boundaries.h"
 
 #include "imgui.h"
+
+#include <vector>
 
 namespace trading::ui
 {
@@ -15,6 +18,8 @@ namespace trading::ui
         bool crosshairVisible = false;
         EpochMillis crosshairTimestampMs = 0;
         double crosshairValue = 0.0;
+        std::uint64_t boundaryRevision = 0;
+        std::vector<render::TimeBoundary> timeBoundaries;
     };
 
     void DrawRenderDocument(

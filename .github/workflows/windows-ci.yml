@@ -37,7 +37,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $shell = Get-Content .\shell_main.cpp -Raw
           if (-not $shell.Contains('ApplyStockTradeTick')) {
-            python .\scripts\connect_realtime_stock_bars.py
+            python .\scripts\apply_realtime_core_only.py
           }
           else {
             Write-Host 'Selected-stock 0B integration is already present.'

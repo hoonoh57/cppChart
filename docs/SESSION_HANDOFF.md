@@ -1,4 +1,4 @@
-﻿# cppChart Session Handoff
+# cppChart Session Handoff
 
 ## Mandatory first read
 
@@ -14,6 +14,8 @@ Read these before changing code:
 - development branch: `p2/kiwoom-mock-gateway`
 - PR: `#1`, Draft; do not merge before real-data and account acceptance
 - production policy: real Kiwoom mock data only; no synthetic fallback
+- verified M6 implementation commit: `d1c8d1dcd5e6fc8ebc5585af26b3deb20769a96c`
+- verification-only Windows CI run: `30797703979`
 
 ## Product objective
 
@@ -48,48 +50,72 @@ a monolithic `shell_main.cpp`.
 - market-data and chart-workspace feature-level controls
 - WebSocket `0B` unsubscribe and reconnect behavior
 - actual `ka10080` plus `0B` selected-symbol chart path
+- verification-only CI; one-shot migration files removed
 
-## Current M6 status
+## M6 chart foundation completed remotely
 
-Implemented:
+- full loaded history remains available for viewport navigation
+- wheel zoom anchored at mouse position
+- right-button horizontal pan
+- double-click reset and latest-bar auto-follow
+- visible-range automatic value scale
+- current-price line and label
+- same-frame vertical crosshair synchronization across panes
+- OHLCV and tick-count tooltip
+- generic time and value axes
+- calendar-date and abnormal session-gap boundaries
+- headless viewport and time-boundary fixtures in the complete suite
 
-- viewport state and tests
-- wheel zoom, horizontal pan, double-click reset, auto-follow
-- value/time axes
-- current-price line
-- OHLCV/tick tooltip
-- same-frame synchronized vertical crosshair across panes
-- full loaded history available for viewport navigation
+## M6 performance structure
 
-Completed after the first M6 checkpoint:
+- completed candle history is immutable shared storage
+- current live candle is a separate value tail
+- same-minute `0B` updates reuse all completed candle history
+- completed volume history is also shared and reused
+- a new minute promotes the old live bar and rebuilds completed volume once
+- boundary calculation is cached by completed-history structure revision
+- renderer receives generic data only; it has no Kiwoom, indicator, strategy,
+  or account-specific branch
 
-- completed immutable history is separate from the mutable live bar;
-- render documents share completed candle and volume history;
-- same-minute `0B` updates do not copy the complete loaded history;
-- a new minute promotes the old live bar and rebuilds completed volume history once.
+## Verification result
 
-M6 remote implementation is complete:
+Windows CI run `30797703979` passed:
 
-- calendar-date and abnormal session-gap boundaries are generic renderer data;
-- boundary calculation is cached by completed-history structure revision;
-- same-minute `0B` events do not recompute boundaries or copy completed history;
-- viewport, boundary, market-data, workspace, and runtime tests are in the complete suite.
+- repository and secret-file policy
+- core dependency boundary
+- real-data-only production policy
+- modular architecture boundary
+- M6 shared-history and boundary contracts
+- MSVC x64 `shell.exe` build
+- complete headless test suite
+- clean source-tree check
+- executable artifact publication
 
-Still required before asking the user to test:
+## Current user-intervention point
 
-1. run the final Windows MSVC build and complete headless suite;
-2. restore verification-only CI and remove one-shot migration files;
-3. record the verified HEAD and CI run below.
+Remote verification is complete. A focused local visual/GPU and real-`0B`
+acceptance test is now required before M6 is declared complete.
 
-## User-test policy
+Validate:
 
-Do not request a local pull yet. Ask for a focused local test only after the
-remaining M6 items are remotely verified. The focused test must cover real
-`ka10080` history, `0B` last-bar updates, wheel zoom, pan, double-click reset,
-crosshair synchronization, current-price line, and feature Off/Standby/Visible.
+1. real `ka10080` history loads;
+2. real `0B` updates the final candle without viewport reset;
+3. wheel zoom centers on the mouse position;
+4. right-button drag pans through the complete loaded history;
+5. double-click returns to the latest bars and resumes auto-follow;
+6. crosshair timestamp aligns across price and volume panes;
+7. OHLCV/tick tooltip follows the nearest candle;
+8. current-price line and label update with `0B`;
+9. date/session boundary lines remain aligned while zooming and panning;
+10. Market Data and Chart Workspace Off/Standby/Visible levels perform their
+    documented work reduction without affecting broker-account liquidation.
 
-## Verification record
+## Next remote milestone after acceptance
 
-- verified HEAD: pending final M6 verification
-- Windows CI run: pending
-- local acceptance: not requested
+M7 reusable indicator engine:
+
+- batch and incremental parity contract
+- indicator registry and parameter serialization
+- SMA, JMA, VWAP, OBV, and ADX
+- standard Line/Histogram/ReferenceLine renderer contributions
+- no renderer changes per added indicator

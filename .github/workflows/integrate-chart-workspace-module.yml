@@ -87,6 +87,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          git restore .github/workflows/windows-ci.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add `
@@ -94,8 +95,7 @@ jobs:
             platform/kiwoom_runtime_runner.cpp `
             tests/kiwoom_runtime_runner_tests.cpp `
             tests/run_all.bat `
-            scripts/verify_modular_architecture.ps1 `
-            .github/workflows/windows-ci.yml
+            scripts/verify_modular_architecture.ps1
           if (-not (git diff --cached --quiet)) {
             git commit -m 'Integrate modular chart and feature execution levels'
             git fetch origin p2/kiwoom-mock-gateway

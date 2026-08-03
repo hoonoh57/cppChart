@@ -104,6 +104,17 @@ namespace
         Check(snapshot.continuation.nextKey == "next",
               "market-data continuation mismatch");
 
+        const trading::app::MarketDataSeriesSnapshot series =
+            module.SeriesSnapshot();
+        Check(series.completedBars != nullptr,
+              "completed history pointer is missing");
+        Check(series.completedBars->size() == 1,
+              "REST page must split completed history from live tail");
+        Check(series.hasLiveBar && series.liveBar.close == 158300,
+              "REST page live tail mismatch");
+        Check(series.barCount == 2,
+              "series snapshot bar count mismatch");
+
         const std::vector<trading::Bar> one =
             module.CopyVisibleBars(1);
         Check(one.size() == 1 && one.front().close == 158300,
@@ -129,6 +140,12 @@ namespace
         module.SetStockTradeSubscriptionRequested(true);
         const trading::StockTradeTick sameMinute = MakeSameMinuteTick();
 
+        const trading::app::MarketDataSeriesSnapshot beforeTick =
+            module.SeriesSnapshot();
+        const auto completedIdentity = beforeTick.completedBars;
+        const auto completedRevision = beforeTick.completedRevision;
+        const auto liveRevision = beforeTick.liveRevision;
+
         const trading::app::MarketDataApplyResult updated =
             module.ApplyStockTradeTick(sameMinute);
         Check(updated.applied, "same-minute trade was not applied");
@@ -138,6 +155,15 @@ namespace
               "real-time tick count mismatch");
         Check(module.Snapshot().latestBar.high == 158700,
               "same-minute high was not updated");
+
+        const trading::app::MarketDataSeriesSnapshot sameMinuteSeries =
+            module.SeriesSnapshot();
+        Check(sameMinuteSeries.completedBars == completedIdentity,
+              "same-minute tick must reuse immutable completed history");
+        Check(sameMinuteSeries.completedRevision == completedRevision,
+              "same-minute tick must not advance completed revision");
+        Check(sameMinuteSeries.liveRevision > liveRevision,
+              "same-minute tick must advance only live revision");
 
         trading::StockTradeTick nextMinute = sameMinute;
         nextMinute.priceWon = 158900;
@@ -149,6 +175,17 @@ namespace
               "next-minute trade must append a bar");
         Check(module.Snapshot().latestBar.tickCount == 1,
               "new live bar tick count mismatch");
+
+        const trading::app::MarketDataSeriesSnapshot nextMinuteSeries =
+            module.SeriesSnapshot();
+        Check(nextMinuteSeries.completedBars != completedIdentity,
+              "new minute must publish a new immutable completed history");
+        Check(nextMinuteSeries.completedBars->size() == 2,
+              "old live bar must be promoted into completed history");
+        Check(nextMinuteSeries.completedRevision > completedRevision,
+              "new minute must advance completed revision");
+        Check(nextMinuteSeries.liveBar.close == 158900,
+              "new minute live tail mismatch");
 
         Check(module.SetLevel(
                   trading::app::FeatureLevel::Standby,

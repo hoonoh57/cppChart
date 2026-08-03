@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+# This script is intentionally deterministic so the remote Windows gate can
+# patch, build, test, and commit the correction on the development branch.
 ROOT = Path(__file__).resolve().parents[1]
 CORE = ROOT / "core" / "kiwoom_market_data.cpp"
 TESTS = ROOT / "tests" / "kiwoom_market_data_tests.cpp"

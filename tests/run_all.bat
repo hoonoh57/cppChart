@@ -8,6 +8,12 @@ if errorlevel 1 exit /b 1
 call :build_and_run indicator_engine_tests.exe "tests\indicator_engine_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\sma_indicator.cpp"
 if errorlevel 1 exit /b 1
 
+call :build_and_run jma_indicator_tests.exe "tests\jma_indicator_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\jma_indicator.cpp"
+if errorlevel 1 exit /b 1
+
+call :build_and_run obv_indicator_tests.exe "tests\obv_indicator_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\obv_indicator.cpp"
+if errorlevel 1 exit /b 1
+
 call :build_and_run feature_registry_tests.exe "tests\feature_registry_tests.cpp app\feature_registry.cpp"
 if errorlevel 1 exit /b 1
 

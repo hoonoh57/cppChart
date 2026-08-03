@@ -7,13 +7,19 @@ on:
     paths:
       - scripts/integrate_chart_workspace_module.py
       - .github/workflows/integrate-chart-workspace-module.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/integrate_chart_workspace_module.py
+      - .github/workflows/integrate-chart-workspace-module.yml
 
 permissions:
   contents: write
 
 concurrency:
-  group: integrate-chart-workspace-module
-  cancel-in-progress: false
+  group: integrate-chart-workspace-module-${{ github.event_name }}
+  cancel-in-progress: true
 
 jobs:
   patch-build-test-commit:
@@ -70,6 +76,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "tests failed, exit code=$LASTEXITCODE" }
 
       - name: Commit verified integration
+        if: github.event_name == 'push'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'

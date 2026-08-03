@@ -186,6 +186,8 @@ namespace
                 if (
                     message.find("\"type\":[\"0B\"]") !=
                         std::string::npos &&
+                    message.find("\"refresh\":\"1\"") !=
+                        std::string::npos &&
                     message.find("000660") != std::string::npos)
                 {
                     ++count;

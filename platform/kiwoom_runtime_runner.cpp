@@ -557,7 +557,7 @@ namespace trading::platform
         action.type = KiwoomRuntimeActionType::SendWebSocketText;
         action.text = BuildWebSocketRegistrationMessage(
             "2",
-            false,
+            true,
             { code },
             { "0B" });
         Enqueue({ std::move(action) });

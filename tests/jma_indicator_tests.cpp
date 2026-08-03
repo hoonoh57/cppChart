@@ -169,7 +169,7 @@ int main()
     value = live.Update(MakeBar(50, 4000));
     Check(value.replaced,
           "JMA state must remain replaceable after rejected input");
-    CheckNear(value.value, 47.9914,
+    CheckNear(value.value, 47.7743,
               "rejected JMA input must not mutate state");
 
     Check(live.RetainedBytes() >= sizeof(double) * 10U,

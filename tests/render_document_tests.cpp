@@ -111,11 +111,13 @@ namespace
         unordered.workspaceId = "main";
         trading::render::Pane unorderedPane;
         unorderedPane.id = "price";
-        trading::render::CandleSeries candles;
-        candles.id = "candles";
-        candles.bars.push_back(MakeBar(2000, 100, 110, 95, 105, 10));
-        candles.bars.push_back(MakeBar(1000, 105, 115, 101, 112, 20));
-        unorderedPane.candles.push_back(candles);
+        trading::render::CandleSeries unorderedCandles;
+        unorderedCandles.id = "candles";
+        unorderedCandles.bars.push_back(
+            MakeBar(2000, 100, 110, 95, 105, 10));
+        unorderedCandles.bars.push_back(
+            MakeBar(1000, 105, 115, 101, 112, 20));
+        unorderedPane.candles.push_back(unorderedCandles);
         unordered.panes.push_back(unorderedPane);
 
         Check(!trading::render::ValidateRenderDocument(unordered, error),

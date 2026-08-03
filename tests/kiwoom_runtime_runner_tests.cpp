@@ -196,6 +196,26 @@ namespace
             return count;
         }
 
+        int StockTradeRemovalCount()
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            int count = 0;
+            for (const std::string& message : sentMessages_) {
+                if (
+                    message.find("\"trnm\":\"REMOVE\"") !=
+                        std::string::npos &&
+                    message.find("\"type\":[\"0B\"]") !=
+                        std::string::npos &&
+                    message.find("\"refresh\"") ==
+                        std::string::npos &&
+                    message.find("000660") != std::string::npos)
+                {
+                    ++count;
+                }
+            }
+            return count;
+        }
+
         void PushStockTrade()
         {
             PushText(
@@ -331,6 +351,27 @@ namespace
         WaitUntil(
             [&] { return fake->StockTradeRegistrationCount() >= 2; },
             "runtime did not restore 0B subscription after reconnect");
+
+        Check(runner.UnsubscribeStockTrades("000660", error),
+              "runner must accept stock trade removal");
+        WaitUntil(
+            [&] { return fake->StockTradeRemovalCount() >= 1; },
+            "runner did not send 0B REMOVE message");
+
+        const int registrationsBeforeSecondReconnect =
+            fake->StockTradeRegistrationCount();
+        fake->SimulatePhysicalDisconnect();
+        WaitUntil(
+            [&] { return fake->ConnectCount() >= 3; },
+            "runtime did not reconnect after removal");
+        WaitUntil(
+            [&] { return runner.Snapshot().orderSubmissionAllowed; },
+            "runtime did not reconcile after removal reconnect");
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        Check(
+            fake->StockTradeRegistrationCount() ==
+                registrationsBeforeSecondReconnect,
+            "removed 0B subscription must not return after reconnect");
 
         Check(!observe.load(std::memory_order_acquire),
               "single recoverable disconnect must not force observe mode");

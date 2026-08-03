@@ -198,6 +198,54 @@ namespace trading::platform
         return true;
     }
 
+    bool KiwoomRuntimeRunner::UnsubscribeStockTrades(
+        const std::string& stockCode,
+        std::string& error)
+    {
+        if (stockCode.empty()) {
+            error = "stock code is required for real-time removal";
+            return false;
+        }
+
+        std::string subscribedCode;
+        bool removalRequired = false;
+        {
+            std::lock_guard<std::mutex> lock(subscriptionMutex_);
+            if (stockTradeCode_.empty()) {
+                error.clear();
+                return true;
+            }
+            if (stockTradeCode_ != stockCode) {
+                error =
+                    "real-time removal code does not match active subscription";
+                return false;
+            }
+
+            subscribedCode = stockTradeCode_;
+            removalRequired = stockTradeSubscriptionSent_;
+            stockTradeCode_.clear();
+            stockTradeSubscriptionSent_ = false;
+        }
+
+        if (
+            removalRequired &&
+            running_.load(std::memory_order_acquire) &&
+            transport_->IsWebSocketConnected())
+        {
+            KiwoomRuntimeAction action;
+            action.type = KiwoomRuntimeActionType::SendWebSocketText;
+            action.text = BuildWebSocketRemovalMessage(
+                "2",
+                { subscribedCode },
+                { "0B" });
+            Enqueue({ std::move(action) });
+            Log("WS", "stock trade 0B removal queued: " + subscribedCode);
+        }
+
+        error.clear();
+        return true;
+    }
+
     bool KiwoomRuntimeRunner::SubmitOrder(
         const OrderIntent& intent,
         std::string& error)

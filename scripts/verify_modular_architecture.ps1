@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 
 $requiredFiles = @(
     '.\docs\ARCHITECTURE_CONSTITUTION.md',
@@ -7,6 +7,8 @@ $requiredFiles = @(
     '.\app\feature_registry.cpp',
     '.\app\market_data_module.h',
     '.\app\market_data_module.cpp',
+    '.\app\chart_workspace_module.h',
+    '.\app\chart_workspace_module.cpp',
     '.\render\render_document.h',
     '.\render\render_document.cpp',
     '.\render\market_chart_builder.h',
@@ -28,6 +30,7 @@ $requiredShellMarkers = @(
     'render/market_chart_builder.h',
     'ui/render_document_renderer.h',
     'MarketDataModule g_marketDataModule',
+    'ChartWorkspaceModule g_chartWorkspaceModule',
     'FeatureRegistry g_featureRegistry',
     'DrawRenderDocument'
 )
@@ -42,7 +45,8 @@ $forbiddenShellMarkers = @(
     'static std::mutex g_marketDataMutex',
     'static void ApplyStockTradeTick(',
     'static void ApplyMinuteBars(',
-    'static void DrawRealCandles('
+    'static void DrawRealCandles(',
+    'static trading::render::RenderDocument g_mainRenderDocument'
 )
 foreach ($marker in $forbiddenShellMarkers) {
     if ($shell.Contains($marker)) {

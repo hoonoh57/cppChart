@@ -51,6 +51,15 @@ chart_workspace_module_tests.exe
 if errorlevel 1 exit /b 1
 
 cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
+  tests\kiwoom_realtime_subscription_tests.cpp ^
+  core\json_lite.cpp ^
+  core\kiwoom_realtime_subscription.cpp ^
+  /Fe:kiwoom_realtime_subscription_tests.exe
+if errorlevel 1 exit /b 1
+kiwoom_realtime_subscription_tests.exe
+if errorlevel 1 exit /b 1
+
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
   tests\kiwoom_protocol_tests.cpp ^
   core\json_lite.cpp ^
   core\kiwoom_protocol.cpp ^
@@ -185,6 +194,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
   core\kiwoom_reconciliation.cpp ^
   core\safe_liquidation.cpp ^
   core\kiwoom_runtime_engine.cpp ^
+  core\kiwoom_realtime_subscription.cpp ^
   platform\kiwoom_runtime_runner.cpp ^
   /Fe:kiwoom_runtime_runner_tests.exe
 if errorlevel 1 exit /b 1

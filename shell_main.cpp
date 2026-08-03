@@ -38,6 +38,7 @@
 #include "platform/winhttp_kiwoom_transport.h"
 #include "app/feature_registry.h"
 #include "app/market_data_module.h"
+#include "app/chart_workspace_module.h"
 #include "render/market_chart_builder.h"
 #include "ui/render_document_renderer.h"
 
@@ -237,9 +238,8 @@ static double g_bootMilliseconds = 0.0;
 
 static trading::app::FeatureRegistry g_featureRegistry;
 static trading::app::MarketDataModule g_marketDataModule;
-static trading::render::RenderDocument g_mainRenderDocument;
+static trading::app::ChartWorkspaceModule g_chartWorkspaceModule;
 static trading::ui::RenderSurfaceState g_mainRenderSurface;
-static std::size_t g_mainRenderVisibleLimit = 0;
 
 static int MinuteUnitFromSelection(int selection) noexcept
 {
@@ -270,29 +270,114 @@ static bool SetFeatureLevel(
     trading::app::FeatureLevel level,
     std::string& error)
 {
-    if (!g_featureRegistry.SetLevel(id, level, error)) return false;
-    if (id == "market-data") {
-        if (!g_marketDataModule.SetLevel(level, error)) return false;
+    trading::app::FeatureSnapshot previousFeature;
+    if (!g_featureRegistry.Get(id, previousFeature)) {
+        error = "기능이 등록되어 있지 않습니다: " + id;
+        return false;
     }
+
+    const trading::app::MarketDataSnapshot previousMarket =
+        g_marketDataModule.Snapshot();
+
+    if (!g_featureRegistry.SetLevel(id, level, error)) return false;
+
+    if (id == "market-data") {
+        if (!g_marketDataModule.SetLevel(level, error)) {
+            std::string rollbackError;
+            g_featureRegistry.SetLevel(
+                id,
+                previousFeature.level,
+                rollbackError);
+            return false;
+        }
+
+        const bool enabled =
+            level == trading::app::FeatureLevel::Visible ||
+            level == trading::app::FeatureLevel::Active;
+
+        if (!enabled) {
+            if (g_runtimeRunner && !previousMarket.code.empty()) {
+                std::string unsubscribeError;
+                if (!g_runtimeRunner->UnsubscribeStockTrades(
+                        previousMarket.code,
+                        unsubscribeError))
+                {
+                    g_log.Add(
+                        "FAULT",
+                        "0B 실시간 해지 실패: %s",
+                        unsubscribeError.c_str());
+                    std::string healthError;
+                    g_featureRegistry.SetHealth(
+                        "market-data",
+                        false,
+                        unsubscribeError,
+                        healthError);
+                }
+            }
+            g_marketDataModule.SetStockTradeSubscriptionRequested(false);
+        }
+        else if (
+            previousMarket.state == trading::app::MarketDataState::Ready &&
+            !previousMarket.code.empty() &&
+            g_runtimeRunner)
+        {
+            std::string subscribeError;
+            if (!g_runtimeRunner->SubscribeStockTrades(
+                    previousMarket.code,
+                    subscribeError))
+            {
+                g_marketDataModule.SetStockTradeSubscriptionRequested(false);
+                g_log.Add(
+                    "FAULT",
+                    "0B 실시간 재등록 실패: %s",
+                    subscribeError.c_str());
+                std::string healthError;
+                g_featureRegistry.SetHealth(
+                    "market-data",
+                    false,
+                    subscribeError,
+                    healthError);
+            }
+            else {
+                g_marketDataModule.SetStockTradeSubscriptionRequested(true);
+                g_log.Add(
+                    "WS",
+                    "0B 실시간 재등록 요청: %s",
+                    previousMarket.code.c_str());
+            }
+        }
+    }
+    else if (id == "chart-workspace") {
+        if (!g_chartWorkspaceModule.SetLevel(level, error)) {
+            std::string rollbackError;
+            g_featureRegistry.SetLevel(
+                id,
+                previousFeature.level,
+                rollbackError);
+            return false;
+        }
+    }
+
+    error.clear();
     return true;
 }
 
 static void RecordFeatureWork(
     const std::string& id,
     std::uint64_t elapsedMicros,
-    std::size_t renderSeriesCount = 0,
+    std::size_t retainedBytes,
+    std::size_t symbolCount,
+    std::size_t renderSeriesCount,
     std::uint64_t mergedEvents = 0,
     std::uint64_t droppedEvents = 0)
 {
-    const trading::app::MarketDataSnapshot market =
-        g_marketDataModule.Snapshot();
     std::string ignored;
     g_featureRegistry.RecordWork(
         id,
         elapsedMicros,
         0,
-        market.retainedBytes,
-        market.code.empty() ? 0 : 1,
+        retainedBytes,
+        symbolCount,
         renderSeriesCount,
         mergedEvents,
         droppedEvents,
@@ -608,40 +693,66 @@ static void DrawMarketDataPanel()
         static_cast<int>(available.x / 7.0f)));
 
     const double started = NowSeconds();
-    if (
-        g_mainRenderDocument.revision != snapshot.revision ||
-        g_mainRenderVisibleLimit != visibleLimit)
+    if (g_chartWorkspaceModule.NeedsUpdate(
+            snapshot.revision,
+            visibleLimit))
     {
         const std::vector<trading::Bar> visibleBars =
             g_marketDataModule.CopyVisibleBars(visibleLimit);
-        g_mainRenderDocument = trading::render::BuildMarketChartDocument(
-            "main-market-chart",
-            snapshot.code,
-            snapshot.code,
-            visibleBars,
-            snapshot.revision);
-        std::string renderError;
-        if (!trading::render::ValidateRenderDocument(
-                g_mainRenderDocument,
-                renderError))
+        std::string chartError;
+        if (!g_chartWorkspaceModule.UpdateMarketChart(
+                "main-market-chart",
+                snapshot.code,
+                snapshot.code,
+                visibleBars,
+                snapshot.revision,
+                visibleLimit,
+                chartError))
         {
-            g_marketDataModule.SetError(
-                "렌더 문서 검증 실패: " + renderError);
-            g_log.Add("FAULT", "렌더 문서 검증 실패: %s", renderError.c_str());
+            g_log.Add(
+                "FAULT",
+                "차트 워크스페이스 갱신 실패: %s",
+                chartError.c_str());
+            std::string healthError;
+            g_featureRegistry.SetHealth(
+                "chart-workspace",
+                false,
+                chartError,
+                healthError);
             ImGui::End();
             return;
         }
-        g_mainRenderVisibleLimit = visibleLimit;
         g_mainRenderSurface.dirty = true;
     }
 
+    const trading::app::ChartWorkspaceSnapshot workspace =
+        g_chartWorkspaceModule.Snapshot();
+    if (workspace.document == nullptr) {
+        ImGui::TextColored(
+            ImVec4(0.95f, 0.30f, 0.30f, 1.0f),
+            "차트 렌더 문서가 없습니다.");
+        ImGui::End();
+        return;
+    }
+
     trading::ui::DrawRenderDocument(
-        g_mainRenderDocument,
+        *workspace.document,
         available,
         g_mainRenderSurface);
     const std::uint64_t elapsedMicros = static_cast<std::uint64_t>(
         (NowSeconds() - started) * 1000000.0);
-    RecordFeatureWork("chart-workspace", elapsedMicros, 2);
+    RecordFeatureWork(
+        "chart-workspace",
+        elapsedMicros,
+        workspace.retainedBytes,
+        snapshot.code.empty() ? 0 : 1,
+        workspace.seriesCount);
+    std::string healthError;
+    g_featureRegistry.SetHealth(
+        "chart-workspace",
+        workspace.state == trading::app::ChartWorkspaceState::Ready,
+        workspace.error,
+        healthError);
     ImGui::End();
 }
 
@@ -918,12 +1029,16 @@ static void DrawFeatureWindow()
             ImGui::TextUnformatted(feature.displayName.c_str());
             ImGui::TableNextColumn();
             int selectedLevel = static_cast<int>(feature.level);
+            const bool pinnedDiagnostics = feature.id == "diagnostics";
+            if (pinnedDiagnostics) ImGui::BeginDisabled();
             ImGui::SetNextItemWidth(90.0f);
-            if (ImGui::Combo(
-                    "##level",
-                    &selectedLevel,
-                    levels,
-                    IM_ARRAYSIZE(levels)))
+            const bool levelChanged = ImGui::Combo(
+                "##level",
+                &selectedLevel,
+                levels,
+                IM_ARRAYSIZE(levels));
+            if (pinnedDiagnostics) ImGui::EndDisabled();
+            if (levelChanged)
             {
                 std::string error;
                 if (!SetFeatureLevel(
@@ -1606,6 +1721,8 @@ int WINAPI wWinMain(
             RecordFeatureWork(
                 "market-data",
                 elapsedMicros,
+                snapshot.retainedBytes,
+                snapshot.code.empty() ? 0 : 1,
                 snapshot.hasLatestBar ? 2 : 0,
                 0,
                 applied.stale ? 1 : 0);
@@ -1666,6 +1783,8 @@ int WINAPI wWinMain(
             RecordFeatureWork(
                 "market-data",
                 elapsedMicros,
+                snapshot.retainedBytes,
+                snapshot.code.empty() ? 0 : 1,
                 snapshot.hasLatestBar ? 2 : 0,
                 0,
                 applied.stale ? 1 : 0);

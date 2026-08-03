@@ -33,13 +33,66 @@ namespace trading::app
                 ? base
                 : base + ".segment." + std::to_string(index + 1U);
         }
+
+        bool ValidatePaneContract(
+            const std::string& paneId,
+            float paneHeightWeight,
+            render::PaneValueScale paneValueScale,
+            double fixedMinimum,
+            double fixedMaximum,
+            std::string& error)
+        {
+            if (paneId.empty()) {
+                error = "indicator render pane id is empty";
+                return false;
+            }
+            if (
+                !std::isfinite(paneHeightWeight) ||
+                paneHeightWeight <= 0.0f)
+            {
+                error = "indicator render pane height is invalid";
+                return false;
+            }
+            if (
+                paneValueScale == render::PaneValueScale::Fixed &&
+                (
+                    !std::isfinite(fixedMinimum) ||
+                    !std::isfinite(fixedMaximum) ||
+                    fixedMaximum <= fixedMinimum))
+            {
+                error = "indicator render fixed pane range is invalid";
+                return false;
+            }
+            return true;
+        }
+
+        void ApplyPaneContract(
+            render::Pane& pane,
+            const std::string& paneId,
+            const std::string& paneTitle,
+            float paneHeightWeight,
+            render::PaneValueScale paneValueScale,
+            double fixedMinimum,
+            double fixedMaximum,
+            const render::ValueGrid& cursorGrid,
+            int valueDecimals)
+        {
+            pane.id = paneId;
+            pane.title = paneTitle.empty() ? paneId : paneTitle;
+            pane.heightWeight = paneHeightWeight;
+            pane.valueScale = paneValueScale;
+            pane.fixedMinimum = fixedMinimum;
+            pane.fixedMaximum = fixedMaximum;
+            pane.cursorGrid = cursorGrid;
+            pane.valueDecimals = valueDecimals;
+        }
     }
 
     bool IndicatorRenderAdapter::Configure(
         const IndicatorRenderPlan& plan,
         std::string& error)
     {
-        std::set<std::string> seriesIds;
+        std::set<std::string> renderIds;
         for (const IndicatorOutputBinding& binding : plan.bindings) {
             if (binding.indicatorId.empty()) {
                 error = "indicator render binding id is empty";
@@ -49,35 +102,24 @@ namespace trading::app
                 error = "indicator render output index is out of range";
                 return false;
             }
-            if (binding.paneId.empty()) {
-                error = "indicator render pane id is empty";
+            if (!ValidatePaneContract(
+                    binding.paneId,
+                    binding.paneHeightWeight,
+                    binding.paneValueScale,
+                    binding.fixedMinimum,
+                    binding.fixedMaximum,
+                    error))
+            {
                 return false;
             }
             if (binding.seriesId.empty()) {
                 error = "indicator render series id is empty";
                 return false;
             }
-            if (!seriesIds.insert(binding.seriesId).second) {
+            if (!renderIds.insert(binding.seriesId).second) {
                 error =
-                    "duplicate indicator render series id: " +
+                    "duplicate indicator render id: " +
                     binding.seriesId;
-                return false;
-            }
-            if (
-                !std::isfinite(binding.paneHeightWeight) ||
-                binding.paneHeightWeight <= 0.0f)
-            {
-                error = "indicator render pane height is invalid";
-                return false;
-            }
-            if (
-                binding.paneValueScale == render::PaneValueScale::Fixed &&
-                (
-                    !std::isfinite(binding.fixedMinimum) ||
-                    !std::isfinite(binding.fixedMaximum) ||
-                    binding.fixedMaximum <= binding.fixedMinimum))
-            {
-                error = "indicator render fixed pane range is invalid";
                 return false;
             }
             if (
@@ -85,6 +127,37 @@ namespace trading::app
                 (!std::isfinite(binding.width) || binding.width <= 0.0f))
             {
                 error = "indicator render line width is invalid";
+                return false;
+            }
+        }
+
+        for (const IndicatorReferenceBinding& reference : plan.references) {
+            if (!ValidatePaneContract(
+                    reference.paneId,
+                    reference.paneHeightWeight,
+                    reference.paneValueScale,
+                    reference.fixedMinimum,
+                    reference.fixedMaximum,
+                    error))
+            {
+                return false;
+            }
+            if (reference.referenceId.empty()) {
+                error = "indicator reference-line id is empty";
+                return false;
+            }
+            if (!renderIds.insert(reference.referenceId).second) {
+                error =
+                    "duplicate indicator render id: " +
+                    reference.referenceId;
+                return false;
+            }
+            if (!std::isfinite(reference.value)) {
+                error = "indicator reference-line value is invalid";
+                return false;
+            }
+            if (!std::isfinite(reference.width) || reference.width <= 0.0f) {
+                error = "indicator reference-line width is invalid";
                 return false;
             }
         }
@@ -252,6 +325,23 @@ namespace trading::app
             }
         }
 
+        for (const IndicatorReferenceBinding& reference : plan_.references) {
+            render::Pane* pane =
+                FindOrCreatePane(document, reference, error);
+            if (pane == nullptr) return false;
+
+            render::ReferenceLine line;
+            line.id = reference.referenceId;
+            line.label = reference.label;
+            line.value = reference.value;
+            line.color = reference.color;
+            line.width = reference.width;
+            line.visible = reference.visible;
+            pane->referenceLines.push_back(std::move(line));
+            ++contributedSeries;
+            structureToken = MixRevision(structureToken, 1U);
+        }
+
         document.revision = MixRevision(
             document.revision,
             MixRevision(
@@ -291,6 +381,8 @@ namespace trading::app
         std::size_t bytes =
             plan_.bindings.capacity() *
                 sizeof(IndicatorOutputBinding) +
+            plan_.references.capacity() *
+                sizeof(IndicatorReferenceBinding) +
             caches_.size() *
                 sizeof(std::pair<const std::string, BindingCache>);
 
@@ -300,6 +392,12 @@ namespace trading::app
             bytes += binding.paneTitle.capacity();
             bytes += binding.seriesId.capacity();
             bytes += binding.label.capacity();
+        }
+        for (const IndicatorReferenceBinding& reference : plan_.references) {
+            bytes += reference.paneId.capacity();
+            bytes += reference.paneTitle.capacity();
+            bytes += reference.referenceId.capacity();
+            bytes += reference.label.capacity();
         }
         for (const auto& entry : caches_) {
             bytes += entry.first.capacity();
@@ -340,16 +438,41 @@ namespace trading::app
         }
 
         render::Pane pane;
-        pane.id = binding.paneId;
-        pane.title = binding.paneTitle.empty()
-            ? binding.paneId
-            : binding.paneTitle;
-        pane.heightWeight = binding.paneHeightWeight;
-        pane.valueScale = binding.paneValueScale;
-        pane.fixedMinimum = binding.fixedMinimum;
-        pane.fixedMaximum = binding.fixedMaximum;
-        pane.cursorGrid = binding.cursorGrid;
-        pane.valueDecimals = binding.valueDecimals;
+        ApplyPaneContract(
+            pane,
+            binding.paneId,
+            binding.paneTitle,
+            binding.paneHeightWeight,
+            binding.paneValueScale,
+            binding.fixedMinimum,
+            binding.fixedMaximum,
+            binding.cursorGrid,
+            binding.valueDecimals);
+        document.panes.push_back(std::move(pane));
+        error.clear();
+        return &document.panes.back();
+    }
+
+    render::Pane* IndicatorRenderAdapter::FindOrCreatePane(
+        render::RenderDocument& document,
+        const IndicatorReferenceBinding& binding,
+        std::string& error) const
+    {
+        for (render::Pane& pane : document.panes) {
+            if (pane.id == binding.paneId) return &pane;
+        }
+
+        render::Pane pane;
+        ApplyPaneContract(
+            pane,
+            binding.paneId,
+            binding.paneTitle,
+            binding.paneHeightWeight,
+            binding.paneValueScale,
+            binding.fixedMinimum,
+            binding.fixedMaximum,
+            binding.cursorGrid,
+            binding.valueDecimals);
         document.panes.push_back(std::move(pane));
         error.clear();
         return &document.panes.back();

@@ -1,4 +1,5 @@
 #include "../app/default_indicator_render_plan.h"
+#include "../core/jma_indicator.h"
 
 #include <cstdio>
 #include <cstdlib>

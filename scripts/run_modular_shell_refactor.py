@@ -13,4 +13,8 @@ new = (
 if source.count(old) != 1:
     raise RuntimeError("modular refactor range helper was not found")
 source = source.replace(old, new, 1)
-exec(compile(source, str(script_path), "exec"), {"__name__": "__main__"})
+namespace = {
+    "__name__": "__main__",
+    "__file__": str(script_path),
+}
+exec(compile(source, str(script_path), "exec"), namespace)

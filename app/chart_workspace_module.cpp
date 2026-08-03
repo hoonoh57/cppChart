@@ -21,7 +21,11 @@ namespace trading::app
         }
     }
 
-    ChartWorkspaceModule::ChartWorkspaceModule() = default;
+    ChartWorkspaceModule::ChartWorkspaceModule()
+        : completedVolume_(
+            std::make_shared<const std::vector<render::HistogramPoint>>())
+    {
+    }
 
     bool ChartWorkspaceModule::SetLevel(
         FeatureLevel level,
@@ -32,10 +36,13 @@ namespace trading::app
 
         if (level == FeatureLevel::Off) {
             document_.reset();
+            completedVolume_ =
+                std::make_shared<const std::vector<render::HistogramPoint>>();
             state_ = ChartWorkspaceState::Empty;
             sourceRevision_ = 0;
+            completedRevision_ = 0;
             documentRevision_ = 0;
-            visibleBarLimit_ = 0;
+            sourceBarCount_ = 0;
             error_.clear();
         }
 
@@ -53,9 +60,7 @@ namespace trading::app
         const std::string& workspaceId,
         const std::string& title,
         const std::string& seriesId,
-        const std::vector<Bar>& visibleBars,
-        std::uint64_t sourceRevision,
-        std::size_t visibleBarLimit,
+        const ChartMarketSource& source,
         std::string& error)
     {
         if (workspaceId.empty()) {
@@ -66,16 +71,18 @@ namespace trading::app
             error = "chart series id is empty";
             return false;
         }
-        if (visibleBarLimit == 0) {
-            error = "chart visible-bar limit is zero";
+        if (source.barCount == 0 || !source.hasLiveBar) {
+            error = "chart source bars are empty";
             return false;
         }
-        if (visibleBars.empty()) {
-            error = "chart source bars are empty";
+        if (!source.completedBars) {
+            error = "chart completed-bar history is missing";
             return false;
         }
 
         std::uint64_t nextDocumentRevision = 0;
+        std::shared_ptr<const std::vector<render::HistogramPoint>>
+            completedVolume;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (!IsVisibleLevel(level_)) {
@@ -87,22 +94,38 @@ namespace trading::app
             }
             if (
                 state_ == ChartWorkspaceState::Ready &&
-                sourceRevision_ == sourceRevision &&
-                visibleBarLimit_ == visibleBarLimit &&
+                sourceRevision_ == source.revision &&
                 document_ != nullptr)
             {
                 error.clear();
                 return true;
             }
+
             nextDocumentRevision = documentRevision_ + 1;
+            if (
+                completedRevision_ == source.completedRevision &&
+                completedVolume_)
+            {
+                completedVolume = completedVolume_;
+            }
         }
+
+        if (!completedVolume) {
+            completedVolume = BuildCompletedVolume(source.completedBars);
+        }
+
+        render::MarketChartSource renderSource;
+        renderSource.completedBars = source.completedBars;
+        renderSource.liveBar = source.liveBar;
+        renderSource.hasLiveBar = source.hasLiveBar;
+        renderSource.completedVolume = completedVolume;
 
         render::RenderDocument candidate =
             render::BuildMarketChartDocument(
                 workspaceId,
                 title,
                 seriesId,
-                visibleBars,
+                renderSource,
                 nextDocumentRevision);
 
         std::string validationError;
@@ -124,16 +147,18 @@ namespace trading::app
             }
             if (
                 state_ == ChartWorkspaceState::Ready &&
-                sourceRevision_ == sourceRevision &&
-                visibleBarLimit_ == visibleBarLimit &&
+                sourceRevision_ == source.revision &&
                 document_ != nullptr)
             {
                 error.clear();
                 return true;
             }
-            sourceRevision_ = sourceRevision;
+
+            sourceRevision_ = source.revision;
+            completedRevision_ = source.completedRevision;
             documentRevision_ = immutable->revision;
-            visibleBarLimit_ = visibleBarLimit;
+            sourceBarCount_ = source.barCount;
+            completedVolume_ = std::move(completedVolume);
             document_ = std::move(immutable);
             error_.clear();
             state_ = ChartWorkspaceState::Ready;
@@ -157,8 +182,9 @@ namespace trading::app
         result.state = state_;
         result.level = level_;
         result.sourceRevision = sourceRevision_;
+        result.completedRevision = completedRevision_;
         result.documentRevision = documentRevision_;
-        result.visibleBarLimit = visibleBarLimit_;
+        result.sourceBarCount = sourceBarCount_;
         result.error = error_;
         result.document = document_;
         if (document_ != nullptr) {
@@ -170,8 +196,7 @@ namespace trading::app
     }
 
     bool ChartWorkspaceModule::NeedsUpdate(
-        std::uint64_t sourceRevision,
-        std::size_t visibleBarLimit) const noexcept
+        std::uint64_t sourceRevision) const noexcept
     {
         std::lock_guard<std::mutex> lock(mutex_);
         return
@@ -179,8 +204,7 @@ namespace trading::app
             (
                 document_ == nullptr ||
                 state_ != ChartWorkspaceState::Ready ||
-                sourceRevision_ != sourceRevision ||
-                visibleBarLimit_ != visibleBarLimit);
+                sourceRevision_ != sourceRevision);
     }
 
     const char* ChartWorkspaceModule::StateName(
@@ -229,7 +253,7 @@ namespace trading::app
             for (const render::CandleSeries& series : pane.candles) {
                 result += DynamicStringBytes(series.id);
                 result += DynamicStringBytes(series.label);
-                result += series.bars.capacity() * sizeof(Bar);
+                result += series.bars.RetainedBytes();
             }
             for (const render::LineSeries& series : pane.lines) {
                 result += DynamicStringBytes(series.id);
@@ -239,7 +263,7 @@ namespace trading::app
             for (const render::HistogramSeries& series : pane.histograms) {
                 result += DynamicStringBytes(series.id);
                 result += DynamicStringBytes(series.label);
-                result += series.points.capacity() * sizeof(render::HistogramPoint);
+                result += series.points.RetainedBytes();
             }
             for (const render::MarkerSeries& series : pane.markers) {
                 result += DynamicStringBytes(series.id);
@@ -248,5 +272,24 @@ namespace trading::app
             }
         }
         return result;
+    }
+
+    std::shared_ptr<const std::vector<render::HistogramPoint>>
+    ChartWorkspaceModule::BuildCompletedVolume(
+        const std::shared_ptr<const std::vector<Bar>>& completedBars)
+    {
+        auto points =
+            std::make_shared<std::vector<render::HistogramPoint>>();
+        if (completedBars) {
+            points->reserve(completedBars->size());
+            for (const Bar& bar : *completedBars) {
+                render::HistogramPoint point;
+                point.timestampMs = bar.closeTimestampMs;
+                point.value = static_cast<double>(bar.volume);
+                point.positive = bar.close >= bar.open;
+                points->push_back(point);
+            }
+        }
+        return points;
     }
 }

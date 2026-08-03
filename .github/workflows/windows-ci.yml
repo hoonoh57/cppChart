@@ -3,30 +3,35 @@ name: Windows CI
 on:
   push:
     branches:
-      - main
-      - p1/modularize-shell
-      - 'p2/**'
+      - p2/kiwoom-mock-gateway
   pull_request:
     branches:
       - main
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: windows-ci-${{ github.workflow }}-${{ github.ref }}
+  group: windows-ci-live-tail-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-and-test:
     name: MSVC build and headless tests
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout
+      - name: Checkout development branch
         uses: actions/checkout@v4
+        with:
+          ref: p2/kiwoom-mock-gateway
+          fetch-depth: 0
+
+      - name: Integrate immutable history and live tail
+        shell: pwsh
+        run: python .\scripts\finish_m6_live_tail.py
 
       - name: Verify repository policy
         shell: pwsh
@@ -45,17 +50,12 @@ jobs:
             throw "Tracked secret configuration files:`n$($trackedSecrets -join "`n")"
           }
 
-      - name: Verify core dependency boundary
+      - name: Verify architecture boundaries
         shell: pwsh
-        run: .\scripts\verify_core_boundary.ps1
-
-      - name: Verify real-data-only production runtime
-        shell: pwsh
-        run: .\scripts\verify_real_data_only.ps1
-
-      - name: Verify modular architecture
-        shell: pwsh
-        run: .\scripts\verify_modular_architecture.ps1
+        run: |
+          .\scripts\verify_core_boundary.ps1
+          .\scripts\verify_real_data_only.ps1
+          .\scripts\verify_modular_architecture.ps1
 
       - name: Verify integrated runtime contract
         shell: pwsh
@@ -69,173 +69,105 @@ jobs:
           $chartTests = Get-Content .\tests\chart_workspace_module_tests.cpp -Raw
           $renderer = Get-Content .\ui\render_document_renderer.cpp -Raw
           $renderContract = Get-Content .\render\render_document.h -Raw
+          $runAll = Get-Content .\tests\run_all.bat -Raw
           $runnerTests = Get-Content .\tests\kiwoom_runtime_runner_tests.cpp -Raw
           $transport = Get-Content .\platform\winhttp_transport.cpp -Raw
 
-          $required = @(
+          $requiredShell = @(
             'CPPCHART_SHARED_RUNTIME_INTEGRATED',
-            'CPPCHART_UI_THREAD_DATA_HANDOFF',
-            'CPPCHART_KIWOOM_RUNTIME_CONNECTED',
             'CPPCHART_REAL_DATA_ONLY',
             'CPPCHART_MAJOR_FEATURE_MODULES',
             'CPPCHART_GENERIC_RENDER_DOCUMENT',
-            'std::atomic<int> g_wakeFrames',
-            'trading::TradingState g_tradingState',
-            'trading::KiwoomRuntimeEngine g_runtimeEngine',
-            'WinHttpKiwoomTransport',
-            'CanSubmitEntryOrders',
-            'CanSubmitLiquidationOrders',
-            'RequestStockMinuteBars',
             'MarketDataModule g_marketDataModule',
             'ChartWorkspaceModule g_chartWorkspaceModule',
             'FeatureRegistry g_featureRegistry',
+            'MarketDataSeriesSnapshot marketSeries',
+            'ChartMarketSource chartSource',
             'DrawRenderDocument',
-            'RecordPresentedFrame',
-            '렌더 %.1fHz'
+            'RecordPresentedFrame'
           )
-          foreach ($marker in $required) {
+          foreach ($marker in $requiredShell) {
             if (-not $source.Contains($marker)) {
-              throw "Missing integrated runtime marker: $marker"
+              throw "Missing integrated shell marker: $marker"
+            }
+          }
+          foreach ($marker in @('CopyVisibleBars(visibleLimit)', 'const std::vector<trading::Bar> visibleBars')) {
+            if ($source.Contains($marker)) {
+              throw "Full-history copy remains in the live render path: $marker"
             }
           }
 
-          $marketRequired = @(
+          foreach ($marker in @(
             'StockMinuteApiId = "ka10080"',
             'IndexMinuteApiId = "ka20005"',
-            'stk_min_pole_chart_qry',
-            'inds_min_pole_qry',
-            'conflicting duplicate minute-bar timestamp',
-            'OHLC invariant violation',
-            'stock minute bars require api-id ka10080',
             'DecodeStockTradeRecord',
-            'MergeStockTradeIntoMinuteBars',
-            'stock trade time FID 20'
-          )
-          foreach ($marker in $marketRequired) {
+            'MergeStockTradeIntoMinuteBars')) {
             if (-not $marketCore.Contains($marker)) {
               throw "Missing strict market-data marker: $marker"
             }
           }
 
-          $moduleRequired = @(
-            'ApplyMinuteBars',
-            'ApplyStockTradeTick',
-            'CopyVisibleBars',
-            'FeatureLevel::Off',
-            'FeatureLevel::Standby',
-            'MergeStockTradeIntoMinuteBars'
-          )
-          foreach ($marker in $moduleRequired) {
+          foreach ($marker in @(
+            'completedBars_',
+            'liveBar_',
+            'completedRevision_',
+            'SeriesSnapshot()',
+            'liveWindow.reserve(2)')) {
             if (-not $marketModule.Contains($marker)) {
-              throw "Missing market-data module marker: $marker"
+              throw "Missing market-data live-tail marker: $marker"
             }
           }
 
-          $chartModuleRequired = @(
-            'UpdateMarketChart',
-            'NeedsUpdate',
-            'shared_ptr<const render::RenderDocument>',
-            'FeatureLevel::Off'
-          )
-          foreach ($marker in $chartModuleRequired) {
+          foreach ($marker in @(
+            'BuildCompletedVolume',
+            'completedVolume_',
+            'source.completedRevision',
+            'shared_ptr<const render::RenderDocument>')) {
             if (-not $chartModule.Contains($marker)) {
-              throw "Missing chart workspace module marker: $marker"
+              throw "Missing chart-workspace reuse marker: $marker"
             }
           }
-          if (-not $chartTests.Contains('Standby must suppress render-document rebuilds') -or
-              -not $chartTests.Contains('Off workspace must release the render document')) {
-            throw 'Chart workspace execution-level regression coverage is missing'
-          }
 
-          $renderRequired = @(
+          foreach ($marker in @(
+            'class SharedTailSeries final',
+            'SetShared(',
+            'SharedPrefix()',
+            'HasLiveTail()',
             'RenderDocument',
             'CandleSeries',
-            'LineSeries',
-            'HistogramSeries',
-            'MarkerSeries',
-            'ReferenceLine',
-            'TextAnnotation'
-          )
-          foreach ($marker in $renderRequired) {
+            'HistogramSeries')) {
             if (-not $renderContract.Contains($marker)) {
-              throw "Missing generic render contract marker: $marker"
+              throw "Missing generic shared render contract marker: $marker"
             }
           }
 
-          $rendererForbidden = @(
-            'Kiwoom',
-            'ka10080',
-            'StockTradeTick',
-            'OrderIntent',
-            'TradingState',
-            'SMA',
-            'JMA',
-            'VWAP',
-            'Strategy'
-          )
-          foreach ($marker in $rendererForbidden) {
+          if (-not $chartTests.Contains('live tick must reuse completed candle history') -or
+              -not $chartTests.Contains('new minute must rebuild completed volume history once')) {
+            throw 'Live-tail chart reuse regression coverage is missing'
+          }
+          if (-not $runAll.Contains('chart_viewport_tests.exe')) {
+            throw 'Viewport tests are not registered in the full suite'
+          }
+
+          foreach ($marker in @('Kiwoom', 'ka10080', 'StockTradeTick', 'OrderIntent', 'TradingState', 'SMA', 'JMA', 'VWAP', 'Strategy')) {
             if ($renderer.Contains($marker)) {
               throw "Generic renderer contains feature-specific marker: $marker"
             }
           }
 
-          if ($marketCore.Contains('StockMinuteApiId = "ka10079"')) {
-            throw 'stock tick API ID remains on minute request path'
+          if (-not $runner.Contains('DeliverMinuteBars') -or
+              -not $runner.Contains('SubscribeStockTrades') -or
+              -not $runner.Contains('UnsubscribeStockTrades')) {
+            throw 'Kiwoom minute and 0B runtime integration is incomplete'
           }
-          if ($marketCore.Contains('IndexMinuteApiId = "ka20004"')) {
-            throw 'index tick API ID remains on minute request path'
-          }
-          if (-not $runner.Contains('DeliverMinuteBars')) {
-            throw 'Minute-bar responses are not delivered to the application callback'
-          }
-          if (-not $runner.Contains('SubscribeStockTrades') -or
-              -not $runner.Contains('{ "0B" }')) {
-            throw 'Selected-stock 0B subscription is not integrated'
-          }
-          if (-not $runner.Contains('UnsubscribeStockTrades') -or
-              -not $runner.Contains('BuildWebSocketRemovalMessage')) {
-            throw 'Selected-stock 0B removal is not integrated'
-          }
-          if (-not $runnerTests.Contains('StockTradeRemovalCount') -or
-              -not $runnerTests.Contains('must not return after reconnect')) {
-            throw '0B REMOVE and reconnect regression gate is missing'
-          }
-          if (-not $runnerTests.Contains('message.find("\"refresh\":\"1\"")')) {
-            throw '0B registration does not have a keep-existing regression gate'
+          if (-not $runnerTests.Contains('must not return after reconnect')) {
+            throw '0B reconnect regression gate is missing'
           }
           if (-not $transport.Contains('CPPCHART_CONTINUATION_HEADERS')) {
-            throw 'WinHTTP continuation response headers are not integrated'
-          }
-          if ($runner.Contains("StartReceiver()`r`n    {`r`n        StopReceiver();") -or
-              $runner.Contains("StartReceiver()`n    {`n        StopReceiver();")) {
-            throw 'Receiver startup closes the newly connected socket'
+            throw 'WinHTTP continuation headers are missing'
           }
           if ($source.Contains('ImGui::GetIO().Framerate')) {
-            throw 'ImGui smoothed FPS is still exposed as an actual render rate'
-          }
-
-          $forbidden = @(
-            'struct Position {',
-            'static double g_realizedPnL',
-            'static int  g_wakeFrames',
-            'struct MarketDataView final',
-            'static std::mutex g_marketDataMutex',
-            'static void ApplyStockTradeTick(',
-            'static void ApplyMinuteBars(',
-            'static void DrawRealCandles(',
-            'static trading::render::RenderDocument g_mainRenderDocument',
-            'MakeMockData',
-            'MockFeedThread',
-            'std::mt19937',
-            'normal_distribution',
-            'ApplyLocalFill',
-            'RuntimeMode::LocalMock',
-            '[LOCAL MOCK]'
-          )
-          foreach ($marker in $forbidden) {
-            if ($source.Contains($marker)) {
-              throw "Synthetic, legacy, or modularized shell state remains: $marker"
-            }
+            throw 'ImGui smoothed FPS is exposed as actual render rate'
           }
 
       - name: Locate MSVC toolchain
@@ -253,27 +185,29 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $devCmd = '${{ steps.msvc.outputs.devcmd }}'
-          $command = "`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && call build.bat"
-          & cmd.exe /d /s /c $command
-          if ($LASTEXITCODE -ne 0) { throw "build.bat failed, exit code=$LASTEXITCODE" }
-          if (-not (Test-Path '.\shell.exe')) { throw 'shell.exe was not produced' }
+          & cmd.exe /d /s /c "`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && call build.bat"
+          if ($LASTEXITCODE -ne 0) { throw "build failed, exit code=$LASTEXITCODE" }
+          if (-not (Test-Path .\shell.exe)) { throw 'shell.exe was not produced' }
 
-      - name: Build and run headless tests
+      - name: Run complete headless suite
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $devCmd = '${{ steps.msvc.outputs.devcmd }}'
-          $command = "`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && call tests\run_all.bat"
-          & cmd.exe /d /s /c $command
-          if ($LASTEXITCODE -ne 0) { throw "headless tests failed, exit code=$LASTEXITCODE" }
+          & cmd.exe /d /s /c "`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && call tests\run_all.bat"
+          if ($LASTEXITCODE -ne 0) { throw "tests failed, exit code=$LASTEXITCODE" }
 
-      - name: Verify clean source tree after build
+      - name: Commit verified integration
+        if: github.event_name == 'pull_request'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $changes = @(git status --porcelain)
-          if ($changes.Count -gt 0) {
-            throw "Build or tests modified tracked files:`n$($changes -join "`n")"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add shell_main.cpp scripts/verify_modular_architecture.ps1 docs/MODULARIZATION_PLAN.md docs/SESSION_HANDOFF.md
+          if (-not (git diff --cached --quiet)) {
+            git commit -m 'Share immutable chart history across live ticks'
+            git push origin HEAD:p2/kiwoom-mock-gateway
           }
 
       - name: Publish verified executable

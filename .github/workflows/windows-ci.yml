@@ -39,9 +39,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw 'indicator legend/property patch failed'
           }
+          git restore -- .\.github\workflows\windows-ci.yml
+          git restore -- .\.github\workflows\apply-indicator-legend.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm .\.github\workflows\apply-indicator-legend.yml
           git add -A
           git commit -m 'Add interactive indicator legends and properties'
           git push origin HEAD:p2/kiwoom-mock-gateway

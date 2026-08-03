@@ -15,9 +15,10 @@ Read these before changing code:
 - PR: `#1`, Draft; do not merge before real-data and account acceptance
 - production policy: real Kiwoom mock data only; no synthetic fallback
 - chart interaction implementation commit: `cb29d61c4b768a3c9e85a97434ed4c3e5f17d774`
-- verification-only CI configuration commit: `24cb554db13b3f8f61ca228a977aadd44641ac36`
-- successful Windows CI run: `30807173805`
-- artifact digest: `sha256:20a820a2082117f263aa837c879ec86e0f261b68270a0e9826e8000cf65892bb`
+- pane crosshair time-label implementation commit: `5436c1988f80365e8b91d78384bb6da3f5261e8a`
+- verified cleanup source head: `e42c5a38fe994c043fd75a62efee8105e89f30d9`
+- successful Windows CI run: `30820961609`
+- artifact digest: `sha256:1c601f969e0d496e70d6793ea776bc2d6d318ecb82d287919528d4644f926011`
 
 ## Product objective
 
@@ -39,6 +40,8 @@ a monolithic `shell_main.cpp`.
   document builder; the renderer does not contain a Korean-market branch.
 - Candle and histogram body widths derive from one shared axis-slot geometry;
   a pane must never infer width from only the series types it contains.
+- Crosshair time-label placement is generic renderer geometry and is clamped to
+  the active pane. It must not depend on a candle or indicator type.
 - `Off` stops subscriptions, calculation, rendering, and retained memory;
   `Standby` retains state but stops expensive work; `Visible` renders without
   strategy execution; `Active` enables the complete feature.
@@ -64,58 +67,46 @@ a monolithic `shell_main.cpp`.
 
 ### Finding 1 — calendar gaps consumed X-axis width
 
-The user loaded real `005930` one-minute data. The response contained 900 real
-`ka10080` rows, but absolute timestamp mapping created huge overnight/weekend
-blank regions and compressed valid candles into clusters.
-
-Correction:
-
-- `OrdinalTimeAxis` maps each actual bar to one equal horizontal slot;
-- overnight and session gaps consume no empty pixel span;
-- actual timestamps remain available for labels, crosshair, tooltip, and date
-  boundaries;
-- the initial viewport opens a recent usable bar window.
+The renderer originally mapped absolute elapsed time to pixels, creating huge
+blank overnight and weekend regions. `OrdinalTimeAxis` now maps every real bar
+to one equal slot while retaining real timestamps for labels and boundaries.
 
 ### Finding 2 — price candles and volume bars used different widths
 
-The price pane derived body width from its visible candle count. The volume pane
-contains no candle series, so it fell back to one item and produced maximum-width
-histograms. The volume bars therefore overlapped and appeared crushed.
-
-Correction:
-
-- `SeriesBodyWidth` derives one body width from plot width and the shared visible
-  ordinal-axis span;
-- candle and histogram panes use the same slot pitch and fill ratio;
-- `series_geometry_tests` prevents pane-local width calculations from returning.
+The volume pane contained no candle series and calculated an unrelated maximum
+body width. `SeriesBodyWidth` now derives candle and histogram width from the
+same plot width and visible ordinal-axis span.
 
 ### Finding 3 — drag did not pan
 
-The invisible chart surface captured only the left mouse button while panning
-was implemented only for the right button. The intended drag path was therefore
-unreliable and did not match normal chart interaction.
-
-Correction:
-
-- the surface explicitly captures left and right mouse buttons;
-- either left-button or right-button horizontal drag pans the viewport;
-- manual pan disables auto-follow until the viewport returns to the latest edge
-  or the user double-clicks to reset.
+The chart surface did not reliably capture the button used by the pan path.
+Both left and right horizontal drag now pan the same viewport and disable
+latest auto-follow until reset or return to the latest edge.
 
 ### Finding 4 — horizontal crosshair was forced to candle close
 
-The cursor Y value was initially calculated from the mouse, but the renderer
-later replaced the horizontal line with the nearest candle close. This made the
-line jump vertically and prevented subpanels from reporting their own values.
+The renderer replaced the mouse Y value with the nearest candle close. The
+horizontal line now remains at the mouse-derived value in the hovered pane.
+The price pane snaps through its configured legal quotation ladder, while the
+volume pane reports an integer volume value. Indicator panes can define their
+own value grid and decimals without renderer changes.
+
+### Finding 5 — crosshair timestamp had no visible floating label
+
+The vertical line was synchronized across panes, but the selected timestamp was
+only available inside the candle tooltip. Moving over a volume or future
+indicator pane therefore showed the pane value but not the time.
 
 Correction:
 
-- the horizontal line remains at the mouse-derived value in the hovered pane;
-- the price pane snaps that value to its configured legal quotation ladder;
-- the volume pane snaps to an integer volume value;
-- future indicator panes may supply their own decimals or value grid;
-- only the vertical time crosshair is synchronized across panes;
-- the OHLCV tooltip still resolves the nearest candle independently.
+- every hovered pane draws a floating `MM/DD HH:mm` label at the vertical
+  crosshair position;
+- the bottom pane uses its reserved time-axis band;
+- other panes place the label inside their lower edge;
+- `PlaceCenteredHorizontalLabel` clamps the label within pane boundaries;
+- the pane-local Y value label remains visible at the same time;
+- `cursor_label_layout_tests` covers centered, left-edge, right-edge, and
+  oversized label placement.
 
 ## Current chart foundation
 
@@ -128,6 +119,7 @@ Correction:
 - aligned candle and histogram widths
 - current-price line and label
 - vertical timestamp crosshair synchronized across panes
+- pane-local floating timestamp label
 - pane-local horizontal value crosshair and right-axis label
 - KRX equity quotation-step snapping configured by the stock chart builder
 - volume integer cursor value
@@ -137,7 +129,7 @@ Correction:
 
 ## Verification result
 
-Windows CI run `30807173805` passed:
+Windows CI run `30820961609` passed:
 
 - repository and secret-file policy
 - core dependency boundary
@@ -147,7 +139,7 @@ Windows CI run `30807173805` passed:
 - left/right drag interaction markers
 - pane-aware `ValueGrid` contract
 - price/volume shared body-width geometry
-- Korean equity tick-boundary fixtures
+- pane crosshair time-label geometry and edge clamping
 - MSVC x64 `shell.exe` build
 - complete headless test suite
 - clean source-tree check
@@ -159,19 +151,14 @@ A focused real-screen test is required before M6 is declared complete.
 
 Validate:
 
-1. candle and volume histogram bodies have identical horizontal width and center;
-2. left-button drag pans horizontally;
-3. right-button drag also pans horizontally;
-4. wheel zoom remains functional;
-5. double-click returns to the latest bars;
-6. the price-pane horizontal crosshair follows mouse Y and snaps to the legal
-   Korean equity quotation unit for that price band;
-7. the volume-pane horizontal crosshair follows mouse Y and displays that
-   panel's integer volume value;
-8. the vertical crosshair remains aligned between price and volume panes;
-9. the OHLCV tooltip remains tied to the nearest candle rather than the cursor
-   value line;
-10. real `0B` updates do not reset a manually panned viewport.
+1. price-pane hover shows both the quotation-step-adjusted price label and a
+   floating timestamp label at the crosshair X position;
+2. volume-pane hover shows both the integer volume label and the same timestamp;
+3. the time label remains inside the pane near the left and right chart edges;
+4. left and right drag still pan horizontally;
+5. wheel zoom and double-click latest reset still work;
+6. candle and volume bodies remain aligned;
+7. real `0B` updates do not reset a manually panned viewport.
 
 Do not proceed to M7 until these visual interactions are confirmed.
 

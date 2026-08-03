@@ -9,12 +9,15 @@ $requiredFiles = @(
     'app\indicator_module.cpp',
     'app\indicator_render_adapter.h',
     'app\indicator_render_adapter.cpp',
+    'app\default_indicator_render_plan.h',
+    'app\default_indicator_render_plan.cpp',
     'app\chart_workspace_module.h',
     'app\chart_workspace_module.cpp',
     'tests\indicator_module_tests.cpp',
     'tests\indicator_module_revision_tests.cpp',
     'tests\indicator_render_adapter_tests.cpp',
     'tests\indicator_reference_adapter_tests.cpp',
+    'tests\default_indicator_render_plan_tests.cpp',
     'tests\chart_workspace_indicator_tests.cpp'
 )
 foreach ($relative in $requiredFiles) {
@@ -94,6 +97,24 @@ foreach ($forbidden in @(
     'series.spec.type == "ADX"')) {
     if ($adapter.Contains($forbidden)) {
         throw "Indicator render adapter contains a central type switch: $forbidden"
+    }
+}
+
+$defaultPlan = Get-Content (
+    Join-Path $repoRoot 'app\default_indicator_render_plan.cpp') -Raw
+foreach ($marker in @(
+    'spec.type == "SMA"',
+    'spec.type == "JMA"',
+    'spec.type == "VWAP"',
+    'spec.type == "OBV"',
+    'spec.type == "ADX"',
+    'JmaSlopeOutput',
+    'ObvDirectionOutput',
+    'AdxValueOutput',
+    'VwapLower2Output',
+    'candidate.references.push_back')) {
+    if (-not $defaultPlan.Contains($marker)) {
+        throw "Default indicator render plan is missing: $marker"
     }
 }
 
@@ -177,6 +198,20 @@ foreach ($marker in @(
     }
 }
 
+$defaultPlanTests = Get-Content (
+    Join-Path $repoRoot 'tests\default_indicator_render_plan_tests.cpp') -Raw
+foreach ($marker in @(
+    'SMA must map to a standard price line',
+    'JMA slope must map to a symmetric histogram pane',
+    'VWAP five-output price overlay contract mismatch',
+    'OBV Direction must map to a standard histogram',
+    'ADX 20/25 reference plan mismatch',
+    'default render plan must satisfy generic adapter contract')) {
+    if (-not $defaultPlanTests.Contains($marker)) {
+        throw "Default indicator render-plan regression coverage is missing: $marker"
+    }
+}
+
 $workspaceTests = Get-Content (
     Join-Path $repoRoot 'tests\chart_workspace_indicator_tests.cpp') -Raw
 foreach ($marker in @(
@@ -196,13 +231,15 @@ foreach ($marker in @(
     'indicator_module_revision_tests.exe',
     'indicator_render_adapter_tests.exe',
     'indicator_reference_adapter_tests.exe',
+    'default_indicator_render_plan_tests.exe',
     'chart_workspace_indicator_tests.exe',
     'app\indicator_module.cpp',
     'app\indicator_render_adapter.cpp',
+    'app\default_indicator_render_plan.cpp',
     'app\chart_workspace_module.cpp')) {
     if (-not $runAll.Contains($marker)) {
         throw "Indicator module/adapter/workspace test is not in the complete suite: $marker"
     }
 }
 
-Write-Host 'Indicator module cache, generic line/histogram/reference adapter, and chart workspace composition contracts passed.' -ForegroundColor Green
+Write-Host 'Indicator module, generic render adapter, default plan, and chart workspace composition contracts passed.' -ForegroundColor Green

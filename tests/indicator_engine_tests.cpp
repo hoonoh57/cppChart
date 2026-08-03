@@ -59,6 +59,20 @@ namespace
         return spec;
     }
 
+    void TestFixedOutputFrame()
+    {
+        trading::indicators::IndicatorValue value;
+        value.SetOutput(3, 42.5);
+        Check(value.outputCount == 4U,
+              "fixed output frame must extend to the assigned channel");
+        Check(!value.IsReady(0) && value.IsReady(3),
+              "fixed output frame readiness mask mismatch");
+        CheckNear(value.Value(3), 42.5, 1e-12,
+                  "fixed output frame value mismatch");
+        CheckNear(value.Value(7), 0.0, 1e-12,
+                  "unassigned output channel must read as zero");
+    }
+
     void TestSpecSerialization()
     {
         using namespace trading::indicators;
@@ -148,13 +162,13 @@ namespace
               "SMA batch calculation failed");
         Check(batch.size() == bars.size(),
               "SMA batch result count mismatch");
-        Check(!batch[0].ready && !batch[1].ready,
+        Check(!batch[0].IsReady(0) && !batch[1].IsReady(0),
               "SMA warmup readiness mismatch");
-        Check(batch[2].ready && batch[3].ready,
+        Check(batch[2].IsReady(0) && batch[3].IsReady(0),
               "SMA ready state mismatch");
-        CheckNear(batch[2].value, 20.0, 1e-12,
+        CheckNear(batch[2].Value(0), 20.0, 1e-12,
                   "SMA first ready value mismatch");
-        CheckNear(batch[3].value, 30.0, 1e-12,
+        CheckNear(batch[3].Value(0), 30.0, 1e-12,
                   "SMA rolling value mismatch");
 
         IndicatorInstance incremental = registry.Create(SmaSpec(3), error);
@@ -169,9 +183,11 @@ namespace
                   "incremental SMA update failed");
             Check(live.timestampMs == batch[index].timestampMs,
                   "batch/incremental timestamp parity mismatch");
-            Check(live.ready == batch[index].ready,
+            Check(live.outputCount == batch[index].outputCount,
+                  "batch/incremental output-count parity mismatch");
+            Check(live.readyMask == batch[index].readyMask,
                   "batch/incremental readiness parity mismatch");
-            CheckNear(live.value, batch[index].value, 1e-12,
+            CheckNear(live.Value(0), batch[index].Value(0), 1e-12,
                       "batch/incremental value parity mismatch");
         }
     }
@@ -194,20 +210,20 @@ namespace
               "second SMA update failed");
 
         IndicatorValue value = instance.Update(MakeBar(30, 3000));
-        Check(value.ready, "third SMA value must be ready");
-        CheckNear(value.value, 20.0, 1e-12,
+        Check(value.IsReady(0), "third SMA value must be ready");
+        CheckNear(value.Value(0), 20.0, 1e-12,
                   "initial live-tail SMA mismatch");
 
         value = instance.Update(MakeBar(60, 3000));
         Check(value.replaced,
               "same-timestamp update must replace the mutable live tail");
-        CheckNear(value.value, 30.0, 1e-12,
+        CheckNear(value.Value(0), 30.0, 1e-12,
                   "same-timestamp SMA replacement mismatch");
 
         value = instance.Update(MakeBar(40, 4000));
         Check(!value.replaced,
               "new timestamp must append instead of replace");
-        CheckNear(value.value, 40.0, 1e-12,
+        CheckNear(value.Value(0), 40.0, 1e-12,
                   "post-replacement rolling SMA mismatch");
 
         value = instance.Update(MakeBar(50, 3500));
@@ -241,6 +257,7 @@ namespace
 
 int main()
 {
+    TestFixedOutputFrame();
     TestSpecSerialization();
     TestRegistryAndValidation();
     TestBatchIncrementalParity();

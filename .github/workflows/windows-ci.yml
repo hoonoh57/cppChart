@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -27,6 +27,25 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # BEGIN TEMP INDICATOR LEGEND APPLY
+      - name: Apply interactive indicator legends
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git fetch origin p2/kiwoom-mock-gateway
+          git switch -C p2/kiwoom-mock-gateway origin/p2/kiwoom-mock-gateway
+          python .\scripts\apply_indicator_legend_properties.py
+          if ($LASTEXITCODE -ne 0) {
+            throw 'indicator legend/property patch failed'
+          }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .\.github\workflows\apply-indicator-legend.yml
+          git add -A
+          git commit -m 'Add interactive indicator legends and properties'
+          git push origin HEAD:p2/kiwoom-mock-gateway
+      # END TEMP INDICATOR LEGEND APPLY
 
       - name: Verify repository policy
         shell: pwsh

@@ -9,6 +9,8 @@ $requiredFiles = @(
     '.\app\market_data_module.cpp',
     '.\app\chart_workspace_module.h',
     '.\app\chart_workspace_module.cpp',
+    '.\app\indicator_module.h',
+    '.\app\indicator_module.cpp',
     '.\core\indicator_engine.h',
     '.\core\indicator_engine.cpp',
     '.\core\sma_indicator.h',
@@ -40,7 +42,8 @@ $requiredFiles = @(
     '.\tests\jma_indicator_tests.cpp',
     '.\tests\obv_indicator_tests.cpp',
     '.\tests\adx_indicator_tests.cpp',
-    '.\tests\vwap_indicator_tests.cpp'
+    '.\tests\vwap_indicator_tests.cpp',
+    '.\tests\indicator_module_tests.cpp'
 )
 
 foreach ($file in $requiredFiles) {
@@ -270,6 +273,29 @@ foreach ($contract in $indicatorContracts) {
     }
 }
 
+$indicatorModuleHeader = Get-Content '.\app\indicator_module.h' -Raw
+foreach ($marker in @(
+    'class IndicatorModule final',
+    'struct IndicatorMarketSource final',
+    'struct IndicatorSeriesSnapshot final',
+    'FeatureMetrics metrics')) {
+    if (-not $indicatorModuleHeader.Contains($marker)) {
+        throw "Indicator module contract is missing: $marker"
+    }
+}
+
+$indicatorModule = Get-Content '.\app\indicator_module.cpp' -Raw
+foreach ($marker in @(
+    'completedRevision_ != source.completedRevision',
+    'runtime.instance.Update(source.liveBar)',
+    'runtime.completedValues',
+    'metrics_.mergedEventCount',
+    'level == FeatureLevel::Visible ||')) {
+    if (-not $indicatorModule.Contains($marker)) {
+        throw "Indicator module lifecycle/cache contract is missing: $marker"
+    }
+}
+
 $indicatorTests = Get-Content '.\tests\indicator_engine_tests.cpp' -Raw
 $requiredIndicatorTestMarkers = @(
     'fixed output frame readiness mask mismatch',
@@ -325,6 +351,17 @@ foreach ($test in $specializedIndicatorTests) {
     }
 }
 
+$indicatorModuleTests = Get-Content '.\tests\indicator_module_tests.cpp' -Raw
+foreach ($marker in @(
+    'completed SMA output pointer must be reused on live-tail updates',
+    'live timestamp changed without completed revision must fail',
+    'Off indicator module must release calculated series',
+    'completed-revision promotion must rebuild indicators')) {
+    if (-not $indicatorModuleTests.Contains($marker)) {
+        throw "Indicator module regression coverage is missing: $marker"
+    }
+}
+
 $runAll = Get-Content '.\tests\run_all.bat' -Raw
 foreach ($marker in @(
     'indicator_engine_tests.exe',
@@ -332,15 +369,17 @@ foreach ($marker in @(
     'obv_indicator_tests.exe',
     'adx_indicator_tests.exe',
     'vwap_indicator_tests.exe',
+    'indicator_module_tests.exe',
     'core\indicator_engine.cpp',
     'core\sma_indicator.cpp',
     'core\jma_indicator.cpp',
     'core\obv_indicator.cpp',
     'core\adx_indicator.cpp',
-    'core\vwap_indicator.cpp')) {
+    'core\vwap_indicator.cpp',
+    'app\indicator_module.cpp')) {
     if (-not $runAll.Contains($marker)) {
-        throw "Indicator engine is not in the complete headless suite: $marker"
+        throw "Indicator engine/module is not in the complete headless suite: $marker"
     }
 }
 
-Write-Host 'Major-feature modules, accepted M6 chart contracts, and the M7 SMA/JMA/OBV/ADX/VWAP multi-output batch-incremental foundation are verified.'
+Write-Host 'Major-feature modules, accepted M6 chart contracts, and the M7 SMA/JMA/OBV/ADX/VWAP engine plus IndicatorModule live-tail cache are verified.'

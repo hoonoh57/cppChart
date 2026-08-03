@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -22,11 +22,26 @@ jobs:
   build-and-test:
     name: MSVC build and headless tests
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: p2/kiwoom-mock-gateway
+          fetch-depth: 0
+
+      - name: Apply selected-stock 0B integration
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $shell = Get-Content .\shell_main.cpp -Raw
+          if (-not $shell.Contains('ApplyStockTradeTick')) {
+            python .\scripts\connect_realtime_stock_bars.py
+          }
+          else {
+            Write-Host 'Selected-stock 0B integration is already present.'
+          }
 
       - name: Verify repository policy
         shell: pwsh
@@ -79,7 +94,10 @@ jobs:
             'CanSubmitLiquidationOrders',
             'RequestStockMinuteBars',
             'ApplyMinuteBars',
-            'DrawRealCandles'
+            'DrawRealCandles',
+            'ApplyStockTradeTick',
+            'RecordPresentedFrame',
+            '렌더 %.1fHz'
           )
           foreach ($marker in $required) {
             if (-not $source.Contains($marker)) {
@@ -94,7 +112,10 @@ jobs:
             'inds_min_pole_qry',
             'conflicting duplicate minute-bar timestamp',
             'OHLC invariant violation',
-            'stock minute bars require api-id ka10080'
+            'stock minute bars require api-id ka10080',
+            'DecodeStockTradeRecord',
+            'MergeStockTradeIntoMinuteBars',
+            'stock trade time FID 20'
           )
           foreach ($marker in $marketRequired) {
             if (-not $marketData.Contains($marker)) {
@@ -112,6 +133,10 @@ jobs:
           if (-not $runner.Contains('DeliverMinuteBars')) {
             throw 'Minute-bar responses are not delivered to the UI callback'
           }
+          if (-not $runner.Contains('SubscribeStockTrades') -or
+              -not $runner.Contains('{ "0B" }')) {
+            throw 'Selected-stock 0B subscription is not integrated'
+          }
 
           if (-not $transport.Contains('CPPCHART_CONTINUATION_HEADERS')) {
             throw 'WinHTTP continuation response headers are not integrated'
@@ -120,6 +145,10 @@ jobs:
           if ($runner.Contains("StartReceiver()`r`n    {`r`n        StopReceiver();") -or
               $runner.Contains("StartReceiver()`n    {`n        StopReceiver();")) {
             throw 'Receiver startup closes the newly connected socket'
+          }
+
+          if ($source.Contains('ImGui::GetIO().Framerate')) {
+            throw 'ImGui smoothed FPS is still exposed as an actual render rate'
           }
 
           $forbidden = @(
@@ -188,7 +217,28 @@ jobs:
             throw "headless tests failed, exit code=$LASTEXITCODE"
           }
 
-      - name: Verify clean source tree after build
+      - name: Commit verified integration
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add `
+            core/kiwoom_market_data.h `
+            core/kiwoom_market_data.cpp `
+            platform/kiwoom_runtime_runner.h `
+            platform/kiwoom_runtime_runner.cpp `
+            shell_main.cpp `
+            tests/kiwoom_market_data_tests.cpp `
+            tests/kiwoom_runtime_runner_tests.cpp `
+            .github/workflows/windows-ci.yml
+          if (-not (git diff --cached --quiet)) {
+            git commit -m 'Connect 0B trades to live minute bars'
+            git push origin HEAD:p2/kiwoom-mock-gateway
+          }
+
+      - name: Verify clean source tree after commit
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'

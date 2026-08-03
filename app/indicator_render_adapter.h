@@ -57,7 +57,11 @@ namespace trading::app
             render::RenderDocument& document,
             std::string& error);
 
-        void ClearCache() noexcept;
+        void ClearCache() noexcept
+        {
+            caches_.clear();
+        }
+
         void Reset() noexcept;
 
         std::uint64_t PlanRevision() const noexcept;

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "../core/market_types.h"
 #include "value_grid.h"
@@ -127,6 +127,11 @@ namespace trading::render
         std::size_t RetainedBytes() const noexcept
         {
             return capacity() * sizeof(T);
+        }
+
+        const T& operator[](std::size_t index) const noexcept
+        {
+            return At(index);
         }
 
         const T& front() const noexcept
@@ -259,7 +264,7 @@ namespace trading::render
     {
         std::string id;
         std::string label;
-        std::vector<LinePoint> points;
+        SharedTailSeries<LinePoint> points;
         ColorRgba color;
         float width = 1.0f;
         bool visible = true;

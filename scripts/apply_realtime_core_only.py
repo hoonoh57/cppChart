@@ -13,4 +13,8 @@ if marker not in source:
     raise RuntimeError("real-time migration CI section marker is missing")
 
 source_only = source.split(marker, 1)[0]
-exec(compile(source_only, str(script_path), "exec"), {"__name__": "__main__"})
+namespace = {
+    "__name__": "__main__",
+    "__file__": str(script_path),
+}
+exec(compile(source_only, str(script_path), "exec"), namespace)

@@ -14,9 +14,10 @@ Read these before changing code:
 - development branch: `p2/kiwoom-mock-gateway`
 - PR: `#1`, Draft; do not merge before real-data and account acceptance
 - production policy: real Kiwoom mock data only; no synthetic fallback
-- corrected chart-axis implementation commit: `aa55b0bbd1e6b396553c45da777b4030a9f4bd7e`
-- successful Windows CI run: `30803999147`
-- artifact digest: `sha256:a35f64979593c8ddd37341a3458e28dae7d1d02fa123c9c94b62aa85a44ac709`
+- chart interaction implementation commit: `cb29d61c4b768a3c9e85a97434ed4c3e5f17d774`
+- verification-only CI configuration commit: `24cb554db13b3f8f61ca228a977aadd44641ac36`
+- successful Windows CI run: `30807173805`
+- artifact digest: `sha256:20a820a2082117f263aa837c879ec86e0f261b68270a0e9826e8000cf65892bb`
 
 ## Product objective
 
@@ -34,6 +35,10 @@ a monolithic `shell_main.cpp`.
   market or account state directly.
 - The generic renderer consumes only `RenderDocument` and renderer interaction
   state. It must not know Kiwoom API IDs, indicators, strategies, or accounts.
+- Pane-specific cursor snapping is supplied as generic `ValueGrid` data by the
+  document builder; the renderer does not contain a Korean-market branch.
+- Candle and histogram body widths derive from one shared axis-slot geometry;
+  a pane must never infer width from only the series types it contains.
 - `Off` stops subscriptions, calculation, rendering, and retained memory;
   `Standby` retains state but stops expensive work; `Visible` renders without
   strategy execution; `Active` enables the complete feature.
@@ -41,8 +46,8 @@ a monolithic `shell_main.cpp`.
   make a screen look complete.
 - Batch, replay, and real-time indicator/strategy logic must share the same
   calculation implementation.
-- Financial bars must use a trading-time coordinate axis. Wall-clock elapsed
-  milliseconds must never be mapped directly to horizontal pixels.
+- Financial bars use the ordinal trading-time coordinate axis. Wall-clock
+  elapsed milliseconds must never be mapped directly to horizontal pixels.
 
 ## Completed modularization
 
@@ -55,93 +60,127 @@ a monolithic `shell_main.cpp`.
 - actual `ka10080` plus `0B` selected-symbol chart path
 - verification-only CI; one-shot migration files removed
 
-## First local M6 acceptance result
+## Local M6 acceptance findings and corrections
 
-The user loaded real `005930` one-minute data and exposed a critical visual
-defect. The header and logs confirmed 900 real `ka10080` rows, but the chart
-showed a few dense candle clusters separated by huge blank regions from 07/30
-to 08/03.
+### Finding 1 — calendar gaps consumed X-axis width
 
-Root cause:
+The user loaded real `005930` one-minute data. The response contained 900 real
+`ka10080` rows, but absolute timestamp mapping created huge overnight/weekend
+blank regions and compressed valid candles into clusters.
 
-- the renderer mapped absolute wall-clock timestamp differences directly to X;
-- overnight, weekend, and session gaps consumed most of the screen width;
-- all 900 loaded bars were forced into the initial viewport;
-- this made a valid response look like corrupted market data.
+Correction:
 
-This was a renderer-coordinate and initial-window defect. It was not repaired by
-changing market data, inventing bars, deleting gaps, or adding synthetic values.
+- `OrdinalTimeAxis` maps each actual bar to one equal horizontal slot;
+- overnight and session gaps consume no empty pixel span;
+- actual timestamps remain available for labels, crosshair, tooltip, and date
+  boundaries;
+- the initial viewport opens a recent usable bar window.
 
-## Corrected M6 chart foundation
+### Finding 2 — price candles and volume bars used different widths
 
-- `OrdinalTimeAxis` maps each actual bar to one equally spaced horizontal slot;
-- overnight, weekend, lunch, halt, and session gaps consume no empty pixel span;
-- real timestamps remain available for labels, crosshair, tooltip, and boundary
-  annotations;
-- the initial viewport opens the latest screen-sized bar window rather than the
-  complete 900-bar history;
-- right-button pan reaches all retained history;
-- wheel zoom remains anchored at the mouse position;
-- double-click returns to the latest window and resumes auto-follow;
-- a manually panned viewport is not moved by same-minute `0B` updates;
-- visible-range price scaling ignores off-screen bars;
-- direct wall-clock X mapping is blocked by architecture verification;
-- `time_axis_tests` proves a 17-hour overnight gap occupies one adjacent bar
-  slot, not a proportional blank region.
+The price pane derived body width from its visible candle count. The volume pane
+contains no candle series, so it fell back to one item and produced maximum-width
+histograms. The volume bars therefore overlapped and appeared crushed.
 
-## M6 performance structure
+Correction:
 
-- completed candle history is immutable shared storage;
-- current live candle is a separate value tail;
-- same-minute `0B` updates reuse all completed candle history;
-- completed volume history is also shared and reused;
-- a new minute promotes the old live bar and rebuilds completed volume once;
-- ordinal time axis and boundary calculation are cached by completed-history
-  structure revision;
-- renderer receives generic data only and has no Kiwoom, indicator, strategy,
-  or account-specific branch.
+- `SeriesBodyWidth` derives one body width from plot width and the shared visible
+  ordinal-axis span;
+- candle and histogram panes use the same slot pitch and fill ratio;
+- `series_geometry_tests` prevents pane-local width calculations from returning.
+
+### Finding 3 — drag did not pan
+
+The invisible chart surface captured only the left mouse button while panning
+was implemented only for the right button. The intended drag path was therefore
+unreliable and did not match normal chart interaction.
+
+Correction:
+
+- the surface explicitly captures left and right mouse buttons;
+- either left-button or right-button horizontal drag pans the viewport;
+- manual pan disables auto-follow until the viewport returns to the latest edge
+  or the user double-clicks to reset.
+
+### Finding 4 — horizontal crosshair was forced to candle close
+
+The cursor Y value was initially calculated from the mouse, but the renderer
+later replaced the horizontal line with the nearest candle close. This made the
+line jump vertically and prevented subpanels from reporting their own values.
+
+Correction:
+
+- the horizontal line remains at the mouse-derived value in the hovered pane;
+- the price pane snaps that value to its configured legal quotation ladder;
+- the volume pane snaps to an integer volume value;
+- future indicator panes may supply their own decimals or value grid;
+- only the vertical time crosshair is synchronized across panes;
+- the OHLCV tooltip still resolves the nearest candle independently.
+
+## Current chart foundation
+
+- ordinal trading-time axis
+- screen-sized initial recent window
+- wheel zoom anchored at the mouse
+- left or right horizontal drag pan
+- double-click latest reset and auto-follow
+- visible-range automatic value scaling
+- aligned candle and histogram widths
+- current-price line and label
+- vertical timestamp crosshair synchronized across panes
+- pane-local horizontal value crosshair and right-axis label
+- KRX equity quotation-step snapping configured by the stock chart builder
+- volume integer cursor value
+- OHLCV and tick-count tooltip
+- date and abnormal session-gap boundaries
+- immutable completed history plus mutable live tail
 
 ## Verification result
 
-Windows CI run `30803999147` passed after the coordinate correction:
+Windows CI run `30807173805` passed:
 
-- repository and secret-file policy;
-- core dependency boundary;
-- real-data-only production policy;
-- modular architecture boundary;
-- compressed trading-time renderer gate;
-- MSVC x64 `shell.exe` build;
-- complete headless test suite, including viewport, time-axis, time-boundary,
-  market-data, workspace, runtime, order, and reconciliation tests;
-- clean source-tree check;
-- executable artifact publication.
+- repository and secret-file policy
+- core dependency boundary
+- real-data-only production policy
+- modular renderer boundary
+- ordinal trading-time axis contract
+- left/right drag interaction markers
+- pane-aware `ValueGrid` contract
+- price/volume shared body-width geometry
+- Korean equity tick-boundary fixtures
+- MSVC x64 `shell.exe` build
+- complete headless test suite
+- clean source-tree check
+- executable artifact publication
 
 ## Current user-intervention point
 
-Pull and retest the corrected chart only. The expected initial result is a normal
-contiguous candlestick chart of recent bars, not three clusters separated by
-blank calendar time.
+A focused real-screen test is required before M6 is declared complete.
 
 Validate:
 
-1. real `005930` one-minute history loads with adjacent candles across sessions;
-2. the initial screen shows a usable recent window, not all 900 bars compressed;
-3. date/session changes are indicated by lines without reserving blank width;
-4. right-button drag pans back through the complete 900-bar history;
-5. wheel zoom changes candle density around the mouse position;
-6. double-click returns to the latest window and resumes auto-follow;
-7. real `0B` updates the final candle without moving a manually panned viewport;
-8. price and volume crosshair timestamps remain aligned;
-9. current-price line, OHLCV tooltip, and visible-range price scale remain correct.
+1. candle and volume histogram bodies have identical horizontal width and center;
+2. left-button drag pans horizontally;
+3. right-button drag also pans horizontally;
+4. wheel zoom remains functional;
+5. double-click returns to the latest bars;
+6. the price-pane horizontal crosshair follows mouse Y and snaps to the legal
+   Korean equity quotation unit for that price band;
+7. the volume-pane horizontal crosshair follows mouse Y and displays that
+   panel's integer volume value;
+8. the vertical crosshair remains aligned between price and volume panes;
+9. the OHLCV tooltip remains tied to the nearest candle rather than the cursor
+   value line;
+10. real `0B` updates do not reset a manually panned viewport.
 
-Do not proceed to M7 until this visual defect is confirmed fixed.
+Do not proceed to M7 until these visual interactions are confirmed.
 
 ## Next remote milestone after acceptance
 
 M7 reusable indicator engine:
 
-- batch and incremental parity contract;
-- indicator registry and parameter serialization;
-- SMA, JMA, VWAP, OBV, and ADX;
-- standard Line/Histogram/ReferenceLine renderer contributions;
-- no renderer changes per added indicator.
+- batch and incremental parity contract
+- indicator registry and parameter serialization
+- SMA, JMA, VWAP, OBV, and ADX
+- standard Line/Histogram/ReferenceLine renderer contributions
+- no renderer changes per added indicator

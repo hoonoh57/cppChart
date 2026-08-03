@@ -19,6 +19,7 @@ $requiredFiles = @(
     '.\render\value_grid.cpp',
     '.\render\series_geometry.h',
     '.\render\series_geometry.cpp',
+    '.\render\cursor_label_layout.h',
     '.\render\market_chart_builder.h',
     '.\render\market_chart_builder.cpp',
     '.\ui\render_document_renderer.h',
@@ -157,7 +158,9 @@ $requiredInteractionMarkers = @(
     'ImGuiButtonFlags_MouseButtonRight',
     'draggingLeft || draggingRight',
     'QuantizeValue(',
-    'SeriesBodyWidth('
+    'SeriesBodyWidth(',
+    'DrawCursorTimeLabel(',
+    'PlaceCenteredHorizontalLabel('
 )
 foreach ($marker in $requiredInteractionMarkers) {
     if (-not $renderer.Contains($marker)) {

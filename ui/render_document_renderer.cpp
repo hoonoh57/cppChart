@@ -1,5 +1,6 @@
 ﻿#include "render_document_renderer.h"
 
+#include "../render/cursor_label_layout.h"
 #include "../render/series_geometry.h"
 #include "../render/value_grid.h"
 
@@ -358,6 +359,47 @@ namespace trading::ui
                 ImVec2(plotEnd.x + 5.0f, y - 7.0f),
                 IM_COL32(235, 237, 244, 255),
                 label);
+        }
+
+        void DrawCursorTimeLabel(
+            ImDrawList* draw,
+            const ImVec2& plotOrigin,
+            const ImVec2& plotEnd,
+            float crossX,
+            EpochMillis timestampMs,
+            bool useTimeAxisBand)
+        {
+            const std::string label = FormatTimestamp(timestampMs);
+            const ImVec2 textSize = ImGui::CalcTextSize(label.c_str());
+            constexpr float horizontalPadding = 6.0f;
+            constexpr float labelHeight = 18.0f;
+            const float requestedWidth = textSize.x + horizontalPadding * 2.0f;
+            const render::HorizontalLabelPlacement placement =
+                render::PlaceCenteredHorizontalLabel(
+                    crossX,
+                    requestedWidth,
+                    plotOrigin.x,
+                    plotEnd.x);
+            const float top = useTimeAxisBand
+                ? plotEnd.y + 1.0f
+                : plotEnd.y - labelHeight - 1.0f;
+            const float bottom = top + labelHeight;
+
+            draw->AddRectFilled(
+                ImVec2(placement.left, top),
+                ImVec2(placement.right, bottom),
+                IM_COL32(65, 68, 80, 245));
+            draw->AddRect(
+                ImVec2(placement.left, top),
+                ImVec2(placement.right, bottom),
+                IM_COL32(205, 208, 220, 180));
+            draw->AddText(
+                ImVec2(
+                    placement.left +
+                        (placement.right - placement.left - textSize.x) * 0.5f,
+                    top + 2.0f),
+                IM_COL32(235, 237, 244, 255),
+                label.c_str());
         }
 
         void DrawValueAxis(
@@ -803,11 +845,24 @@ namespace trading::ui
             }
 
             if (paneHovered) {
+                const float crossX = MapX(
+                    state.crosshairTimestampMs,
+                    axis,
+                    visibleRange,
+                    plotOrigin.x,
+                    plotWidth);
                 const float crossY = MapY(
                     state.crosshairValue,
                     values,
                     plotOrigin.y,
                     plotHeight);
+                DrawCursorTimeLabel(
+                    draw,
+                    plotOrigin,
+                    plotEnd,
+                    crossX,
+                    state.crosshairTimestampMs,
+                    drawTimeAxis);
                 DrawCursorValueLabel(
                     draw,
                     plotOrigin,

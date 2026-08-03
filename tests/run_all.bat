@@ -55,6 +55,13 @@ series_geometry_tests.exe
 if errorlevel 1 exit /b 1
 
 cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
+  tests\cursor_label_layout_tests.cpp ^
+  /Fe:cursor_label_layout_tests.exe
+if errorlevel 1 exit /b 1
+cursor_label_layout_tests.exe
+if errorlevel 1 exit /b 1
+
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
   tests\time_axis_tests.cpp ^
   render\time_axis.cpp ^
   /Fe:time_axis_tests.exe

@@ -24,6 +24,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    app\market_data_module.cpp ^
    app\chart_workspace_module.cpp ^
    render\chart_viewport.cpp ^
+   render\time_axis.cpp ^
    render\time_boundaries.cpp ^
    render\render_document.cpp ^
    render\market_chart_builder.cpp ^

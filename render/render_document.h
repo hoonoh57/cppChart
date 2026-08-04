@@ -290,6 +290,7 @@ namespace trading::render
         LineStyle style = LineStyle::Solid;
         bool visible = true;
         std::string ownerId;
+        std::string axisId;
     };
 
     struct HistogramSeries final
@@ -341,6 +342,26 @@ namespace trading::render
         Symmetric
     };
 
+    enum class ValueAxisSide
+    {
+        Left,
+        Right
+    };
+
+    struct ValueAxis final
+    {
+        std::string id;
+        std::string label;
+        ValueAxisSide side = ValueAxisSide::Left;
+        PaneValueScale valueScale = PaneValueScale::Auto;
+        double fixedMinimum = 0.0;
+        double fixedMaximum = 0.0;
+        ValueGrid cursorGrid;
+        int valueDecimals = 2;
+        ColorRgba color{ 180, 184, 194, 255 };
+        bool visible = true;
+    };
+
     struct Pane final
     {
         std::string id;
@@ -351,6 +372,7 @@ namespace trading::render
         double fixedMaximum = 0.0;
         ValueGrid cursorGrid;
         int valueDecimals = 2;
+        std::vector<ValueAxis> valueAxes;
         std::vector<LegendEntry> legends;
         std::vector<CandleSeries> candles;
         std::vector<LineSeries> lines;

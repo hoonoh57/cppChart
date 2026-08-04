@@ -1,4 +1,4 @@
-#include "comparison_module.h"
+﻿#include "comparison_module.h"
 
 #include <algorithm>
 #include <cctype>
@@ -337,7 +337,7 @@ namespace trading::app
         return result;
     }
 
-    const ComparisonDefinition* ComparisonModule::FindDefinition(
+    bool ComparisonModule::FindDefinition(
         const std::string& comparisonId,
         ComparisonDefinition& copy) const noexcept
     {
@@ -345,9 +345,9 @@ namespace trading::app
         for (const Runtime& runtime : runtimes_) {
             if (runtime.definition.id != comparisonId) continue;
             copy = runtime.definition;
-            return &copy;
+            return true;
         }
-        return nullptr;
+        return false;
     }
 
     bool ComparisonModule::ValidateDefinition(

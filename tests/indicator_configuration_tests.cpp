@@ -1,4 +1,4 @@
-#include "../app/indicator_configuration.h"
+﻿#include "../app/indicator_configuration.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -37,7 +37,7 @@ int main()
         InitialIndicatorDefinitions();
     Check(definitions.size() == 5U,
           "initial indicator definition count mismatch");
-    Check(IndicatorCatalog().size() == 5U,
+    Check(IndicatorCatalog().size() == 11U,
           "indicator catalog count mismatch");
     Check(VisibleIndicatorSpecs(definitions).size() == 5U,
           "initial visible indicator spec count mismatch");

@@ -1,6 +1,7 @@
-#include "chart_workspace_module.h"
+﻿#include "chart_workspace_module.h"
 
 #include "indicator_render_adapter.h"
+#include "comparison_render_adapter.h"
 #include "../render/market_chart_builder.h"
 
 #include <utility>
@@ -43,6 +44,7 @@ namespace trading::app
             sourceRevision_ = 0;
             completedRevision_ = 0;
             indicatorRevision_ = 0;
+            comparisonRevision_ = 0;
             documentRevision_ = 0;
             sourceBarCount_ = 0;
             error_.clear();
@@ -72,6 +74,8 @@ namespace trading::app
             source,
             nullptr,
             nullptr,
+            nullptr,
+            nullptr,
             error);
     }
 
@@ -91,6 +95,31 @@ namespace trading::app
             source,
             &indicatorSnapshot,
             &indicatorAdapter,
+            nullptr,
+            nullptr,
+            error);
+    }
+
+    bool ChartWorkspaceModule::UpdateMarketChart(
+        const std::string& workspaceId,
+        const std::string& title,
+        const std::string& seriesId,
+        const ChartMarketSource& source,
+        const IndicatorModuleSnapshot& indicatorSnapshot,
+        IndicatorRenderAdapter& indicatorAdapter,
+        const ComparisonModuleSnapshot& comparisonSnapshot,
+        ComparisonRenderAdapter& comparisonAdapter,
+        std::string& error)
+    {
+        return UpdateMarketChartCore(
+            workspaceId,
+            title,
+            seriesId,
+            source,
+            &indicatorSnapshot,
+            &indicatorAdapter,
+            &comparisonSnapshot,
+            &comparisonAdapter,
             error);
     }
 
@@ -101,6 +130,8 @@ namespace trading::app
         const ChartMarketSource& source,
         const IndicatorModuleSnapshot* indicatorSnapshot,
         IndicatorRenderAdapter* indicatorAdapter,
+        const ComparisonModuleSnapshot* comparisonSnapshot,
+        ComparisonRenderAdapter* comparisonAdapter,
         std::string& error)
     {
         if (workspaceId.empty()) {
@@ -119,11 +150,12 @@ namespace trading::app
             error = "chart completed-bar history is missing";
             return false;
         }
-        if (
-            (indicatorSnapshot == nullptr) !=
-            (indicatorAdapter == nullptr))
-        {
+        if ((indicatorSnapshot == nullptr) != (indicatorAdapter == nullptr)) {
             error = "indicator snapshot and adapter must be supplied together";
+            return false;
+        }
+        if ((comparisonSnapshot == nullptr) != (comparisonAdapter == nullptr)) {
+            error = "comparison snapshot and adapter must be supplied together";
             return false;
         }
 
@@ -132,6 +164,12 @@ namespace trading::app
                 ? IndicatorCompositeRevision(
                     *indicatorSnapshot,
                     *indicatorAdapter)
+                : 0;
+        const std::uint64_t nextComparisonRevision =
+            comparisonSnapshot != nullptr
+                ? ComparisonCompositeRevision(
+                    *comparisonSnapshot,
+                    *comparisonAdapter)
                 : 0;
         std::uint64_t nextDocumentRevision = 0;
         std::shared_ptr<const std::vector<render::HistogramPoint>>
@@ -149,6 +187,7 @@ namespace trading::app
                 state_ == ChartWorkspaceState::Ready &&
                 sourceRevision_ == source.revision &&
                 indicatorRevision_ == nextIndicatorRevision &&
+                comparisonRevision_ == nextComparisonRevision &&
                 document_ != nullptr)
             {
                 error.clear();
@@ -201,6 +240,23 @@ namespace trading::app
             }
         }
 
+        if (comparisonSnapshot != nullptr &&
+            IsVisibleLevel(comparisonSnapshot->level))
+        {
+            std::string contributionError;
+            if (!comparisonAdapter->Apply(
+                    *comparisonSnapshot,
+                    candidate,
+                    contributionError))
+            {
+                SetError(
+                    "comparison render contribution failed: " +
+                    contributionError);
+                error = contributionError;
+                return false;
+            }
+        }
+
         std::string validationError;
         if (!render::ValidateRenderDocument(candidate, validationError)) {
             SetError("render document validation failed: " + validationError);
@@ -222,6 +278,7 @@ namespace trading::app
                 state_ == ChartWorkspaceState::Ready &&
                 sourceRevision_ == source.revision &&
                 indicatorRevision_ == nextIndicatorRevision &&
+                comparisonRevision_ == nextComparisonRevision &&
                 document_ != nullptr)
             {
                 error.clear();
@@ -231,6 +288,7 @@ namespace trading::app
             sourceRevision_ = source.revision;
             completedRevision_ = source.completedRevision;
             indicatorRevision_ = nextIndicatorRevision;
+            comparisonRevision_ = nextComparisonRevision;
             documentRevision_ = immutable->revision;
             sourceBarCount_ = source.barCount;
             completedVolume_ = std::move(completedVolume);
@@ -259,6 +317,7 @@ namespace trading::app
         result.sourceRevision = sourceRevision_;
         result.completedRevision = completedRevision_;
         result.indicatorRevision = indicatorRevision_;
+        result.comparisonRevision = comparisonRevision_;
         result.documentRevision = documentRevision_;
         result.sourceBarCount = sourceBarCount_;
         result.error = error_;
@@ -303,6 +362,25 @@ namespace trading::app
                 indicatorAdapter));
     }
 
+    bool ChartWorkspaceModule::NeedsUpdate(
+        std::uint64_t sourceRevision,
+        const IndicatorModuleSnapshot& indicatorSnapshot,
+        const IndicatorRenderAdapter& indicatorAdapter,
+        const ComparisonModuleSnapshot& comparisonSnapshot,
+        const ComparisonRenderAdapter& comparisonAdapter) const noexcept
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return
+            IsVisibleLevel(level_) &&
+            (document_ == nullptr ||
+             state_ != ChartWorkspaceState::Ready ||
+             sourceRevision_ != sourceRevision ||
+             indicatorRevision_ != IndicatorCompositeRevision(
+                 indicatorSnapshot, indicatorAdapter) ||
+             comparisonRevision_ != ComparisonCompositeRevision(
+                 comparisonSnapshot, comparisonAdapter));
+    }
+
     const char* ChartWorkspaceModule::StateName(
         ChartWorkspaceState state) noexcept
     {
@@ -331,6 +409,23 @@ namespace trading::app
             static_cast<std::uint64_t>(snapshot.state);
         seed ^=
             state + 0x9e3779b97f4a7c15ULL +
+            (seed << 6U) + (seed >> 2U);
+        return seed;
+    }
+
+    std::uint64_t ChartWorkspaceModule::ComparisonCompositeRevision(
+        const ComparisonModuleSnapshot& snapshot,
+        const ComparisonRenderAdapter& adapter) noexcept
+    {
+        std::uint64_t seed = snapshot.revision;
+        const std::uint64_t adapterRevision = adapter.Revision();
+        seed ^=
+            adapterRevision + 0x9e3779b97f4a7c15ULL +
+            (seed << 6U) + (seed >> 2U);
+        const std::uint64_t level =
+            static_cast<std::uint64_t>(snapshot.level);
+        seed ^=
+            level + 0x9e3779b97f4a7c15ULL +
             (seed << 6U) + (seed >> 2U);
         return seed;
     }

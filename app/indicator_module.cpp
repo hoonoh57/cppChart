@@ -1,9 +1,10 @@
-#include "indicator_module.h"
+﻿#include "indicator_module.h"
 
 #include "../core/adx_indicator.h"
 #include "../core/jma_indicator.h"
 #include "../core/obv_indicator.h"
 #include "../core/sma_indicator.h"
+#include "../core/standard_indicators.h"
 #include "../core/vwap_indicator.h"
 
 #include <algorithm>
@@ -38,7 +39,13 @@ namespace trading::app
             indicators::RegisterJmaIndicator(registry_) &&
             indicators::RegisterObvIndicator(registry_) &&
             indicators::RegisterAdxIndicator(registry_) &&
-            indicators::RegisterVwapIndicator(registry_);
+            indicators::RegisterVwapIndicator(registry_) &&
+            indicators::RegisterEmaIndicator(registry_) &&
+            indicators::RegisterBollingerIndicator(registry_) &&
+            indicators::RegisterRsiIndicator(registry_) &&
+            indicators::RegisterMacdIndicator(registry_) &&
+            indicators::RegisterDmiIndicator(registry_) &&
+            indicators::RegisterSuperTrendIndicator(registry_);
         if (!registered) {
             state_ = IndicatorModuleState::Error;
             error_ = "builtin indicator registration failed";

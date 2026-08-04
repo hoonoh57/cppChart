@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <ctime>
 #include <limits>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -205,7 +206,7 @@ namespace trading::ui
                 }
             }
             for (const render::LineSeries& series : pane.lines) {
-                if (!series.visible) continue;
+                if (!series.visible || !series.axisId.empty()) continue;
                 for (const render::LinePoint& point : series.points) {
                     if (InAxisRange(point.timestampMs, axis, range)) {
                         result.Include(point.value);
@@ -254,6 +255,70 @@ namespace trading::ui
                 result.maximum += padding;
             }
             return result;
+        }
+
+        const render::ValueAxis* FindValueAxis(
+            const render::Pane& pane,
+            const std::string& axisId) noexcept
+        {
+            for (const render::ValueAxis& axis : pane.valueAxes) {
+                if (axis.id == axisId) return &axis;
+            }
+            return nullptr;
+        }
+
+        ValueRange SecondaryAxisRange(
+            const render::Pane& pane,
+            const render::ValueAxis& metadata,
+            const render::OrdinalTimeAxis& axis,
+            const AxisRange& range)
+        {
+            ValueRange result;
+            if (metadata.valueScale == render::PaneValueScale::Fixed) {
+                result.minimum = metadata.fixedMinimum;
+                result.maximum = metadata.fixedMaximum;
+                result.valid = true;
+                return result;
+            }
+            for (const render::LineSeries& series : pane.lines) {
+                if (!series.visible || series.axisId != metadata.id) continue;
+                for (const render::LinePoint& point : series.points) {
+                    if (InAxisRange(point.timestampMs, axis, range)) {
+                        result.Include(point.value);
+                    }
+                }
+            }
+            if (!result.valid) return result;
+            if (metadata.valueScale == render::PaneValueScale::Symmetric) {
+                const double absolute = (std::max)(
+                    std::fabs(result.minimum),
+                    std::fabs(result.maximum));
+                result.minimum = -absolute;
+                result.maximum = absolute;
+            }
+            if (result.maximum <= result.minimum) {
+                const double padding =
+                    (std::max)(1.0, std::fabs(result.maximum) * 0.01);
+                result.minimum -= padding;
+                result.maximum += padding;
+            }
+            else {
+                const double padding =
+                    (result.maximum - result.minimum) * 0.04;
+                result.minimum -= padding;
+                result.maximum += padding;
+            }
+            return result;
+        }
+
+        const ValueRange* FindSecondaryRange(
+            const std::map<std::string, ValueRange>& ranges,
+            const std::string& axisId) noexcept
+        {
+            const auto found = ranges.find(axisId);
+            return found == ranges.end() || !found->second.valid
+                ? nullptr
+                : &found->second;
         }
 
         float MapX(
@@ -476,6 +541,47 @@ namespace trading::ui
                 draw->AddText(
                     ImVec2(plotOrigin.x + plotWidth + 5.0f, y - 7.0f),
                     IM_COL32(180, 184, 194, 255),
+                    label);
+            }
+        }
+
+        void DrawSecondaryValueAxis(
+            ImDrawList* draw,
+            const render::ValueAxis& metadata,
+            const ValueRange& values,
+            const ImVec2& plotOrigin,
+            float plotHeight,
+            std::size_t column)
+        {
+            const float right =
+                plotOrigin.x - static_cast<float>(column) * ValueAxisWidth;
+            const float left = right - ValueAxisWidth;
+            draw->AddLine(
+                ImVec2(right - 1.0f, plotOrigin.y),
+                ImVec2(right - 1.0f, plotOrigin.y + plotHeight),
+                ToImColor(metadata.color),
+                1.0f);
+            if (!metadata.label.empty()) {
+                draw->AddText(
+                    ImVec2(left + 4.0f, plotOrigin.y + 2.0f),
+                    ToImColor(metadata.color),
+                    metadata.label.c_str());
+            }
+            char label[48]{};
+            for (int index = 0; index <= 5; ++index) {
+                const double ratio = static_cast<double>(index) / 5.0;
+                const double value =
+                    values.maximum - ratio * (values.maximum - values.minimum);
+                const float y =
+                    plotOrigin.y + plotHeight * static_cast<float>(ratio);
+                FormatPaneValue(
+                    label,
+                    sizeof(label),
+                    value,
+                    metadata.valueDecimals);
+                draw->AddText(
+                    ImVec2(left + 4.0f, y - 7.0f),
+                    ToImColor(metadata.color),
                     label);
             }
         }
@@ -774,7 +880,25 @@ namespace trading::ui
             if (size.x < 130.0f || size.y < 50.0f) return;
 
             const float timeAxisHeight = drawTimeAxis ? TimeAxisHeight : 0.0f;
-            const float plotWidth = (std::max)(40.0f, size.x - ValueAxisWidth);
+            std::vector<const render::ValueAxis*> leftAxes;
+            std::map<std::string, ValueRange> secondaryRanges;
+            for (const render::ValueAxis& metadata : pane.valueAxes) {
+                if (!metadata.visible ||
+                    metadata.side != render::ValueAxisSide::Left)
+                {
+                    continue;
+                }
+                ValueRange range = SecondaryAxisRange(
+                    pane, metadata, axis, visibleRange);
+                if (!range.valid) continue;
+                leftAxes.push_back(&metadata);
+                secondaryRanges.emplace(metadata.id, range);
+            }
+            const float leftAxisWidth =
+                static_cast<float>(leftAxes.size()) * ValueAxisWidth;
+            const float plotWidth = (std::max)(
+                40.0f,
+                size.x - ValueAxisWidth - leftAxisWidth);
             const float plotHeight = (std::max)(30.0f, size.y - timeAxisHeight);
             const ValueRange values = PaneValueRange(pane, axis, visibleRange);
 
@@ -785,7 +909,9 @@ namespace trading::ui
                 ImGuiButtonFlags_MouseButtonLeft |
                     ImGuiButtonFlags_MouseButtonRight);
             const ImVec2 surfaceOrigin = ImGui::GetItemRectMin();
-            const ImVec2 plotOrigin = surfaceOrigin;
+            const ImVec2 plotOrigin(
+                surfaceOrigin.x + leftAxisWidth,
+                surfaceOrigin.y);
             const ImVec2 plotEnd(
                 plotOrigin.x + plotWidth,
                 plotOrigin.y + plotHeight);
@@ -972,6 +1098,13 @@ namespace trading::ui
 
             for (const render::LineSeries& series : pane.lines) {
                 if (!series.visible) continue;
+                const ValueRange* seriesValues = &values;
+                if (!series.axisId.empty()) {
+                    seriesValues = FindSecondaryRange(
+                        secondaryRanges,
+                        series.axisId);
+                    if (seriesValues == nullptr) continue;
+                }
                 const bool selected =
                     OwnerSelected(series.ownerId, state);
                 bool hasPrevious = false;
@@ -987,7 +1120,7 @@ namespace trading::ui
                             plotWidth),
                         MapY(
                             point.value,
-                            values,
+                            *seriesValues,
                             plotOrigin.y,
                             plotHeight));
                     if (hasPrevious) {
@@ -1105,6 +1238,18 @@ namespace trading::ui
             }
 
             DrawValueAxis(draw, values, plotOrigin, plotWidth, plotHeight);
+            for (std::size_t index = 0; index < leftAxes.size(); ++index) {
+                const auto found = secondaryRanges.find(leftAxes[index]->id);
+                if (found != secondaryRanges.end()) {
+                    DrawSecondaryValueAxis(
+                        draw,
+                        *leftAxes[index],
+                        found->second,
+                        plotOrigin,
+                        plotHeight,
+                        index);
+                }
+            }
             if (drawTimeAxis) {
                 DrawTimeAxis(
                     draw,

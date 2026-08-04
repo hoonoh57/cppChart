@@ -46,9 +46,12 @@
 #include "app/indicator_configuration.h"
 #include "app/indicator_properties.h"
 #include "app/indicator_workspace_coordinator.h"
+#include "app/comparison_module.h"
+#include "app/comparison_render_adapter.h"
 #include "render/market_chart_builder.h"
 #include "ui/render_document_renderer.h"
 #include "ui/indicator_manager_ui.h"
+#include "ui/comparison_manager_ui.h"
 
 // CPPCHART_SHARED_RUNTIME_INTEGRATED
 // CPPCHART_UI_THREAD_DATA_HANDOFF
@@ -254,6 +257,11 @@ static std::vector<trading::indicators::IndicatorSpec> g_indicatorSpecs;
 static std::vector<trading::app::IndicatorInstanceDefinition>
     g_indicatorDefinitions;
 static trading::ui::IndicatorManagerUiState g_indicatorManagerUi;
+static trading::app::ComparisonModule g_comparisonModule;
+static trading::app::ComparisonRenderAdapter g_comparisonRenderAdapter;
+static std::vector<trading::app::ComparisonDefinition>
+    g_comparisonDefinitions;
+static trading::ui::ComparisonManagerUiState g_comparisonManagerUi;
 
 static int MinuteUnitFromSelection(int selection) noexcept
 {
@@ -374,6 +382,16 @@ static bool SetFeatureLevel(
             g_indicatorRenderAdapter.ClearCache();
         }
     }
+    else if (id == "comparison") {
+        if (!g_comparisonModule.SetLevel(level, error)) {
+            std::string rollbackError;
+            g_featureRegistry.SetLevel(id, previousFeature.level, rollbackError);
+            return false;
+        }
+        if (level == trading::app::FeatureLevel::Off) {
+            g_comparisonRenderAdapter.ClearCache();
+        }
+    }
     else if (id == "chart-workspace") {
         if (!g_chartWorkspaceModule.SetLevel(level, error)) {
             std::string rollbackError;
@@ -422,6 +440,12 @@ static bool InitializeFeatureRegistry(std::string& error)
     if (!g_featureRegistry.Register(
             "indicators",
             "Indicators",
+            trading::app::FeatureLevel::Visible,
+            { "market-data" },
+            error)) return false;
+    if (!g_featureRegistry.Register(
+            "comparison",
+            "Comparison Series",
             trading::app::FeatureLevel::Visible,
             { "market-data" },
             error)) return false;
@@ -504,6 +528,111 @@ static bool InitializeIndicators(std::string& error)
     g_indicatorDefinitions = definitions;
     g_indicatorManagerUi = {};
     error.clear();
+    return true;
+}
+
+static bool ApplyComparisonDefinitions(
+    const std::vector<trading::app::ComparisonDefinition>& candidate,
+    std::string& error)
+{
+    const std::vector<trading::app::ComparisonDefinition> previous =
+        g_comparisonDefinitions;
+    if (!g_comparisonModule.Configure(candidate, error)) return false;
+
+    auto used = [](const std::vector<trading::app::ComparisonDefinition>& values,
+                   trading::app::ComparisonInstrumentKind kind,
+                   const std::string& code) {
+        for (const auto& value : values) {
+            if (value.visible && value.kind == kind && value.code == code) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    if (g_runtimeRunner) {
+        for (const auto& old : previous) {
+            if (!old.visible || used(candidate, old.kind, old.code)) continue;
+            std::string ignored;
+            if (old.kind == trading::app::ComparisonInstrumentKind::Stock) {
+                g_runtimeRunner->UnsubscribeStockTrades(old.code, ignored);
+            }
+            else {
+                g_runtimeRunner->UnsubscribeIndexValues(old.code, ignored);
+            }
+        }
+        const trading::app::ComparisonModuleSnapshot snapshot =
+            g_comparisonModule.Snapshot();
+        for (const auto& series : snapshot.series) {
+            if (!series.definition.visible ||
+                series.state != trading::app::ComparisonSeriesState::Ready)
+            {
+                continue;
+            }
+            std::string ignored;
+            if (series.definition.kind ==
+                trading::app::ComparisonInstrumentKind::Stock)
+            {
+                g_runtimeRunner->SubscribeStockTrades(
+                    series.definition.code, ignored);
+            }
+            else {
+                g_runtimeRunner->SubscribeIndexValues(
+                    series.definition.code, ignored);
+            }
+        }
+    }
+
+    g_mainRenderSurface.dirty = true;
+    std::string healthError;
+    g_featureRegistry.SetHealth("comparison", true, {}, healthError);
+    WakeFrames(6);
+    error.clear();
+    return true;
+}
+
+static bool RequestComparisonData(
+    const std::string& comparisonId,
+    std::string& error)
+{
+    if (!g_runtimeRunner || !g_runtimeRunner->IsRunning()) {
+        error = "키움 런타임이 실행 중이 아닙니다.";
+        return false;
+    }
+    trading::app::ComparisonDefinition definition;
+    if (!g_comparisonModule.FindDefinition(
+            comparisonId, definition))
+    {
+        error = "비교 시계열을 찾지 못했습니다.";
+        return false;
+    }
+    const trading::app::MarketDataSnapshot market =
+        g_marketDataModule.Snapshot();
+    const int minuteUnit = market.minuteUnit > 0
+        ? market.minuteUnit
+        : MinuteUnitFromSelection(g_timeFrameIndex);
+    if (!g_comparisonModule.BeginRequest(
+            comparisonId, minuteUnit, error))
+    {
+        return false;
+    }
+    const bool requested =
+        definition.kind == trading::app::ComparisonInstrumentKind::Stock
+            ? g_runtimeRunner->RequestStockMinuteBars(
+                definition.code, minuteUnit, {}, error)
+            : g_runtimeRunner->RequestIndexMinuteBars(
+                definition.code, minuteUnit, {}, error);
+    if (!requested) {
+        g_comparisonModule.SetError(comparisonId, error);
+        return false;
+    }
+    g_log.Add(
+        "DATA",
+        "비교 %s 분봉 요청: %s %d분",
+        definition.kind == trading::app::ComparisonInstrumentKind::Stock
+            ? "종목" : "지수",
+        definition.code.c_str(),
+        minuteUnit);
     return true;
 }
 
@@ -867,36 +996,33 @@ static void DrawMarketDataPanel()
         }
     }
 
-    bool chartNeedsUpdate = false;
-    if (useIndicators) {
-        chartNeedsUpdate = g_chartWorkspaceModule.NeedsUpdate(
-            marketSeries.revision,
-            indicatorSnapshot,
-            g_indicatorRenderAdapter);
+    trading::app::ComparisonModuleSnapshot comparisonSnapshot =
+        g_comparisonModule.Snapshot();
+    trading::app::IndicatorModuleSnapshot workspaceIndicator =
+        indicatorSnapshot;
+    if (!useIndicators) {
+        workspaceIndicator.level = trading::app::FeatureLevel::Off;
     }
-    else {
-        chartNeedsUpdate =
-            g_chartWorkspaceModule.NeedsUpdate(marketSeries.revision);
-    }
+
+    bool chartNeedsUpdate = g_chartWorkspaceModule.NeedsUpdate(
+        marketSeries.revision,
+        workspaceIndicator,
+        g_indicatorRenderAdapter,
+        comparisonSnapshot,
+        g_comparisonRenderAdapter);
 
     if (chartNeedsUpdate) {
         std::string chartError;
-        const bool updated = useIndicators
-            ? g_chartWorkspaceModule.UpdateMarketChart(
-                "main-market-chart",
-                snapshot.code,
-                snapshot.code,
-                chartSource,
-                indicatorSnapshot,
-                g_indicatorRenderAdapter,
-                chartError)
-            : g_chartWorkspaceModule.UpdateMarketChart(
-                "main-market-chart",
-                snapshot.code,
-                snapshot.code,
-                chartSource,
-                chartError);
-
+        const bool updated = g_chartWorkspaceModule.UpdateMarketChart(
+            "main-market-chart",
+            snapshot.code,
+            snapshot.code,
+            chartSource,
+            workspaceIndicator,
+            g_indicatorRenderAdapter,
+            comparisonSnapshot,
+            g_comparisonRenderAdapter,
+            chartError);
         if (!updated) {
             g_log.Add(
                 "FAULT",
@@ -904,10 +1030,7 @@ static void DrawMarketDataPanel()
                 chartError.c_str());
             std::string healthError;
             g_featureRegistry.SetHealth(
-                "chart-workspace",
-                false,
-                chartError,
-                healthError);
+                "chart-workspace", false, chartError, healthError);
             ImGui::End();
             return;
         }
@@ -929,10 +1052,27 @@ static void DrawMarketDataPanel()
         available,
         g_mainRenderSurface);
     if (g_mainRenderSurface.selectionChanged) {
-        trading::ui::SelectIndicator(
-            g_indicatorManagerUi,
-            g_mainRenderSurface.selectedOwnerId,
-            g_mainRenderSurface.selectionDoubleClicked);
+        if (trading::app::FindIndicatorDefinition(
+                g_indicatorDefinitions,
+                g_mainRenderSurface.selectedOwnerId) != nullptr)
+        {
+            trading::ui::SelectIndicator(
+                g_indicatorManagerUi,
+                g_mainRenderSurface.selectedOwnerId,
+                g_mainRenderSurface.selectionDoubleClicked);
+        }
+        else {
+            trading::app::ComparisonDefinition comparison;
+            if (g_comparisonModule.FindDefinition(
+                    g_mainRenderSurface.selectedOwnerId,
+                    comparison))
+            {
+                trading::ui::SelectComparison(
+                    g_comparisonManagerUi,
+                    comparison.id,
+                    g_mainRenderSurface.selectionDoubleClicked);
+            }
+        }
         WakeFrames(4);
     }
     const std::uint64_t elapsedMicros = static_cast<std::uint64_t>(
@@ -1595,6 +1735,7 @@ static void BuildDefaultLayout(ImGuiID root)
     ImGui::DockBuilderDockWindow("결함", bottomLogs);
     ImGui::DockBuilderDockWindow("기능/성능", right);
     ImGui::DockBuilderDockWindow("프로퍼티", right);
+    ImGui::DockBuilderDockWindow("비교", right);
     ImGui::DockBuilderFinish(root);
 }
 
@@ -1933,91 +2074,131 @@ int WINAPI wWinMain(
             const trading::MinuteBarsPage& page,
             const trading::Continuation& continuation) {
             const double started = NowSeconds();
-            const trading::app::MarketDataApplyResult applied =
-                g_marketDataModule.ApplyMinuteBars(page, continuation);
+            const trading::app::MarketDataSnapshot before =
+                g_marketDataModule.Snapshot();
+            trading::app::MarketDataApplyResult marketApplied;
+            if (page.instrument == trading::MinuteBarInstrument::Stock &&
+                !before.code.empty() && before.code == page.code)
+            {
+                marketApplied =
+                    g_marketDataModule.ApplyMinuteBars(page, continuation);
+            }
+            const trading::app::ComparisonApplyResult comparisonApplied =
+                g_comparisonModule.ApplyMinuteBars(page, continuation);
             const std::uint64_t elapsedMicros = static_cast<std::uint64_t>(
                 (NowSeconds() - started) * 1000000.0);
-            const trading::app::MarketDataSnapshot snapshot =
+            const trading::app::MarketDataSnapshot market =
                 g_marketDataModule.Snapshot();
+            const trading::app::ComparisonModuleSnapshot comparison =
+                g_comparisonModule.Snapshot();
             RecordFeatureWork(
                 "market-data",
                 elapsedMicros,
-                snapshot.retainedBytes,
-                snapshot.code.empty() ? 0 : 1,
-                snapshot.hasLatestBar ? 2 : 0,
+                market.retainedBytes,
+                market.code.empty() ? 0 : 1,
+                market.hasLatestBar ? 2 : 0,
                 0,
-                applied.stale ? 1 : 0);
+                marketApplied.stale ? 1 : 0);
+            RecordFeatureWork(
+                "comparison",
+                elapsedMicros,
+                comparison.retainedBytes +
+                    g_comparisonRenderAdapter.RetainedBytes(),
+                comparison.series.size(),
+                comparison.series.size(),
+                0,
+                comparisonApplied.stale ? 1 : 0);
 
-            std::string healthError;
-            g_featureRegistry.SetHealth(
-                "market-data",
-                applied.applied,
-                applied.error,
-                healthError);
-
-            if (applied.applied) {
+            if (marketApplied.applied) {
                 g_tradingState.UpdateCurrentPrice(
-                    applied.code,
-                    applied.latestPriceWon);
-                g_log.Add(
-                    "DATA",
-                    "실제 분봉 적용 완료: %s %d분 %zu봉",
-                    page.code.c_str(),
-                    page.minuteUnit,
-                    page.bars.size());
-
+                    marketApplied.code,
+                    marketApplied.latestPriceWon);
                 std::string subscriptionError;
-                if (
-                    !g_runtimeRunner ||
-                    !g_runtimeRunner->SubscribeStockTrades(
-                        page.code,
-                        subscriptionError))
+                if (g_runtimeRunner &&
+                    g_runtimeRunner->SubscribeStockTrades(
+                        page.code, subscriptionError))
                 {
-                    g_marketDataModule.SetStockTradeSubscriptionRequested(false);
-                    g_log.Add(
-                        "FAULT",
-                        "0B 실시간 등록 실패: %s",
-                        subscriptionError.c_str());
-                }
-                else {
                     g_marketDataModule.SetStockTradeSubscriptionRequested(true);
-                    g_log.Add(
-                        "WS",
-                        "0B 실시간 등록 요청: %s",
-                        page.code.c_str());
                 }
             }
-            else if (!applied.stale) {
-                g_log.Add("FAULT", "실제 분봉 오류: %s", applied.error.c_str());
+            if (comparisonApplied.applied) {
+                trading::app::ComparisonDefinition definition;
+                if (g_comparisonModule.FindDefinition(
+                        comparisonApplied.comparisonId,
+                        definition))
+                {
+                    std::string subscriptionError;
+                    const bool subscribed = definition.kind ==
+                        trading::app::ComparisonInstrumentKind::Stock
+                            ? g_runtimeRunner &&
+                                g_runtimeRunner->SubscribeStockTrades(
+                                    definition.code, subscriptionError)
+                            : g_runtimeRunner &&
+                                g_runtimeRunner->SubscribeIndexValues(
+                                    definition.code, subscriptionError);
+                    if (!subscribed) {
+                        g_log.Add(
+                            "FAULT",
+                            "비교 실시간 등록 실패: %s",
+                            subscriptionError.c_str());
+                    }
+                }
+            }
+            if (!marketApplied.applied && !comparisonApplied.applied &&
+                !marketApplied.stale && !comparisonApplied.stale)
+            {
+                const std::string error = !marketApplied.error.empty()
+                    ? marketApplied.error
+                    : comparisonApplied.error;
+                if (!error.empty()) {
+                    g_log.Add("FAULT", "분봉 적용 실패: %s", error.c_str());
+                }
             }
             WakeFrames(4);
         };
         callbacks.stockTrade = [](
             const trading::StockTradeTick& tick) {
             const double started = NowSeconds();
-            const trading::app::MarketDataApplyResult applied =
+            const trading::app::MarketDataApplyResult marketApplied =
                 g_marketDataModule.ApplyStockTradeTick(tick);
+            const trading::app::ComparisonApplyResult comparisonApplied =
+                g_comparisonModule.ApplyStockTradeTick(tick);
             const std::uint64_t elapsedMicros = static_cast<std::uint64_t>(
                 (NowSeconds() - started) * 1000000.0);
-            const trading::app::MarketDataSnapshot snapshot =
-                g_marketDataModule.Snapshot();
-            RecordFeatureWork(
-                "market-data",
-                elapsedMicros,
-                snapshot.retainedBytes,
-                snapshot.code.empty() ? 0 : 1,
-                snapshot.hasLatestBar ? 2 : 0,
-                0,
-                applied.stale ? 1 : 0);
-
-            if (applied.applied) {
+            if (marketApplied.applied) {
                 g_tradingState.UpdateCurrentPrice(
-                    applied.code,
-                    applied.latestPriceWon);
+                    marketApplied.code,
+                    marketApplied.latestPriceWon);
+            }
+            if (marketApplied.applied || comparisonApplied.applied) {
+                WakeFrames(2);
+            }
+            else if (!marketApplied.stale && !comparisonApplied.stale) {
+                const std::string error = !marketApplied.error.empty()
+                    ? marketApplied.error
+                    : comparisonApplied.error;
+                if (!error.empty()) {
+                    g_log.Add("FAULT", "0B 병합 실패: %s", error.c_str());
+                }
+            }
+            RecordFeatureWork(
+                "comparison",
+                elapsedMicros,
+                g_comparisonModule.Snapshot().retainedBytes,
+                g_comparisonModule.Snapshot().series.size(),
+                g_comparisonModule.Snapshot().series.size(),
+                0,
+                comparisonApplied.stale ? 1 : 0);
+        };
+        callbacks.indexValue = [](
+            const trading::IndexValueTick& tick) {
+            const trading::app::ComparisonApplyResult applied =
+                g_comparisonModule.ApplyIndexValueTick(tick);
+            if (applied.applied) {
                 WakeFrames(2);
             }
             else if (!applied.stale && !applied.error.empty()) {
-                g_log.Add("FAULT", "0B 분봉 병합 실패: %s", applied.error.c_str());
+                g_log.Add("FAULT", "0I 지수 병합 실패: %s", applied.error.c_str());
             }
         };
 
@@ -2158,6 +2339,12 @@ int WINAPI wWinMain(
             g_indicatorDefinitions,
             g_indicatorManagerUi,
             ApplyIndicatorConfiguration);
+        trading::ui::DrawComparisonManagerWindow(
+            g_comparisonDefinitions,
+            g_comparisonModule.Snapshot(),
+            g_comparisonManagerUi,
+            ApplyComparisonDefinitions,
+            RequestComparisonData);
         DrawDashboard();
         DrawLogWindow("로그", g_log);
         DrawLogWindow("신호", g_signalLog);

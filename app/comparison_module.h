@@ -1,6 +1,7 @@
-#pragma once
+﻿#pragma once
 
 #include "../core/kiwoom_market_data.h"
+#include "../core/kiwoom_index_realtime.h"
 #include "feature_registry.h"
 #include "../render/render_document.h"
 
@@ -120,7 +121,7 @@ namespace trading::app
 
         ComparisonModuleSnapshot Snapshot() const;
 
-        const ComparisonDefinition* FindDefinition(
+        bool FindDefinition(
             const std::string& comparisonId,
             ComparisonDefinition& copy) const noexcept;
 

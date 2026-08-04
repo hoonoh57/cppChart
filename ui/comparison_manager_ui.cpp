@@ -1,4 +1,4 @@
-#include "comparison_manager_ui.h"
+﻿#include "comparison_manager_ui.h"
 
 #include "imgui.h"
 
@@ -458,10 +458,18 @@ namespace trading::ui
             }
         }
 
+        char displayName[128]{};
+        std::snprintf(
+            displayName,
+            sizeof(displayName),
+            "%s",
+            state.draft.displayName.c_str());
         if (ImGui::InputText(
                 "표시명",
-                &state.draft.displayName))
+                displayName,
+                sizeof(displayName)))
         {
+            state.draft.displayName = displayName;
             state.dirty = true;
         }
         const char* placements[] = {
@@ -479,16 +487,32 @@ namespace trading::ui
             state.dirty = true;
         }
         if (placement == 0) {
+            char paneId[128]{};
+            char paneTitle[128]{};
+            std::snprintf(
+                paneId,
+                sizeof(paneId),
+                "%s",
+                state.draft.paneId.c_str());
+            std::snprintf(
+                paneTitle,
+                sizeof(paneTitle),
+                "%s",
+                state.draft.paneTitle.c_str());
             if (ImGui::InputText(
                     "패널 ID",
-                    &state.draft.paneId))
+                    paneId,
+                    sizeof(paneId)))
             {
+                state.draft.paneId = paneId;
                 state.dirty = true;
             }
             if (ImGui::InputText(
                     "패널 제목",
-                    &state.draft.paneTitle))
+                    paneTitle,
+                    sizeof(paneTitle)))
             {
+                state.draft.paneTitle = paneTitle;
                 state.dirty = true;
             }
             if (ImGui::DragFloat(

@@ -10,6 +10,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    core\json_lite.cpp ^
    core\indicator_engine.cpp ^
    core\sma_indicator.cpp ^
+   core\standard_indicators.cpp ^
    core\jma_indicator.cpp ^
    core\obv_indicator.cpp ^
    core\adx_indicator.cpp ^
@@ -17,6 +18,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    core\kiwoom_protocol.cpp ^
    core\kiwoom_realtime_subscription.cpp ^
    core\kiwoom_market_data.cpp ^
+   core\kiwoom_index_realtime.cpp ^
    core\runtime_config.cpp ^
    core\kiwoom_session.cpp ^
    core\trading_state.cpp ^
@@ -35,6 +37,8 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    app\default_indicator_render_plan.cpp ^
    app\indicator_properties.cpp ^
    app\indicator_workspace_coordinator.cpp ^
+   app\comparison_module.cpp ^
+   app\comparison_render_adapter.cpp ^
    render\chart_viewport.cpp ^
    render\time_axis.cpp ^
    render\value_grid.cpp ^
@@ -45,6 +49,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    render\market_chart_builder.cpp ^
    ui\render_document_renderer.cpp ^
    ui\indicator_manager_ui.cpp ^
+   ui\comparison_manager_ui.cpp ^
    platform\kiwoom_runtime_runner.cpp ^
    platform\winhttp_transport.cpp ^
    platform\winhttp_kiwoom_transport.cpp ^

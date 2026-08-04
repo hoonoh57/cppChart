@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "../core/kiwoom_runtime_engine.h"
+#include "../core/kiwoom_index_realtime.h"
 
 #include <atomic>
 #include <chrono>
@@ -10,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 
@@ -77,6 +79,8 @@ namespace trading::platform
             const Continuation& continuation)> minuteBars;
         std::function<void(
             const StockTradeTick& tick)> stockTrade;
+        std::function<void(
+            const IndexValueTick& tick)> indexValue;
     };
 
     class KiwoomRuntimeRunner final
@@ -118,6 +122,14 @@ namespace trading::platform
             const std::string& stockCode,
             std::string& error);
 
+        bool SubscribeIndexValues(
+            const std::string& indexCode,
+            std::string& error);
+
+        bool UnsubscribeIndexValues(
+            const std::string& indexCode,
+            std::string& error);
+
         bool SubmitOrder(
             const OrderIntent& intent,
             std::string& error);
@@ -141,7 +153,7 @@ namespace trading::platform
         void HandleAction(
             KiwoomRuntimeAction action);
 
-        void TryQueueStockTradeSubscription();
+        void TryQueueRealtimeSubscriptions();
 
         void StartReceiver();
 
@@ -179,7 +191,9 @@ namespace trading::platform
         std::thread receiverThread_;
 
         std::mutex subscriptionMutex_;
-        std::string stockTradeCode_;
-        bool stockTradeSubscriptionSent_ = false;
+        std::set<std::string> stockTradeCodes_;
+        std::set<std::string> stockTradeSubscriptionsSent_;
+        std::set<std::string> indexValueCodes_;
+        std::set<std::string> indexValueSubscriptionsSent_;
     };
 }

@@ -1,9 +1,10 @@
-#include "indicator_configuration.h"
+﻿#include "indicator_configuration.h"
 
 #include "indicator_properties.h"
 #include "../core/adx_indicator.h"
 #include "../core/jma_indicator.h"
 #include "../core/obv_indicator.h"
+#include "../core/standard_indicators.h"
 #include "../core/vwap_indicator.h"
 
 #include <algorithm>
@@ -177,6 +178,12 @@ namespace trading::app
     {
         static const std::vector<IndicatorCatalogEntry> catalog = {
             { "SMA", "SMA 단순이동평균" },
+            { "EMA", "EMA 지수이동평균" },
+            { "BOLLINGER", "Bollinger Bands" },
+            { "RSI", "RSI 상대강도" },
+            { "MACD", "MACD 추세모멘텀" },
+            { "DMI", "DMI +DI/-DI/ADX" },
+            { "SUPERTREND", "SuperTrend" },
             { "JMA", "JMA 적응형 이동평균" },
             { "VWAP", "VWAP 세션 밴드" },
             { "OBV", "OBV 거래량 흐름" },
@@ -209,6 +216,105 @@ namespace trading::app
                 {},
                 { 255, 210, 64, 255 },
                 1.5f));
+        }
+        else if (spec.type == "EMA") {
+            candidate.outputs.push_back(LineBinding(
+                spec, indicators::EmaValueOutput, "price", "Price",
+                "value", "EMA", {}, { 255, 154, 64, 255 }, 1.6f));
+        }
+        else if (spec.type == "BOLLINGER") {
+            candidate.outputs.push_back(LineBinding(
+                spec, indicators::BollingerMiddleOutput, "price", "Price",
+                "middle", "Middle", {}, { 222, 222, 230, 230 }, 1.2f));
+            candidate.outputs.push_back(LineBinding(
+                spec, indicators::BollingerUpperOutput, "price", "Price",
+                "upper", "Upper", {}, { 190, 92, 235, 220 }, 1.1f));
+            candidate.outputs.push_back(LineBinding(
+                spec, indicators::BollingerLowerOutput, "price", "Price",
+                "lower", "Lower", {}, { 190, 92, 235, 220 }, 1.1f));
+        }
+        else if (spec.type == "RSI") {
+            const std::string paneId = "indicator." + spec.id + ".pane";
+            IndicatorOutputBinding value = LineBinding(
+                spec, indicators::RsiValueOutput, paneId, "RSI",
+                "value", "RSI", {}, { 182, 120, 255, 255 }, 1.6f);
+            ConfigureAdxPane(value);
+            candidate.outputs.push_back(value);
+            IndicatorReferenceBinding overbought = ReferenceBinding(
+                spec, paneId, "RSI", "reference.70", "Overbought", 70.0);
+            ConfigureAdxReference(overbought);
+            overbought.color = { 235, 92, 92, 210 };
+            candidate.references.push_back(overbought);
+            IndicatorReferenceBinding oversold = ReferenceBinding(
+                spec, paneId, "RSI", "reference.30", "Oversold", 30.0);
+            ConfigureAdxReference(oversold);
+            oversold.color = { 72, 154, 235, 210 };
+            candidate.references.push_back(oversold);
+        }
+        else if (spec.type == "MACD") {
+            const std::string paneId = "indicator." + spec.id + ".pane";
+            IndicatorOutputBinding macd = LineBinding(
+                spec, indicators::MacdValueOutput, paneId, "MACD",
+                "value", "MACD", {}, { 64, 210, 225, 255 }, 1.5f);
+            macd.paneHeightWeight = 0.30f;
+            macd.paneValueScale = render::PaneValueScale::Symmetric;
+            macd.valueDecimals = 2;
+            candidate.outputs.push_back(macd);
+            IndicatorOutputBinding signal = LineBinding(
+                spec, indicators::MacdSignalOutput, paneId, "MACD",
+                "signal", "Signal", {}, { 255, 196, 64, 255 }, 1.2f);
+            signal.paneHeightWeight = 0.30f;
+            signal.paneValueScale = render::PaneValueScale::Symmetric;
+            signal.valueDecimals = 2;
+            candidate.outputs.push_back(signal);
+            IndicatorOutputBinding histogram = HistogramBinding(
+                spec, indicators::MacdHistogramOutput, paneId, "MACD",
+                "histogram", "Histogram", {},
+                { 58, 196, 125, 210 }, { 235, 80, 92, 210 });
+            histogram.paneHeightWeight = 0.30f;
+            histogram.paneValueScale = render::PaneValueScale::Symmetric;
+            histogram.valueDecimals = 2;
+            candidate.outputs.push_back(histogram);
+            IndicatorReferenceBinding zero = ReferenceBinding(
+                spec, paneId, "MACD", "reference.zero", "Zero", 0.0);
+            zero.paneHeightWeight = 0.30f;
+            zero.paneValueScale = render::PaneValueScale::Symmetric;
+            zero.valueDecimals = 2;
+            candidate.references.push_back(zero);
+        }
+        else if (spec.type == "DMI") {
+            const std::string paneId = "indicator." + spec.id + ".pane";
+            IndicatorOutputBinding plus = LineBinding(
+                spec, indicators::DmiPlusOutput, paneId, "DMI",
+                "plus", "+DI", {}, { 58, 196, 125, 255 }, 1.5f);
+            ConfigureAdxPane(plus);
+            candidate.outputs.push_back(plus);
+            IndicatorOutputBinding minus = LineBinding(
+                spec, indicators::DmiMinusOutput, paneId, "DMI",
+                "minus", "-DI", {}, { 235, 80, 92, 255 }, 1.5f);
+            ConfigureAdxPane(minus);
+            candidate.outputs.push_back(minus);
+            IndicatorOutputBinding adx = LineBinding(
+                spec, indicators::DmiAdxOutput, paneId, "DMI",
+                "adx", "ADX", {}, { 255, 196, 64, 255 }, 1.6f);
+            ConfigureAdxPane(adx);
+            candidate.outputs.push_back(adx);
+            IndicatorReferenceBinding twenty = ReferenceBinding(
+                spec, paneId, "DMI", "reference.20", "20", 20.0);
+            ConfigureAdxReference(twenty);
+            candidate.references.push_back(twenty);
+            IndicatorReferenceBinding twentyFive = ReferenceBinding(
+                spec, paneId, "DMI", "reference.25", "25", 25.0);
+            ConfigureAdxReference(twentyFive);
+            candidate.references.push_back(twentyFive);
+        }
+        else if (spec.type == "SUPERTREND") {
+            candidate.outputs.push_back(LineBinding(
+                spec, indicators::SuperTrendUpOutput, "price", "Price",
+                "up", "Up", {}, { 58, 196, 125, 255 }, 2.0f));
+            candidate.outputs.push_back(LineBinding(
+                spec, indicators::SuperTrendDownOutput, "price", "Price",
+                "down", "Down", {}, { 235, 80, 92, 255 }, 2.0f));
         }
         else if (spec.type == "JMA") {
             candidate.outputs.push_back(LineBinding(
@@ -405,6 +511,28 @@ namespace trading::app
 
         if (type == "SMA") {
             spec.parameters.emplace("period", 20.0);
+        }
+        else if (type == "EMA") {
+            spec.parameters.emplace("period", 20.0);
+        }
+        else if (type == "BOLLINGER") {
+            spec.parameters.emplace("period", 20.0);
+            spec.parameters.emplace("deviation", 2.0);
+        }
+        else if (type == "RSI") {
+            spec.parameters.emplace("period", 14.0);
+        }
+        else if (type == "MACD") {
+            spec.parameters.emplace("fast_period", 12.0);
+            spec.parameters.emplace("slow_period", 26.0);
+            spec.parameters.emplace("signal_period", 9.0);
+        }
+        else if (type == "DMI") {
+            spec.parameters.emplace("period", 14.0);
+        }
+        else if (type == "SUPERTREND") {
+            spec.parameters.emplace("period", 14.0);
+            spec.parameters.emplace("multiplier", 2.0);
         }
         else if (type == "JMA") {
             spec.parameters.emplace("period", 20.0);

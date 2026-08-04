@@ -72,6 +72,28 @@ namespace trading::render
                 return false;
             }
 
+            std::set<std::string> axisIds;
+            for (const ValueAxis& axis : pane.valueAxes) {
+                if (axis.id.empty() || !axisIds.insert(axis.id).second) {
+                    error = "duplicate or empty value axis id: " + pane.id;
+                    return false;
+                }
+                if (axis.valueDecimals < 0 || axis.valueDecimals > 8 ||
+                    !ValidColor(axis.color))
+                {
+                    error = "render value axis metadata is invalid: " + axis.id;
+                    return false;
+                }
+                if (axis.valueScale == PaneValueScale::Fixed &&
+                    (!std::isfinite(axis.fixedMinimum) ||
+                     !std::isfinite(axis.fixedMaximum) ||
+                     axis.fixedMaximum <= axis.fixedMinimum))
+                {
+                    error = "fixed value axis range is invalid: " + axis.id;
+                    return false;
+                }
+            }
+
             for (const LegendEntry& legend : pane.legends) {
                 if (!AddUnique(elementIds, legend.id, error)) return false;
                 if (legend.label.empty()) {
@@ -127,6 +149,12 @@ namespace trading::render
 
             for (const LineSeries& series : pane.lines) {
                 if (!AddUnique(elementIds, series.id, error)) return false;
+                if (!series.axisId.empty() &&
+                    axisIds.find(series.axisId) == axisIds.end())
+                {
+                    error = "line series references missing value axis: " + series.id;
+                    return false;
+                }
                 if (!std::isfinite(series.width) || series.width <= 0.0f ||
                     !ValidLineStyle(series.style)) {
                     error = "line series width is invalid: " + series.id;

@@ -109,6 +109,41 @@ namespace trading::app
             candidate.parameters.push_back(
                 IntegerParameter("period", "Period", 1, 100000));
         }
+        else if (spec.type == "EMA") {
+            candidate.displayName = "EMA";
+            candidate.parameters.push_back(
+                IntegerParameter("period", "Period", 1, 100000));
+        }
+        else if (spec.type == "BOLLINGER") {
+            candidate.displayName = "Bollinger Bands";
+            candidate.parameters.push_back(
+                IntegerParameter("period", "Period", 2, 100000));
+            candidate.parameters.push_back(
+                DecimalParameter("deviation", "Deviation", 0.0, 100.0, 0.1, 1.0));
+        }
+        else if (spec.type == "RSI") {
+            candidate.displayName = "RSI";
+            candidate.parameters.push_back(
+                IntegerParameter("period", "Period", 1, 10000));
+        }
+        else if (spec.type == "MACD") {
+            candidate.displayName = "MACD";
+            candidate.parameters.push_back(IntegerParameter("fast_period", "Fast period", 1, 10000));
+            candidate.parameters.push_back(IntegerParameter("slow_period", "Slow period", 2, 10000));
+            candidate.parameters.push_back(IntegerParameter("signal_period", "Signal period", 1, 10000));
+        }
+        else if (spec.type == "DMI") {
+            candidate.displayName = "DMI";
+            candidate.parameters.push_back(
+                IntegerParameter("period", "Period", 1, 10000));
+        }
+        else if (spec.type == "SUPERTREND") {
+            candidate.displayName = "SuperTrend";
+            candidate.parameters.push_back(
+                IntegerParameter("period", "ATR period", 1, 10000));
+            candidate.parameters.push_back(
+                DecimalParameter("multiplier", "Multiplier", 0.01, 100.0, 0.1, 1.0));
+        }
         else if (spec.type == "JMA") {
             candidate.displayName = "JMA";
             candidate.parameters.push_back(
@@ -257,6 +292,45 @@ namespace trading::app
             TryParameter(spec, "period", period))
         {
             return "SMA " + FormatNumber(period);
+        }
+        if (spec.type == "EMA" &&
+            TryParameter(spec, "period", period))
+        {
+            return "EMA " + FormatNumber(period);
+        }
+        if (spec.type == "BOLLINGER" &&
+            TryParameter(spec, "period", period) &&
+            TryParameter(spec, "deviation", power))
+        {
+            return "BB " + FormatNumber(period) + " x" + FormatNumber(power);
+        }
+        if (spec.type == "RSI" &&
+            TryParameter(spec, "period", period))
+        {
+            return "RSI " + FormatNumber(period);
+        }
+        if (spec.type == "MACD") {
+            double fast = 0.0;
+            double slow = 0.0;
+            if (TryParameter(spec, "fast_period", fast) &&
+                TryParameter(spec, "slow_period", slow) &&
+                TryParameter(spec, "signal_period", signalPeriod))
+            {
+                return "MACD " + FormatNumber(fast) + "/" +
+                    FormatNumber(slow) + "/" + FormatNumber(signalPeriod);
+            }
+        }
+        if (spec.type == "DMI" &&
+            TryParameter(spec, "period", period))
+        {
+            return "DMI " + FormatNumber(period);
+        }
+        if (spec.type == "SUPERTREND" &&
+            TryParameter(spec, "period", period) &&
+            TryParameter(spec, "multiplier", power))
+        {
+            return "SuperTrend " + FormatNumber(period) + " x" +
+                FormatNumber(power);
         }
         if (spec.type == "JMA" &&
             TryParameter(spec, "period", period) &&

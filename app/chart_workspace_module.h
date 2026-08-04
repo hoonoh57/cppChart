@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "../render/render_document.h"
 #include "feature_registry.h"
@@ -14,6 +14,8 @@ namespace trading::app
 {
     struct IndicatorModuleSnapshot;
     class IndicatorRenderAdapter;
+    struct ComparisonModuleSnapshot;
+    class ComparisonRenderAdapter;
 
     enum class ChartWorkspaceState
     {
@@ -40,6 +42,7 @@ namespace trading::app
         std::uint64_t sourceRevision = 0;
         std::uint64_t completedRevision = 0;
         std::uint64_t indicatorRevision = 0;
+        std::uint64_t comparisonRevision = 0;
         std::uint64_t documentRevision = 0;
         std::size_t sourceBarCount = 0;
         std::size_t paneCount = 0;
@@ -78,6 +81,17 @@ namespace trading::app
             IndicatorRenderAdapter& indicatorAdapter,
             std::string& error);
 
+        bool UpdateMarketChart(
+            const std::string& workspaceId,
+            const std::string& title,
+            const std::string& seriesId,
+            const ChartMarketSource& source,
+            const IndicatorModuleSnapshot& indicatorSnapshot,
+            IndicatorRenderAdapter& indicatorAdapter,
+            const ComparisonModuleSnapshot& comparisonSnapshot,
+            ComparisonRenderAdapter& comparisonAdapter,
+            std::string& error);
+
         void SetError(const std::string& error);
 
         ChartWorkspaceSnapshot Snapshot() const;
@@ -94,6 +108,14 @@ namespace trading::app
             const IndicatorModuleSnapshot& indicatorSnapshot,
             const IndicatorRenderAdapter& indicatorAdapter) const noexcept;
 
+
+        bool NeedsUpdate(
+            std::uint64_t sourceRevision,
+            const IndicatorModuleSnapshot& indicatorSnapshot,
+            const IndicatorRenderAdapter& indicatorAdapter,
+            const ComparisonModuleSnapshot& comparisonSnapshot,
+            const ComparisonRenderAdapter& comparisonAdapter) const noexcept;
+
         static const char* StateName(
             ChartWorkspaceState state) noexcept;
 
@@ -105,11 +127,17 @@ namespace trading::app
             const ChartMarketSource& source,
             const IndicatorModuleSnapshot* indicatorSnapshot,
             IndicatorRenderAdapter* indicatorAdapter,
+            const ComparisonModuleSnapshot* comparisonSnapshot,
+            ComparisonRenderAdapter* comparisonAdapter,
             std::string& error);
 
         static std::uint64_t IndicatorCompositeRevision(
             const IndicatorModuleSnapshot& snapshot,
             const IndicatorRenderAdapter& adapter) noexcept;
+
+        static std::uint64_t ComparisonCompositeRevision(
+            const ComparisonModuleSnapshot& snapshot,
+            const ComparisonRenderAdapter& adapter) noexcept;
 
         static std::size_t CountSeries(
             const render::RenderDocument& document) noexcept;
@@ -127,6 +155,7 @@ namespace trading::app
         std::uint64_t sourceRevision_ = 0;
         std::uint64_t completedRevision_ = 0;
         std::uint64_t indicatorRevision_ = 0;
+        std::uint64_t comparisonRevision_ = 0;
         std::uint64_t documentRevision_ = 0;
         std::size_t sourceBarCount_ = 0;
         std::string error_;

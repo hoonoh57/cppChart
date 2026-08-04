@@ -14,6 +14,9 @@ if errorlevel 1 exit /b 1
 call :build_and_run indicator_engine_tests.exe "tests\indicator_engine_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\sma_indicator.cpp"
 if errorlevel 1 exit /b 1
 
+call :build_and_run standard_indicators_tests.exe "tests\standard_indicators_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\standard_indicators.cpp"
+if errorlevel 1 exit /b 1
+
 call :build_and_run jma_indicator_tests.exe "tests\jma_indicator_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\jma_indicator.cpp"
 if errorlevel 1 exit /b 1
 
@@ -26,10 +29,10 @@ if errorlevel 1 exit /b 1
 call :build_and_run vwap_indicator_tests.exe "tests\vwap_indicator_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\vwap_indicator.cpp"
 if errorlevel 1 exit /b 1
 
-call :build_and_run indicator_module_tests.exe "tests\indicator_module_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\sma_indicator.cpp core\jma_indicator.cpp core\obv_indicator.cpp core\adx_indicator.cpp core\vwap_indicator.cpp app\indicator_module.cpp"
+call :build_and_run indicator_module_tests.exe "tests\indicator_module_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\sma_indicator.cpp core\jma_indicator.cpp core\obv_indicator.cpp core\adx_indicator.cpp core\vwap_indicator.cpp core\standard_indicators.cpp app\indicator_module.cpp"
 if errorlevel 1 exit /b 1
 
-call :build_and_run indicator_module_revision_tests.exe "tests\indicator_module_revision_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\sma_indicator.cpp core\jma_indicator.cpp core\obv_indicator.cpp core\adx_indicator.cpp core\vwap_indicator.cpp app\indicator_module.cpp"
+call :build_and_run indicator_module_revision_tests.exe "tests\indicator_module_revision_tests.cpp core\json_lite.cpp core\indicator_engine.cpp core\sma_indicator.cpp core\jma_indicator.cpp core\obv_indicator.cpp core\adx_indicator.cpp core\vwap_indicator.cpp core\standard_indicators.cpp app\indicator_module.cpp"
 if errorlevel 1 exit /b 1
 
 call :build_and_run indicator_render_adapter_tests.exe "tests\indicator_render_adapter_tests.cpp app\indicator_render_adapter.cpp render\render_document.cpp"
@@ -45,6 +48,15 @@ call :build_and_run indicator_properties_tests.exe "tests\indicator_properties_t
 if errorlevel 1 exit /b 1
 
 call :build_and_run indicator_configuration_tests.exe "tests\indicator_configuration_tests.cpp app\indicator_configuration.cpp app\indicator_properties.cpp app\indicator_render_adapter.cpp render\render_document.cpp"
+if errorlevel 1 exit /b 1
+
+call :build_and_run kiwoom_index_realtime_tests.exe "tests\kiwoom_index_realtime_tests.cpp core\json_lite.cpp core\kiwoom_protocol.cpp core\kiwoom_index_realtime.cpp"
+if errorlevel 1 exit /b 1
+
+call :build_and_run comparison_module_tests.exe "tests\comparison_module_tests.cpp core\json_lite.cpp core\kiwoom_protocol.cpp core\kiwoom_market_data.cpp core\kiwoom_index_realtime.cpp app\comparison_module.cpp"
+if errorlevel 1 exit /b 1
+
+call :build_and_run comparison_render_adapter_tests.exe "tests\comparison_render_adapter_tests.cpp app\comparison_render_adapter.cpp render\render_document.cpp"
 if errorlevel 1 exit /b 1
 
 call :build_and_run feature_registry_tests.exe "tests\feature_registry_tests.cpp app\feature_registry.cpp"
@@ -80,10 +92,10 @@ if errorlevel 1 exit /b 1
 call :build_and_run market_data_module_tests.exe "tests\market_data_module_tests.cpp core\json_lite.cpp core\kiwoom_market_data.cpp app\market_data_module.cpp"
 if errorlevel 1 exit /b 1
 
-call :build_and_run chart_workspace_module_tests.exe "tests\chart_workspace_module_tests.cpp render\render_document.cpp render\market_chart_builder.cpp app\indicator_render_adapter.cpp app\chart_workspace_module.cpp"
+call :build_and_run chart_workspace_module_tests.exe "tests\chart_workspace_module_tests.cpp render\render_document.cpp render\market_chart_builder.cpp app\indicator_render_adapter.cpp app\comparison_render_adapter.cpp app\chart_workspace_module.cpp"
 if errorlevel 1 exit /b 1
 
-call :build_and_run chart_workspace_indicator_tests.exe "tests\chart_workspace_indicator_tests.cpp render\render_document.cpp render\market_chart_builder.cpp app\indicator_render_adapter.cpp app\chart_workspace_module.cpp"
+call :build_and_run chart_workspace_indicator_tests.exe "tests\chart_workspace_indicator_tests.cpp render\render_document.cpp render\market_chart_builder.cpp app\indicator_render_adapter.cpp app\comparison_render_adapter.cpp app\chart_workspace_module.cpp"
 if errorlevel 1 exit /b 1
 
 call :build_and_run kiwoom_realtime_subscription_tests.exe "tests\kiwoom_realtime_subscription_tests.cpp core\json_lite.cpp core\kiwoom_realtime_subscription.cpp"
@@ -130,7 +142,7 @@ if errorlevel 1 exit /b 1
 call :build_and_run kiwoom_runtime_engine_tests.exe "tests\kiwoom_runtime_engine_tests.cpp core\json_lite.cpp core\kiwoom_protocol.cpp core\kiwoom_market_data.cpp core\runtime_config.cpp core\kiwoom_session.cpp core\trading_state.cpp core\order_coordinator.cpp core\kiwoom_events.cpp core\kiwoom_gateway_core.cpp core\kiwoom_reconciliation.cpp core\safe_liquidation.cpp core\kiwoom_runtime_engine.cpp"
 if errorlevel 1 exit /b 1
 
-call :build_and_run kiwoom_runtime_runner_tests.exe "tests\kiwoom_runtime_runner_tests.cpp core\json_lite.cpp core\kiwoom_protocol.cpp core\kiwoom_market_data.cpp core\runtime_config.cpp core\kiwoom_session.cpp core\trading_state.cpp core\order_coordinator.cpp core\kiwoom_events.cpp core\kiwoom_gateway_core.cpp core\kiwoom_reconciliation.cpp core\safe_liquidation.cpp core\kiwoom_runtime_engine.cpp core\kiwoom_realtime_subscription.cpp platform\kiwoom_runtime_runner.cpp"
+call :build_and_run kiwoom_runtime_runner_tests.exe "tests\kiwoom_runtime_runner_tests.cpp core\json_lite.cpp core\kiwoom_protocol.cpp core\kiwoom_market_data.cpp core\runtime_config.cpp core\kiwoom_session.cpp core\trading_state.cpp core\order_coordinator.cpp core\kiwoom_events.cpp core\kiwoom_gateway_core.cpp core\kiwoom_reconciliation.cpp core\safe_liquidation.cpp core\kiwoom_runtime_engine.cpp core\kiwoom_realtime_subscription.cpp core\kiwoom_index_realtime.cpp platform\kiwoom_runtime_runner.cpp"
 if errorlevel 1 exit /b 1
 
 echo.

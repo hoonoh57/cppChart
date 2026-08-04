@@ -219,12 +219,21 @@ namespace trading::render
         std::uint8_t alpha = 255;
     };
 
+    enum class LineStyle
+    {
+        Solid,
+        Dashed,
+        Dotted
+    };
+
     struct LegendEntry final
     {
         std::string id;
         std::string ownerId;
         std::string label;
         ColorRgba color;
+        float width = 1.0f;
+        LineStyle style = LineStyle::Solid;
         bool selectable = true;
         bool visible = true;
     };
@@ -278,6 +287,7 @@ namespace trading::render
         SharedTailSeries<LinePoint> points;
         ColorRgba color;
         float width = 1.0f;
+        LineStyle style = LineStyle::Solid;
         bool visible = true;
         std::string ownerId;
     };
@@ -309,6 +319,7 @@ namespace trading::render
         double value = 0.0;
         ColorRgba color;
         float width = 1.0f;
+        LineStyle style = LineStyle::Solid;
         bool visible = true;
         std::string ownerId;
     };

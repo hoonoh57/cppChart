@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 
 $requiredFiles = @(
     '.\docs\ARCHITECTURE_CONSTITUTION.md',
@@ -11,6 +11,12 @@ $requiredFiles = @(
     '.\app\chart_workspace_module.cpp',
     '.\app\indicator_module.h',
     '.\app\indicator_module.cpp',
+    '.\app\indicator_configuration.h',
+    '.\app\indicator_configuration.cpp',
+    '.\ui\indicator_manager_ui.h',
+    '.\ui\indicator_manager_ui.cpp',
+    '.\render\pane_layout.h',
+    '.\render\pane_layout.cpp',
     '.\core\indicator_engine.h',
     '.\core\indicator_engine.cpp',
     '.\core\sma_indicator.h',
@@ -382,4 +388,66 @@ foreach ($marker in @(
     }
 }
 
-Write-Host 'Major-feature modules, accepted M6 chart contracts, and the M7 SMA/JMA/OBV/ADX/VWAP engine plus IndicatorModule live-tail cache are verified.'
+
+$indicatorConfiguration = Get-Content '.\app\indicator_configuration.cpp' -Raw
+foreach ($marker in @(
+    'IndicatorCatalog()',
+    'CreateDefaultIndicatorDefinition(',
+    'VisibleIndicatorSpecs(',
+    'BuildIndicatorRenderPlan(',
+    'DuplicateIndicatorDefinition(',
+    'MoveIndicatorToPane(')) {
+    if (-not $indicatorConfiguration.Contains($marker)) {
+        throw "Dynamic indicator configuration contract is missing: $marker"
+    }
+}
+
+$indicatorManagerUi = Get-Content '.\ui\indicator_manager_ui.cpp' -Raw
+foreach ($marker in @(
+    'DrawIndicatorManagerWindow(',
+    '지표 추가',
+    '복제',
+    '감추기',
+    '기준선 추가',
+    '과매수 추가',
+    '과매도 추가',
+    'ColorEdit4(',
+    'EditLineStyle(',
+    'EditPaneSelection(')) {
+    if (-not $indicatorManagerUi.Contains($marker)) {
+        throw "Indicator management UI contract is missing: $marker"
+    }
+}
+
+foreach ($marker in @(
+    'DrawPaneSplitter(',
+    'ImGuiMouseCursor_ResizeNS',
+    'paneHeightWeights',
+    'DrawStyledLine(')) {
+    if (-not $renderer.Contains($marker)) {
+        throw "Resizable/styled pane renderer contract is missing: $marker"
+    }
+}
+
+if ($shell.Contains('DrawIndicatorPropertiesWindow')) {
+    throw 'Hardcoded indicator property window remains in shell_main.cpp'
+}
+foreach ($marker in @(
+    'IndicatorInstanceDefinition',
+    'DrawIndicatorManagerWindow(',
+    'ApplyIndicatorConfiguration(')) {
+    if (-not $shell.Contains($marker)) {
+        throw "Shell dynamic indicator composition marker is missing: $marker"
+    }
+}
+
+foreach ($marker in @(
+    'indicator_configuration_tests.exe',
+    'pane_layout_tests.exe',
+    'render_style_tests.exe')) {
+    if (-not $runAll.Contains($marker)) {
+        throw "Dynamic indicator regression test is not in run_all: $marker"
+    }
+}
+
+Write-Host 'Major-feature modules, accepted M6 chart contracts, and dynamic M7 indicator management are verified.'

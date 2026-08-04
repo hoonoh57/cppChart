@@ -27,6 +27,14 @@ namespace trading::render
         {
             return true;
         }
+
+        bool ValidLineStyle(LineStyle style) noexcept
+        {
+            return
+                style == LineStyle::Solid ||
+                style == LineStyle::Dashed ||
+                style == LineStyle::Dotted;
+        }
     }
 
     bool ValidateRenderDocument(
@@ -74,8 +82,12 @@ namespace trading::render
                     error = "selectable render legend owner is empty: " + legend.id;
                     return false;
                 }
-                if (!ValidColor(legend.color)) {
-                    error = "render legend color is invalid: " + legend.id;
+                if (!ValidColor(legend.color) ||
+                    !std::isfinite(legend.width) ||
+                    legend.width <= 0.0f ||
+                    !ValidLineStyle(legend.style))
+                {
+                    error = "render legend style is invalid: " + legend.id;
                     return false;
                 }
             }
@@ -115,7 +127,8 @@ namespace trading::render
 
             for (const LineSeries& series : pane.lines) {
                 if (!AddUnique(elementIds, series.id, error)) return false;
-                if (!std::isfinite(series.width) || series.width <= 0.0f) {
+                if (!std::isfinite(series.width) || series.width <= 0.0f ||
+                    !ValidLineStyle(series.style)) {
                     error = "line series width is invalid: " + series.id;
                     return false;
                 }
@@ -163,7 +176,8 @@ namespace trading::render
                 if (!AddUnique(elementIds, line.id, error)) return false;
                 if (!std::isfinite(line.value) ||
                     !std::isfinite(line.width) ||
-                    line.width <= 0.0f)
+                    line.width <= 0.0f ||
+                    !ValidLineStyle(line.style))
                 {
                     error = "reference line is invalid: " + line.id;
                     return false;

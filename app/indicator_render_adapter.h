@@ -37,7 +37,9 @@ namespace trading::app
         render::ColorRgba primaryColor;
         render::ColorRgba secondaryColor;
         float width = 1.0f;
+        render::LineStyle style = render::LineStyle::Solid;
         bool visible = true;
+        std::string legendRole;
         std::string legendLabel;
     };
 
@@ -57,6 +59,7 @@ namespace trading::app
         double value = 0.0;
         render::ColorRgba color;
         float width = 1.0f;
+        render::LineStyle style = render::LineStyle::Solid;
         bool visible = true;
         std::string indicatorId;
     };

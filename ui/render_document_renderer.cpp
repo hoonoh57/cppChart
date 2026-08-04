@@ -1,6 +1,7 @@
 ﻿#include "render_document_renderer.h"
 
 #include "../render/cursor_label_layout.h"
+#include "../render/pane_layout.h"
 #include "../render/series_geometry.h"
 #include "../render/value_grid.h"
 
@@ -20,6 +21,8 @@ namespace trading::ui
         constexpr float TimeAxisHeight = 20.0f;
         constexpr float LegendItemHeight = 20.0f;
         constexpr float LegendSpacing = 4.0f;
+        constexpr float PaneSplitterHeight = 7.0f;
+        constexpr float MinimumPaneHeight = 48.0f;
         constexpr double MinimumVisibleSpan = 12.0;
 
         ImU32 ToImColor(const render::ColorRgba& color) noexcept
@@ -29,6 +32,52 @@ namespace trading::ui
                 color.green,
                 color.blue,
                 color.alpha);
+        }
+
+        void DrawStyledLine(
+            ImDrawList* draw,
+            const ImVec2& start,
+            const ImVec2& end,
+            ImU32 color,
+            float width,
+            render::LineStyle style)
+        {
+            const float dx = end.x - start.x;
+            const float dy = end.y - start.y;
+            const float length = std::sqrt(dx * dx + dy * dy);
+            if (style == render::LineStyle::Solid || length < 1.0f) {
+                draw->AddLine(start, end, color, width);
+                return;
+            }
+            const float unitX = dx / length;
+            const float unitY = dy / length;
+            if (style == render::LineStyle::Dotted) {
+                const float spacing = (std::max)(4.0f, width * 3.0f);
+                const float radius = (std::max)(1.0f, width * 0.6f);
+                for (float distance = 0.0f; distance <= length; distance += spacing) {
+                    draw->AddCircleFilled(
+                        ImVec2(
+                            start.x + unitX * distance,
+                            start.y + unitY * distance),
+                        radius,
+                        color);
+                }
+                return;
+            }
+            const float dash = (std::max)(6.0f, width * 4.0f);
+            const float gap = (std::max)(4.0f, width * 2.5f);
+            for (float distance = 0.0f; distance < length; distance += dash + gap) {
+                const float finish = (std::min)(length, distance + dash);
+                draw->AddLine(
+                    ImVec2(
+                        start.x + unitX * distance,
+                        start.y + unitY * distance),
+                    ImVec2(
+                        start.x + unitX * finish,
+                        start.y + unitY * finish),
+                    color,
+                    width);
+            }
         }
 
         struct AxisRange final
@@ -539,11 +588,13 @@ namespace trading::ui
 
                 const float centerY =
                     y + LegendItemHeight * 0.5f;
-                draw->AddLine(
+                DrawStyledLine(
+                    draw,
                     ImVec2(x + 5.0f, centerY),
                     ImVec2(x + 17.0f, centerY),
                     ToImColor(legend.color),
-                    selected ? 3.0f : 2.0f);
+                    legend.width + (selected ? 1.0f : 0.0f),
+                    legend.style);
                 draw->AddText(
                     ImVec2(x + 22.0f, y + 2.0f),
                     selected
@@ -653,6 +704,60 @@ namespace trading::ui
             state.crosshairValue = (std::max)(
                 values.minimum,
                 (std::min)(values.maximum, state.crosshairValue));
+        }
+
+        void DrawPaneSplitter(
+            const render::Pane& upperPane,
+            const render::Pane& lowerPane,
+            float width,
+            float availableHeight,
+            float totalWeight,
+            RenderSurfaceState& state)
+        {
+            ImGui::PushID(("splitter." + upperPane.id + "." + lowerPane.id).c_str());
+            ImGui::InvisibleButton(
+                "##pane_splitter",
+                ImVec2(width, PaneSplitterHeight),
+                ImGuiButtonFlags_MouseButtonLeft);
+            const bool hovered = ImGui::IsItemHovered();
+            const bool active = ImGui::IsItemActive();
+            if (hovered || active) {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+            }
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            const ImVec2 minimum = ImGui::GetItemRectMin();
+            const ImVec2 maximum = ImGui::GetItemRectMax();
+            const float centerY = (minimum.y + maximum.y) * 0.5f;
+            draw->AddRectFilled(
+                minimum,
+                maximum,
+                active
+                    ? IM_COL32(76, 112, 166, 210)
+                    : hovered
+                        ? IM_COL32(64, 82, 112, 190)
+                        : IM_COL32(28, 30, 36, 255));
+            draw->AddLine(
+                ImVec2(minimum.x, centerY),
+                ImVec2(maximum.x, centerY),
+                hovered || active
+                    ? IM_COL32(150, 184, 235, 230)
+                    : IM_COL32(75, 78, 90, 180),
+                hovered || active ? 2.0f : 1.0f);
+            if (active && ImGui::GetIO().MouseDelta.y != 0.0f) {
+                float& upperWeight = state.paneHeightWeights[upperPane.id];
+                float& lowerWeight = state.paneHeightWeights[lowerPane.id];
+                if (render::AdjustAdjacentPaneWeights(
+                        availableHeight,
+                        MinimumPaneHeight,
+                        totalWeight,
+                        ImGui::GetIO().MouseDelta.y,
+                        upperWeight,
+                        lowerWeight))
+                {
+                    state.dirty = true;
+                }
+            }
+            ImGui::PopID();
         }
 
         void DrawPane(
@@ -886,11 +991,13 @@ namespace trading::ui
                             plotOrigin.y,
                             plotHeight));
                     if (hasPrevious) {
-                        draw->AddLine(
+                        DrawStyledLine(
+                            draw,
                             previous,
                             current,
                             ToImColor(series.color),
-                            series.width + (selected ? 1.5f : 0.0f));
+                            series.width + (selected ? 1.5f : 0.0f),
+                            series.style);
                     }
                     previous = current;
                     hasPrevious = true;
@@ -906,11 +1013,19 @@ namespace trading::ui
                     values,
                     plotOrigin.y,
                     plotHeight);
-                draw->AddLine(
+                DrawStyledLine(
+                    draw,
                     ImVec2(plotOrigin.x, y),
                     ImVec2(plotEnd.x, y),
                     ToImColor(line.color),
-                    line.width + (selected ? 1.0f : 0.0f));
+                    line.width + (selected ? 1.0f : 0.0f),
+                    line.style);
+                if (!line.label.empty()) {
+                    draw->AddText(
+                        ImVec2(plotOrigin.x + 4.0f, y - 15.0f),
+                        ToImColor(line.color),
+                        line.label.c_str());
+                }
             }
 
             for (const render::MarkerSeries& series : pane.markers) {
@@ -1127,17 +1242,27 @@ namespace trading::ui
 
         surfaceState.crosshairVisible = false;
 
-        float totalWeight = 0.0f;
         for (const render::Pane& pane : document.panes) {
-            totalWeight += (std::max)(0.01f, pane.heightWeight);
+            auto found = surfaceState.paneHeightWeights.find(pane.id);
+            if (found == surfaceState.paneHeightWeights.end() ||
+                !std::isfinite(found->second) || found->second <= 0.0f)
+            {
+                surfaceState.paneHeightWeights[pane.id] =
+                    (std::max)(0.01f, pane.heightWeight);
+            }
         }
 
-        const float spacing =
-            ImGui::GetStyle().ItemSpacing.y *
+        float totalWeight = 0.0f;
+        for (const render::Pane& pane : document.panes) {
+            totalWeight += surfaceState.paneHeightWeights[pane.id];
+        }
+
+        const float splitterSpace = PaneSplitterHeight *
             static_cast<float>((std::max)(
                 static_cast<std::size_t>(0),
-                document.panes.size() - 1));
-        const float availableHeight = (std::max)(0.0f, size.y - spacing);
+                document.panes.size() - 1U));
+        const float availableHeight =
+            (std::max)(0.0f, size.y - splitterSpace);
         std::vector<PaneGeometry> paneGeometries;
         paneGeometries.reserve(document.panes.size());
 
@@ -1145,7 +1270,7 @@ namespace trading::ui
             const render::Pane& pane = document.panes[index];
             const float paneHeight =
                 availableHeight *
-                (std::max)(0.01f, pane.heightWeight) /
+                surfaceState.paneHeightWeights[pane.id] /
                 totalWeight;
             DrawPane(
                 pane,
@@ -1158,7 +1283,13 @@ namespace trading::ui
                 surfaceState,
                 paneGeometries);
             if (index + 1 < document.panes.size()) {
-                ImGui::Dummy(ImVec2(0.0f, 0.0f));
+                DrawPaneSplitter(
+                    pane,
+                    document.panes[index + 1U],
+                    size.x,
+                    availableHeight,
+                    totalWeight,
+                    surfaceState);
             }
         }
 

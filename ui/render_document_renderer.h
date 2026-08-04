@@ -7,6 +7,7 @@
 
 #include "imgui.h"
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,7 @@ namespace trading::ui
         std::string selectedLegendLabel;
         bool selectionChanged = false;
         bool selectionDoubleClicked = false;
+        std::map<std::string, float> paneHeightWeights;
     };
 
     void DrawRenderDocument(

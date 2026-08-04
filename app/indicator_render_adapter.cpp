@@ -92,6 +92,8 @@ namespace trading::app
             const std::string& ownerId,
             const std::string& label,
             render::ColorRgba color,
+            float width,
+            render::LineStyle style,
             bool visible,
             std::string& error)
         {
@@ -126,6 +128,8 @@ namespace trading::app
             legend.ownerId = ownerId;
             legend.label = label;
             legend.color = color;
+            legend.width = width;
+            legend.style = style;
             legend.selectable = true;
             legend.visible = visible;
             pane.legends.push_back(std::move(legend));
@@ -261,6 +265,8 @@ namespace trading::app
                         ? binding.label
                         : binding.legendLabel,
                     binding.primaryColor,
+                    binding.width,
+                    binding.style,
                     binding.visible,
                     error))
             {
@@ -308,6 +314,7 @@ namespace trading::app
                     line.label = binding.label;
                     line.color = binding.primaryColor;
                     line.width = binding.width;
+                    line.style = binding.style;
                     line.visible = binding.visible;
                     line.ownerId = binding.indicatorId;
 
@@ -331,6 +338,7 @@ namespace trading::app
                     line.label = binding.label;
                     line.color = binding.primaryColor;
                     line.width = binding.width;
+                    line.style = binding.style;
                     line.visible = binding.visible;
                     line.ownerId = binding.indicatorId;
                     line.points.push_back(livePoint);
@@ -397,6 +405,7 @@ namespace trading::app
             line.value = reference.value;
             line.color = reference.color;
             line.width = reference.width;
+            line.style = reference.style;
             line.visible = reference.visible;
             line.ownerId = reference.indicatorId;
             pane->referenceLines.push_back(std::move(line));

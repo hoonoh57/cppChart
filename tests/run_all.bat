@@ -38,10 +38,13 @@ if errorlevel 1 exit /b 1
 call :build_and_run indicator_reference_adapter_tests.exe "tests\indicator_reference_adapter_tests.cpp app\indicator_render_adapter.cpp render\render_document.cpp"
 if errorlevel 1 exit /b 1
 
-call :build_and_run default_indicator_render_plan_tests.exe "tests\default_indicator_render_plan_tests.cpp app\default_indicator_render_plan.cpp app\indicator_properties.cpp app\indicator_render_adapter.cpp render\render_document.cpp"
+call :build_and_run default_indicator_render_plan_tests.exe "tests\default_indicator_render_plan_tests.cpp app\default_indicator_render_plan.cpp app\indicator_configuration.cpp app\indicator_properties.cpp app\indicator_render_adapter.cpp render\render_document.cpp"
 if errorlevel 1 exit /b 1
 
 call :build_and_run indicator_properties_tests.exe "tests\indicator_properties_tests.cpp app\indicator_properties.cpp"
+if errorlevel 1 exit /b 1
+
+call :build_and_run indicator_configuration_tests.exe "tests\indicator_configuration_tests.cpp app\indicator_configuration.cpp app\indicator_properties.cpp app\indicator_render_adapter.cpp render\render_document.cpp"
 if errorlevel 1 exit /b 1
 
 call :build_and_run feature_registry_tests.exe "tests\feature_registry_tests.cpp app\feature_registry.cpp"
@@ -57,6 +60,12 @@ call :build_and_run value_grid_tests.exe "tests\value_grid_tests.cpp render\valu
 if errorlevel 1 exit /b 1
 
 call :build_and_run series_geometry_tests.exe "tests\series_geometry_tests.cpp render\series_geometry.cpp"
+if errorlevel 1 exit /b 1
+
+call :build_and_run pane_layout_tests.exe "tests\pane_layout_tests.cpp render\pane_layout.cpp"
+if errorlevel 1 exit /b 1
+
+call :build_and_run render_style_tests.exe "tests\render_style_tests.cpp render\render_document.cpp"
 if errorlevel 1 exit /b 1
 
 call :build_and_run cursor_label_layout_tests.exe "tests\cursor_label_layout_tests.cpp"

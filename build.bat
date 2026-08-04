@@ -31,6 +31,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    app\chart_workspace_module.cpp ^
    app\indicator_module.cpp ^
    app\indicator_render_adapter.cpp ^
+   app\indicator_configuration.cpp ^
    app\default_indicator_render_plan.cpp ^
    app\indicator_properties.cpp ^
    app\indicator_workspace_coordinator.cpp ^
@@ -38,10 +39,12 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    render\time_axis.cpp ^
    render\value_grid.cpp ^
    render\series_geometry.cpp ^
+   render\pane_layout.cpp ^
    render\time_boundaries.cpp ^
    render\render_document.cpp ^
    render\market_chart_builder.cpp ^
    ui\render_document_renderer.cpp ^
+   ui\indicator_manager_ui.cpp ^
    platform\kiwoom_runtime_runner.cpp ^
    platform\winhttp_transport.cpp ^
    platform\winhttp_kiwoom_transport.cpp ^

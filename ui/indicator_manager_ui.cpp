@@ -1,4 +1,4 @@
-#include "indicator_manager_ui.h"
+﻿#include "indicator_manager_ui.h"
 
 #include "../app/indicator_properties.h"
 
@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <set>
 #include <string>
 #include <utility>

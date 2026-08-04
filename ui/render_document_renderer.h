@@ -36,6 +36,7 @@ namespace trading::ui
         std::map<std::string, float> paneHeightWeights;
         std::map<std::string, float> paneDefaultHeightWeights;
         std::map<std::string, render::ValueViewport> paneValueViewports;
+        std::string activeValueAxisPaneId;
     };
 
     void DrawRenderDocument(

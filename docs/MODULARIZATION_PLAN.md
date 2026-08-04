@@ -12,8 +12,7 @@ DLL plugin ABI before the internal contracts stabilize.
 ## Baseline to preserve
 
 - fail-closed `TRADING_MODE=KIWOOM_MOCK`
-- OAuth, WebSocket login, account-event registration, reconciliation, and order
-  readiness
+- OAuth, WebSocket login, account-event registration, reconciliation, and order readiness
 - `ka10080` real stock minute bars
 - selected-symbol `0B` subscription with reconnect restoration
 - live current-bar OHLCV and tick-count replacement
@@ -26,141 +25,38 @@ DLL plugin ABI before the internal contracts stabilize.
 
 - Financial X coordinates use actual bar order, not elapsed wall-clock time.
 - Every visible bar slot has one shared horizontal pitch across all panes.
-- Candle, volume, indicator histogram, marker, and trade-result series align to
-  that common slot geometry.
-- Pane-local Y interaction belongs to the pane. The timestamp crosshair may be
-  synchronized, but a horizontal value crosshair displays the hovered pane's own
-  value.
+- Candle, volume, indicator histogram, marker, and trade-result series align to that geometry.
+- Pane-local Y interaction belongs to the pane; timestamp cursors may synchronize.
 - Value snapping is supplied through generic pane metadata such as `ValueGrid`.
-- The renderer contains no broker, exchange, symbol, indicator, or strategy
-  branches.
-- Drag, zoom, crosshair, and manual viewport state remain stable while real `0B`
-  updates arrive.
+- The renderer contains no broker, symbol, indicator, strategy, or parameter-schema branches.
+- Drag, zoom, crosshair, and manual viewport state remain stable during real `0B` updates.
 - Legend presentation and hit-testing are generic renderer behavior.
-- Selection resolves through a generic `ownerId`; an indicator's child outputs do
-  not become separate editable objects.
-- Parameter metadata and reconfiguration belong to the feature/application layer,
-  not to the renderer.
+- Selection resolves through a generic `ownerId`; child outputs do not become separate editable objects.
+- Parameter metadata, validation, Apply/Revert, and recalculation belong to the feature/application layer.
 
-## Milestone M1 — architecture contracts and regression gates
+## Milestones M1-M6
 
-Status: complete.
+Status: complete. M6 was accepted on the actual screen/GPU path.
 
-Delivered:
+Delivered across M1-M6:
 
-- `ARCHITECTURE_CONSTITUTION.md`
-- feature execution levels and registry
-- generic renderer document contract
-- module performance metrics
-- CI checks for forbidden dependencies and feature-specific renderer branches
-- headless execution-level, dependency, metric, and render-contract tests
-
-## Milestone M2 — MarketDataModule
-
-Status: complete.
-
-Responsibilities implemented:
-
-- request state, selected code, and minute unit
-- REST page application and continuation state
-- `0B` tick merge
-- latest quote access
-- subscription status
+- architecture constitution and regression gates
+- `MarketDataModule`, `ChartWorkspaceModule`, and `FeatureRegistry`
+- generic `RenderDocument` and ImGui renderer
+- `Off / Standby / Visible / Active`
+- ordinal trading-time axis and common multi-pane slot geometry
 - immutable completed history plus mutable live tail
-- event, timing, memory, merge, and drop metrics
-
-The shell owns no market-data mutex, bar store, tick counters, or tick-to-bar
-aggregation logic.
-
-## Milestone M3 — generic chart renderer
-
-Status: complete.
-
-Delivered:
-
-- broker-independent `RenderDocument`
-- candle, line, histogram, marker, reference-line, annotation, and legend contracts
-- generic ImGui renderer consuming only that document
-- independent viewport, selection, and render-surface state
-- separately testable document builder and renderer
-
-## Milestone M4 — FeatureRegistry and execution levels
-
-Status: complete for the current production features.
-
-Registered production features:
-
-- market data
-- indicators
-- chart workspace
-- trading/account
-- diagnostics
-
-Execution levels:
-
-- `Off`
-- `Standby`
-- `Visible`
-- `Active`
-
-The indicator feature depends on market data. `Off` releases calculation and render
-caches; `Visible` and `Active` perform calculation and chart contribution.
-
-## Milestone M5 — application coordinator and thin shell
-
-Status: partially complete.
-
-Completed:
-
-- normalized modules and immutable snapshot flow
-- generic chart workspace
-- headless-tested market and order coordination
-- indicator calculation, property metadata, and render contribution kept outside
-  the renderer
-
-Remaining long-term cleanup:
-
-- continue reducing `shell_main.cpp` to Win32/D3D lifecycle, top-level composition,
-  and calls into application/UI objects
-- keep all indicator, strategy, order, and chart-domain calculations outside the
-  shell
-
-## Milestone M6 — chart viewport foundation
-
-Status: complete and accepted on the real screen/GPU path.
-
-Implemented and verified:
-
-- ordinal trading-time axis
-- recent initial viewport
-- mouse-anchored wheel zoom
-- left/right horizontal drag pan
-- double-click latest reset and latest-bar auto-follow
-- visible-range value scale
-- current-price line and label
-- synchronized timestamp crosshair across panes
-- pane-local value crosshair
-- OHLCV/tick-count tooltip
-- date and abnormal session-gap boundaries
-- immutable completed history and mutable live tail
-- common candle/histogram slot width
-- generic `ValueGrid`
-- Korean quotation ladder supplied by the market chart builder
-- integer volume cursor
-- pane-local floating timestamp label
-- manual pan preservation during actual `0B` updates
-
-The user confirmed the focused M6 real-screen test as normal. No M6 acceptance gate
-remains.
+- value grids, crosshairs, pan/zoom, latest reset, boundaries, and tooltips
+- actual `0B` updates preserving a manually panned viewport
 
 ## Milestone M7 — reusable indicator engine
 
-Status: calculation engine, data contract, application modules, generic render
-contribution, production shell wiring, interactive legends/properties, architecture
-gates, MSVC build, and complete headless regression are complete. Focused visual
-interaction acceptance remains.
+Status: calculation engine, data contract, modules, generic render contribution,
+production shell wiring, interactive legends/properties, architecture gates, MSVC
+build, and complete headless regression are complete. Focused visual interaction
+acceptance remains.
 
-### Verified core
+### Verified indicator core
 
 - one batch/incremental implementation per indicator
 - deterministic `IndicatorSpec` serialization
@@ -177,80 +73,57 @@ Initial indicators:
 - OBV: Value / Signal / Direction
 - ADX: Wilder ADX
 
-### Verified data contract
+### Verified data and application contract
 
-- `Bar.TradingDateYmd` is explicit and calendar-validated
-- REST `cntr_tm` parsing preserves the KST trading date
-- `0B` new-bar creation preserves the same trading date
-- VWAP session reset uses `TradingDateYmd`
-
-### Verified application and renderer boundary
-
-- `IndicatorModule` owns execution level, cache, revision, metrics, and calculation
-- completed indicator output is shared across live-tail replacements
-- `IndicatorRenderAdapter` publishes only generic line, histogram, reference, and
-  legend contributions
-- `DefaultIndicatorRenderPlan` maps initial outputs outside the renderer
-- ADX 20/25 and JMA slope zero are generic reference lines
+- explicit, validated `Bar.TradingDateYmd`
+- REST `cntr_tm` and `0B` new-bar trading-date preservation
+- VWAP session reset by `TradingDateYmd`
+- `IndicatorModule` owns execution level, cache, revisions, metrics, and calculation
+- completed output is shared across live-tail replacements
+- `IndicatorRenderAdapter` publishes generic lines, histograms, references, and legends
+- stable `price` and `volume` pane IDs prevent duplicate price panes
 - `ChartWorkspaceModule` composes market and indicator revisions independently
-- contribution failure retains the last good document
-- stable pane IDs `price` and `volume` prevent duplicate price panes
-- adding/removing indicators requires no change to renderer source
-
-### Verified production wiring
-
-- `indicators` is registered with `market-data` dependency
-- initial specs and render plan are configured once during startup
-- the shared completed bars and live tail feed `IndicatorMarketSource`
-- calculation runs only at `Visible` or `Active`
-- the indicator-aware workspace overload publishes one immutable combined document
-- diagnostics receives indicator timing, memory, events, symbols, series, readiness,
-  and fault state
-- `Off` releases calculation and adapter caches
-- indicator failure retains a real market-only chart and exposes the fault
-- all indicator sources are linked into the production `shell.exe`
-- the renderer remains feature-agnostic
+- failure retains the last good or market-only real document
+- all indicator sources are linked into production `shell.exe`
 
 ### Interactive legend and property extension
 
 Implemented:
 
-- explicit pane `LegendEntry` collection in `RenderDocument`
-- generic `ownerId` on render series and reference lines
+- explicit pane `LegendEntry` collections
+- generic `ownerId` on render series and references
 - upper-left pane legends with wrapping and color swatches
-- grouped price-pane legends for multi-output JMA and VWAP instances
-- dedicated lower-pane labels for JMA Slope, OBV, and ADX
-- single-click indicator-instance selection
-- double-click selection and focus of the docked `프로퍼티` window
-- generic selected-series highlighting across all panes owned by the instance
-- legend hit-test isolation from chart pan, zoom, and latest reset
-- feature-owned property descriptors and range validation
-- Apply/Revert workflow for SMA, JMA, VWAP, OBV, and ADX parameters
-- validated plan/module reconfiguration from the same real shared market history
+- grouped legends for multi-output JMA and VWAP instances
+- lower-pane JMA Slope, OBV, and ADX labels
+- single-click instance selection
+- double-click focus of the docked `프로퍼티` window
+- generic highlighting of all outputs owned by the selected instance
+- legend hit-test isolation from pan, zoom, and latest reset
+- feature-owned descriptors and range validation
+- Apply/Revert for SMA, JMA, VWAP, OBV, and ADX parameters
+- validated plan/module reconfiguration from the same shared real history
 
 Windows CI `30864225906` (`#857`) passed:
 
 - repository and temporary-file policy
-- core and modular architecture boundaries
-- real-data-only production checks
-- M6/M7 and interactive-legend integration checks
+- architecture and real-data-only boundaries
+- M6/M7 and legend/property integration gates
 - generic renderer no-indicator-name gate
-- legend owner and grouped-render adapter tests
-- indicator property metadata/range tests
+- grouped legend/owner adapter tests
+- property metadata/range tests
 - MSVC x64 shell build
 - complete headless suite
-- clean-tree verification
-- executable artifact publication
+- clean-tree verification and artifact publication
 
 ### Remaining M7 acceptance
 
 Run one actual `ka10080 + 0B` screen test and confirm:
 
-1. price and lower-pane legends are readable and correctly grouped;
-2. single click selects/highlights the whole indicator instance;
-3. double click focuses the docked property window;
-4. Apply changes calculation and the parameterized legend label;
-5. Revert restores the applied property values before Apply;
+1. price and lower-pane legends are readable and grouped correctly;
+2. single click selects/highlights the complete indicator instance;
+3. double click focuses the property window;
+4. Apply updates calculation and parameterized legend label;
+5. Revert restores applied values before Apply;
 6. legend interaction does not alter viewport state;
 7. selection and viewport survive live-tail replacement.
 

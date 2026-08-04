@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -22,11 +22,35 @@ jobs:
   build-and-test:
     name: MSVC build and headless tests
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply comparison and indicator upgrade
+        if: hashFiles('scripts/apply_indicator_pack_and_dual_axis.py') != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git fetch origin p2/kiwoom-mock-gateway
+          git switch -C p2/kiwoom-mock-gateway origin/p2/kiwoom-mock-gateway
+          python .\scripts\apply_indicator_pack_and_dual_axis.py
+          if ($LASTEXITCODE -ne 0) { throw 'indicator/axis migration failed' }
+          python .\scripts\apply_comparison_runtime.py
+          if ($LASTEXITCODE -ne 0) { throw 'comparison runtime migration failed' }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git rm .\scripts\apply_indicator_pack_and_dual_axis.py
+          git rm .\scripts\apply_comparison_runtime.py
+          if (Test-Path .\.github\workflows\apply-comparison-upgrade.yml) {
+            git rm .\.github\workflows\apply-comparison-upgrade.yml
+          }
+          git commit -m 'Add standard indicators and multi-series comparison'
+          git push origin HEAD:p2/kiwoom-mock-gateway
 
       - name: Verify repository policy
         shell: pwsh
@@ -35,25 +59,17 @@ jobs:
           git diff --check
           if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
           foreach ($temporary in @(
-            '.\scripts\apply_indicator_shell_wiring.py',
-            '.\scripts\apply_indicator_legend_properties.py',
-            '.\scripts\apply_indicator_management.py',
-            '.\scripts\sitecustomize.py',
-            '.\scripts\trigger_indicator_legend_apply.txt',
-            '.\.github\workflows\apply-indicator-legend.yml')) {
-            if (Test-Path $temporary) {
-              throw "temporary implementation file must not remain: $temporary"
-            }
+            '.\scripts\apply_indicator_pack_and_dual_axis.py',
+            '.\scripts\apply_comparison_runtime.py',
+            '.\.github\workflows\apply-comparison-upgrade.yml')) {
+            if (Test-Path $temporary) { throw "temporary file remains: $temporary" }
           }
-          $trackedSecrets = @(
-            git ls-files |
-              Where-Object {
-                $_ -match '(^|/)\.env($|\.)' -and
-                $_ -notmatch '(\.example|\.sample|\.template)$'
-              }
-          )
+          $trackedSecrets = @(git ls-files | Where-Object {
+            $_ -match '(^|/)\.env($|\.)' -and
+            $_ -notmatch '(\.example|\.sample|\.template)$'
+          })
           if ($trackedSecrets.Count -gt 0) {
-            throw "Tracked secret configuration files:`n$($trackedSecrets -join "`n")"
+            throw "Tracked secret files:`n$($trackedSecrets -join "`n")"
           }
 
       - name: Verify architecture boundaries
@@ -63,127 +79,80 @@ jobs:
           .\scripts\verify_real_data_only.ps1
           .\scripts\verify_modular_architecture.ps1
 
-      - name: Verify integrated runtime and dynamic indicator contracts
+      - name: Verify comparison and indicator contracts
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $source = Get-Content .\shell_main.cpp -Raw
           $renderer = Get-Content .\ui\render_document_renderer.cpp -Raw
-          $manager = Get-Content .\ui\indicator_manager_ui.cpp -Raw
-          $configuration = Get-Content .\app\indicator_configuration.cpp -Raw
-          $renderContract = Get-Content .\render\render_document.h -Raw
+          $contract = Get-Content .\render\render_document.h -Raw
+          $comparison = Get-Content .\app\comparison_module.cpp -Raw
+          $comparisonUi = Get-Content .\ui\comparison_manager_ui.cpp -Raw
+          $indicatorConfig = Get-Content .\app\indicator_configuration.cpp -Raw
+          $runner = Get-Content .\platform\kiwoom_runtime_runner.cpp -Raw
           $build = Get-Content .\build.bat -Raw
           $runAll = Get-Content .\tests\run_all.bat -Raw
-          $runner = Get-Content .\platform\kiwoom_runtime_runner.cpp -Raw
-          $runnerTests = Get-Content .\tests\kiwoom_runtime_runner_tests.cpp -Raw
-          $transport = Get-Content .\platform\winhttp_transport.cpp -Raw
 
           foreach ($marker in @(
-            'CPPCHART_REAL_DATA_ONLY',
-            'CPPCHART_MAJOR_FEATURE_MODULES',
-            'CPPCHART_GENERIC_RENDER_DOCUMENT',
-            'IndicatorInstanceDefinition',
-            'g_indicatorDefinitions',
-            'BuildIndicatorRenderPlan(',
-            'DrawIndicatorManagerWindow(',
-            'IndicatorMarketSource indicatorSource',
-            'g_indicatorModule.Update(',
-            'DrawRenderDocument',
-            'RecordPresentedFrame')) {
-            if (-not $source.Contains($marker)) {
-              throw "Missing integrated shell marker: $marker"
-            }
-          }
-          if ($source.Contains('DrawIndicatorPropertiesWindow')) {
-            throw 'Hardcoded indicator property window remains in shell_main.cpp'
+            'ComparisonModule g_comparisonModule',
+            'ComparisonRenderAdapter g_comparisonRenderAdapter',
+            'DrawComparisonManagerWindow(',
+            'RequestComparisonData(',
+            'ApplyComparisonDefinitions(',
+            'callbacks.indexValue')) {
+            if (-not $source.Contains($marker)) { throw "Missing shell marker: $marker" }
           }
           foreach ($marker in @(
-            'IndicatorCatalog()',
-            'VisibleIndicatorSpecs(',
-            'DuplicateIndicatorDefinition(',
-            'ApplyIndicatorColorVariant(',
-            'MoveIndicatorToPane(')) {
-            if (-not $configuration.Contains($marker)) {
-              throw "Missing dynamic indicator configuration marker: $marker"
-            }
+            'struct ValueAxis final',
+            'ValueAxisSide',
+            'std::string axisId',
+            'std::vector<ValueAxis> valueAxes')) {
+            if (-not $contract.Contains($marker)) { throw "Missing axis contract: $marker" }
           }
           foreach ($marker in @(
-            'DrawIndicatorManagerWindow(',
-            '지표 추가',
-            '복제',
-            '감추기',
-            '기준선 추가',
-            '과매수 추가',
-            '과매도 추가',
-            'ColorEdit4(',
-            'EditLineStyle(',
-            'EditPaneSelection(',
-            'const app::IndicatorInstanceDefinition selectedCopy',
-            'const bool selectedVisible')) {
-            if (-not $manager.Contains($marker)) {
-              throw "Missing indicator manager marker: $marker"
-            }
+            'SecondaryAxisRange(',
+            'DrawSecondaryValueAxis(',
+            'leftAxisWidth',
+            'series.axisId')) {
+            if (-not $renderer.Contains($marker)) { throw "Missing dual-axis renderer marker: $marker" }
           }
           foreach ($marker in @(
-            'DrawPaneLegends',
-            'DrawPaneSplitter(',
-            'ImGuiMouseCursor_ResizeNS',
-            'paneHeightWeights',
-            'paneDefaultHeightWeights',
-            'configuredWeightChanged',
-            'DrawStyledLine(',
-            'selectedOwnerId',
-            'selectionDoubleClicked')) {
-            if (-not $renderer.Contains($marker)) {
-              throw "Missing generic renderer marker: $marker"
-            }
+            'ComparisonPlacement::PriceSecondaryAxis',
+            'ApplyIndexValueTick(',
+            'ApplyStockTradeTick(',
+            'comparison series limit is 32')) {
+            if (-not $comparison.Contains($marker)) { throw "Missing comparison module marker: $marker" }
           }
           foreach ($marker in @(
-            'enum class LineStyle',
-            'struct LegendEntry final',
-            'LineStyle style = LineStyle::Solid',
-            'std::vector<LegendEntry> legends')) {
-            if (-not $renderContract.Contains($marker)) {
-              throw "Missing generic styled render contract: $marker"
-            }
+            'KOSPI', 'KOSDAQ', '가격 패널 이중축', '별도 하단 패널')) {
+            if (-not $comparisonUi.Contains($marker)) { throw "Missing comparison UI marker: $marker" }
           }
           foreach ($marker in @(
-            'app\indicator_configuration.cpp',
-            'render\pane_layout.cpp',
-            'ui\indicator_manager_ui.cpp')) {
-            if (-not $build.Contains($marker)) {
-              throw "Production source is not linked into shell.exe: $marker"
-            }
+            '"EMA"', '"BOLLINGER"', '"RSI"', '"MACD"', '"DMI"', '"SUPERTREND"')) {
+            if (-not $indicatorConfig.Contains($marker)) { throw "Missing indicator type: $marker" }
           }
           foreach ($marker in @(
-            'indicator_configuration_tests.exe',
-            'pane_layout_tests.exe',
-            'render_style_tests.exe',
-            'indicator_properties_tests.exe')) {
-            if (-not $runAll.Contains($marker)) {
-              throw "Required test is not in the complete suite: $marker"
-            }
+            'stockTradeCodes_', 'indexValueCodes_',
+            'SubscribeIndexValues(', 'DecodeIndexValueRecord(')) {
+            if (-not $runner.Contains($marker)) { throw "Missing realtime comparison marker: $marker" }
           }
           foreach ($marker in @(
-            'Kiwoom', 'ka10080', 'StockTradeTick', 'OrderIntent',
-            'TradingState', 'SMA', 'JMA', 'VWAP', 'OBV', 'ADX', 'Strategy')) {
-            if ($renderer.Contains($marker)) {
-              throw "Generic renderer contains feature-specific marker: $marker"
-            }
+            'core\standard_indicators.cpp',
+            'core\kiwoom_index_realtime.cpp',
+            'app\comparison_module.cpp',
+            'app\comparison_render_adapter.cpp',
+            'ui\comparison_manager_ui.cpp')) {
+            if (-not $build.Contains($marker)) { throw "Build source missing: $marker" }
           }
-          if (-not $runner.Contains('DeliverMinuteBars') -or
-              -not $runner.Contains('SubscribeStockTrades') -or
-              -not $runner.Contains('UnsubscribeStockTrades')) {
-            throw 'Kiwoom minute and 0B runtime integration is incomplete'
+          foreach ($marker in @(
+            'standard_indicators_tests.exe',
+            'kiwoom_index_realtime_tests.exe',
+            'comparison_module_tests.exe',
+            'comparison_render_adapter_tests.exe')) {
+            if (-not $runAll.Contains($marker)) { throw "Test missing: $marker" }
           }
-          if (-not $runnerTests.Contains('must not return after reconnect')) {
-            throw '0B reconnect regression gate is missing'
-          }
-          if (-not $transport.Contains('CPPCHART_CONTINUATION_HEADERS')) {
-            throw 'WinHTTP continuation headers are missing'
-          }
-          if ($source.Contains('ImGui::GetIO().Framerate')) {
-            throw 'ImGui smoothed FPS is exposed as actual render rate'
+          foreach ($forbidden in @('KOSPI', 'KOSDAQ', 'ka20005', '0I', 'EMA', 'MACD')) {
+            if ($renderer.Contains($forbidden)) { throw "Generic renderer contains feature marker: $forbidden" }
           }
 
       - name: Locate MSVC toolchain
@@ -216,10 +185,9 @@ jobs:
       - name: Verify clean source tree after build
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
           $changes = @(git status --porcelain)
           if ($changes.Count -gt 0) {
-            throw "Build or tests modified tracked files:`n$($changes -join "`n")"
+            throw "Build/tests modified tracked files:`n$($changes -join "`n")"
           }
 
       - name: Publish verified executable

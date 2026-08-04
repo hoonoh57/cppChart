@@ -31,7 +31,6 @@ namespace trading::app
             const void* completedIdentity = nullptr;
             const void* primaryIdentity = nullptr;
             std::uint64_t completedRevision = 0;
-            std::uint64_t primaryStructureRevision = 0;
             double valueDivisor = 1.0;
             ComparisonValueMode valueMode = ComparisonValueMode::RawClose;
             ComparisonTransformResult transformed;

@@ -8,7 +8,6 @@ Local: `E:\2026\gpt\cpp\shell`
 PR #1: Draft
 Viewport/footer implementation: `2b87b40097cd36be46de4f956664302ef74a6558`
 Read-only verification contract: `63827a6c88469911e3eab784c1d427bdd0bfdc0f`
-Documentation HEAD: `ffaaaba7a775bd4ff015e11f8bed6d26dfab4e7b`
 Windows CI #1074: `30894598030`
 Artifact: `8886617161`
 Digest: `sha256:edb5fb92aa9b9d8c77ac82753ca92fb42b4c6a58742ad04dd50c2ee9adadfbf2`

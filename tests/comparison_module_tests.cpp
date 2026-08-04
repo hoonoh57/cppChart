@@ -107,23 +107,23 @@ int main()
 
     trading::StockTradeTick stockTick;
     stockTick.code = "005930";
-    stockTick.tradeTimeHhmmss = 90001;
+    stockTick.tradeTimeHhmmss = 90101;
     stockTick.priceWon = 70020;
     stockTick.tradeVolume = 3;
     stockTick.cumulativeVolume = 1013;
     auto stockRealtime = module.ApplyStockTradeTick(stockTick);
     Check(stockRealtime.applied,
-          "stock comparison 0B must replace the KST live minute");
+          "stock comparison 0B must replace the current KST live minute");
 
     trading::IndexValueTick indexTick;
     indexTick.code = "001";
-    indexTick.tradeTimeHhmmss = 90001;
+    indexTick.tradeTimeHhmmss = 90101;
     indexTick.value = 280050;
     indexTick.tradeVolume = 2;
     indexTick.cumulativeVolume = 1002;
     auto indexRealtime = module.ApplyIndexValueTick(indexTick);
     Check(indexRealtime.applied,
-          "index comparison 0I must replace the KST live minute");
+          "index comparison 0I must replace the current KST live minute");
 
     snapshot = module.Snapshot();
     stockSeries = Find(snapshot, stock.id);

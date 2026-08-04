@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -28,34 +28,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # BEGIN TEMP INDICATOR LEGEND APPLY
-      - name: Apply interactive indicator legends
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          git fetch origin p2/kiwoom-mock-gateway
-          git switch -C p2/kiwoom-mock-gateway origin/p2/kiwoom-mock-gateway
-          python .\scripts\apply_indicator_legend_properties.py
-          if ($LASTEXITCODE -ne 0) {
-            throw 'indicator legend/property patch failed'
-          }
-          git restore -- .\.github\workflows\windows-ci.yml
-          git restore -- .\.github\workflows\apply-indicator-legend.yml
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git commit -m 'Add interactive indicator legends and properties'
-          git push origin HEAD:p2/kiwoom-mock-gateway
-      # END TEMP INDICATOR LEGEND APPLY
-
       - name: Verify repository policy
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           git diff --check
           if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
-          if (Test-Path .\scripts\apply_indicator_shell_wiring.py) {
-            throw 'temporary indicator shell wiring script must not remain'
+          foreach ($temporary in @(
+            '.\scripts\apply_indicator_shell_wiring.py',
+            '.\scripts\apply_indicator_legend_properties.py',
+            '.\scripts\sitecustomize.py',
+            '.\scripts\trigger_indicator_legend_apply.txt',
+            '.\.github\workflows\apply-indicator-legend.yml')) {
+            if (Test-Path $temporary) {
+              throw "temporary implementation file must not remain: $temporary"
+            }
           }
           $trackedSecrets = @(
             git ls-files |
@@ -75,7 +62,7 @@ jobs:
           .\scripts\verify_real_data_only.ps1
           .\scripts\verify_modular_architecture.ps1
 
-      - name: Verify integrated runtime, M6, and M7 shell contracts
+      - name: Verify integrated runtime, M6, M7, and legend contracts
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -111,6 +98,9 @@ jobs:
             'g_indicatorModule.Update(',
             'indicatorSnapshot,',
             'g_indicatorRenderAdapter,',
+            'DrawIndicatorPropertiesWindow',
+            'g_indicatorSpecs',
+            'selectionDoubleClicked',
             'DrawRenderDocument',
             'RecordPresentedFrame')) {
             if (-not $source.Contains($marker)) {
@@ -133,6 +123,7 @@ jobs:
             'app\indicator_module.cpp',
             'app\indicator_render_adapter.cpp',
             'app\default_indicator_render_plan.cpp',
+            'app\indicator_properties.cpp',
             'app\indicator_workspace_coordinator.cpp')) {
             if (-not $build.Contains($marker)) {
               throw "M7 production source is not linked into shell.exe: $marker"
@@ -172,7 +163,9 @@ jobs:
             'SetShared(',
             'SharedPrefix()',
             'HasLiveTail()',
-            'ValueGrid cursorGrid')) {
+            'ValueGrid cursorGrid',
+            'struct LegendEntry final',
+            'std::vector<LegendEntry> legends')) {
             if (-not $renderContract.Contains($marker)) {
               throw "Missing shared render contract marker: $marker"
             }
@@ -190,7 +183,10 @@ jobs:
             'ImGuiButtonFlags_MouseButtonRight',
             'draggingLeft || draggingRight',
             'QuantizeValue(',
-            'SeriesBodyWidth(')) {
+            'SeriesBodyWidth(',
+            'DrawPaneLegends',
+            'selectedOwnerId',
+            'selectionDoubleClicked')) {
             if (-not $renderer.Contains($marker)) {
               throw "Missing renderer interaction marker: $marker"
             }
@@ -205,6 +201,9 @@ jobs:
             if (-not $boundaries.Contains($marker)) {
               throw "Missing boundary detector marker: $marker"
             }
+          }
+          if (-not $runAll.Contains('indicator_properties_tests.exe')) {
+            throw 'indicator property tests must be in the full suite'
           }
           if (-not $runAll.Contains('chart_viewport_tests.exe') -or
               -not $runAll.Contains('time_boundaries_tests.exe') -or
@@ -243,7 +242,6 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vsDevCmd.bat'
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
           $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if (-not $installation) { throw 'Visual Studio C++ toolchain not found' }

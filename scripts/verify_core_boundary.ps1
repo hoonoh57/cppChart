@@ -1,4 +1,8 @@
-$ErrorActionPreference = 'Stop'
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = "Stop"
+
 # BEGIN TEMP UI DISABLED STACK FIX
 if ($env:GITHUB_ACTIONS -eq 'true') {
     git fetch origin p2/kiwoom-mock-gateway
@@ -31,7 +35,7 @@ if ($env:GITHUB_ACTIONS -eq 'true') {
     $selfText = [IO.File]::ReadAllText($PSCommandPath)
     $cleanSelf = [Text.RegularExpressions.Regex]::Replace(
         $selfText,
-        '\A.*?# END TEMP UI DISABLED STACK FIX\r?\n',
+        '# BEGIN TEMP UI DISABLED STACK FIX\r?\n.*?# END TEMP UI DISABLED STACK FIX\r?\n',
         '',
         [Text.RegularExpressions.RegexOptions]::Singleline)
     if ($cleanSelf -eq $selfText) {
@@ -51,10 +55,6 @@ if ($env:GITHUB_ACTIONS -eq 'true') {
     if ($LASTEXITCODE -ne 0) { throw 'failed to push disabled-stack fix' }
 }
 # END TEMP UI DISABLED STACK FIX
-[CmdletBinding()]
-param()
-
-$ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $coreRoot = Join-Path $repoRoot "core"

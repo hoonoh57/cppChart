@@ -33,7 +33,7 @@ git rev-parse HEAD
 ## Accepted baseline
 
 M1-M6 remain complete. The user confirmed dynamic indicator management is highly
-stabilized, so M7 management acceptance is closed unless a new defect is reported.
+stabilized, so M7 acceptance is closed unless a new defect is reported.
 
 ## Indicator catalog — 11 types
 

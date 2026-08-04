@@ -524,13 +524,20 @@ namespace trading::ui
 
             const std::vector<PaneChoice> panes =
                 CollectPaneChoices(definitions, &state.draft);
+            const float tableHeight = (std::min)(
+                190.0f,
+                ImGui::GetTextLineHeightWithSpacing() *
+                    static_cast<float>(state.draft.outputs.size() + 1U) +
+                    12.0f);
             if (!ImGui::BeginTable(
                     "indicator_output_styles",
                     7,
                     ImGuiTableFlags_Borders |
                         ImGuiTableFlags_RowBg |
                         ImGuiTableFlags_SizingFixedFit |
-                        ImGuiTableFlags_ScrollX))
+                        ImGuiTableFlags_ScrollX |
+                        ImGuiTableFlags_ScrollY,
+                    ImVec2(0.0f, tableHeight)))
             {
                 return;
             }
@@ -984,8 +991,10 @@ namespace trading::ui
         const std::string preview = selected != nullptr
             ? DefinitionLabel(*selected)
             : std::string("선택된 지표 없음");
+        bool openAddPopup = false;
         ImGui::SetNextItemWidth(220.0f);
-        if (ImGui::BeginCombo("지표", preview.c_str())) {
+        if (ImGui::BeginCombo("적용 지표", preview.c_str())) {
+            ImGui::TextDisabled("현재 적용된 지표");
             for (const app::IndicatorInstanceDefinition& definition :
                  definitions)
             {
@@ -997,10 +1006,29 @@ namespace trading::ui
                 }
                 if (isSelected) ImGui::SetItemDefaultFocus();
             }
+
+            const std::vector<app::IndicatorCatalogEntry>& catalog =
+                app::IndicatorCatalog();
+            if (!catalog.empty()) {
+                ImGui::Separator();
+                ImGui::TextDisabled("새 지표 추가");
+                for (std::size_t index = 0; index < catalog.size(); ++index) {
+                    const std::string label =
+                        "+ " + catalog[index].displayName;
+                    if (ImGui::Selectable(label.c_str(), false)) {
+                        state.addTypeIndex = static_cast<int>(index);
+                        openAddPopup = true;
+                    }
+                }
+            }
             ImGui::EndCombo();
         }
+        if (openAddPopup) {
+            state.error.clear();
+            ImGui::OpenPopup("지표 추가");
+        }
 
-        if (ImGui::Button("지표 추가")) {
+        if (ImGui::Button("새 지표")) {
             state.error.clear();
             ImGui::OpenPopup("지표 추가");
         }
@@ -1142,6 +1170,15 @@ namespace trading::ui
             return;
         }
 
+        const float editorFooterHeight =
+            ImGui::GetFrameHeightWithSpacing() * 2.0f +
+            ImGui::GetStyle().ItemSpacing.y;
+        ImGui::BeginChild(
+            "##indicator_editor_scroll",
+            ImVec2(0.0f, -editorFooterHeight),
+            false,
+            ImGuiWindowFlags_HorizontalScrollbar);
+
         ImGui::Separator();
         ImGui::Text(
             "%s",
@@ -1232,6 +1269,7 @@ namespace trading::ui
         DrawPaneSettings(state.draft, state.dirty);
         DrawReferences(definitions, state);
 
+        ImGui::EndChild();
         ImGui::Separator();
         const bool applyDisabled = !state.dirty;
         if (applyDisabled) ImGui::BeginDisabled();

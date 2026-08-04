@@ -19,7 +19,7 @@ Bollinger Bands, RSI, MACD, DMI, SuperTrend, VWAP, OBV, and Wilder ADX.
 The `비교` editor supports arbitrary stock/index codes, KOSPI `001`, KOSDAQ `101`,
 separate lower panes, price-pane secondary axes, styling, reload, hide/show, and
 delete. Data paths are stock minutes + multiple `0B`, `ka20005` index minutes +
-multiple `0I`, reconnect restoration, source-error isolation, and decimal/x100
+multiple `0J`, reconnect restoration, source-error isolation, and decimal/x100
 index normalization. Rendering uses generic `axisId`, multiple left axes,
 document-wide shared axis width, and completed-point cache reuse.
 
@@ -29,7 +29,7 @@ artifact publication.
 
 Actual-screen acceptance remains for new indicators, KOSPI/KOSDAQ panes,
 stock/index overlays, common pane/crosshair alignment, comparison controls,
-`0B`/`0I` live preservation, and failed-source isolation. Return evidence only for
+`0B`/`0J` live preservation, and failed-source isolation. Return evidence only for
 failed items. Next after acceptance: code/name search and normalized relative
 strength. Keep PR Draft until order/account, physical multi-source reconnect, and
 intraday soak acceptance are complete.

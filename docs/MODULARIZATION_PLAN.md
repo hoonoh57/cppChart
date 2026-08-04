@@ -37,13 +37,13 @@ styles, references, axis/pane settings, legends, and drag-resizable pane layout.
 ## M8 — real stock/index comparison
 
 First production slice implemented and automatically verified. Actual
-`ka20005 + 0I` visual/data acceptance remains.
+`ka20005 + 0J` visual/data acceptance remains.
 
 ### Implemented
 
 - up to 32 stock/index comparison definitions;
 - arbitrary stock minutes and multiple stock `0B` live tails;
-- `ka20005` index minutes and multiple `0I` live tails;
+- `ka20005` index minutes and multiple `0J` live tails;
 - reconnect restoration and explicit unsubscribe;
 - KOSPI `001`, KOSDAQ `101` presets;
 - decimal/x100 index-value normalization;

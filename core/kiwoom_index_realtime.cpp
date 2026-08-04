@@ -139,8 +139,8 @@ namespace trading
         const RealTimeRecord& record)
     {
         IndexValueDecodeResult result;
-        if (record.type != "0I") {
-            result.result.error = "realtime record is not index type 0I";
+        if (record.type != "0J") {
+            result.result.error = "realtime record is not index type 0J";
             return result;
         }
 

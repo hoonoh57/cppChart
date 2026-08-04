@@ -55,7 +55,7 @@ live tail, revisions, errors, and execution level. `ComparisonRenderAdapter`
 contributes only generic close lines, legends, panes, and value axes.
 
 - stock history uses the normalized stock-minute path and stock live tail uses `0B`;
-- index history uses the normalized index-minute path and index live tail uses `0I`;
+- index history uses the normalized index-minute path and index live tail uses `0J`;
 - multiple stock and index subscriptions are independently restored after reconnect;
 - one comparison failure does not replace or corrupt the primary market chart;
 - comparisons may use a separate pane primary axis or a price-pane secondary axis;

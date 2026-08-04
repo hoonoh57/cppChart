@@ -270,9 +270,9 @@ namespace trading::platform
             KiwoomRuntimeAction action;
             action.type = KiwoomRuntimeActionType::SendWebSocketText;
             action.text = BuildWebSocketRemovalMessage(
-                "3", { indexCode }, { "0I" });
+                "3", { indexCode }, { "0J" });
             Enqueue({ std::move(action) });
-            Log("WS", "index value 0I removal queued: " + indexCode);
+            Log("WS", "index value 0J removal queued: " + indexCode);
         }
         error.clear();
         return true;
@@ -429,14 +429,14 @@ namespace trading::platform
                                 callbacks_.stockTrade(decoded.tick);
                             }
                         }
-                        else if (record.type == "0I") {
+                        else if (record.type == "0J") {
                             const IndexValueDecodeResult decoded =
                                 DecodeIndexValueRecord(record);
                             if (!decoded.result.ok) {
                                 Log(
                                     "FAULT",
                                     decoded.result.error.empty()
-                                        ? "index value 0I decode failed"
+                                        ? "index value 0J decode failed"
                                         : decoded.result.error);
                                 continue;
                             }
@@ -668,9 +668,9 @@ namespace trading::platform
             KiwoomRuntimeAction action;
             action.type = KiwoomRuntimeActionType::SendWebSocketText;
             action.text = BuildWebSocketRegistrationMessage(
-                "3", true, indices, { "0I" });
+                "3", true, indices, { "0J" });
             Enqueue({ std::move(action) });
-            Log("WS", "index value 0I subscriptions queued: " +
+            Log("WS", "index value 0J subscriptions queued: " +
                 std::to_string(indices.size()));
         }
     }

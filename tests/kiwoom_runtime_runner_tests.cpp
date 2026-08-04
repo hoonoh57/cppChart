@@ -216,6 +216,44 @@ namespace
             return count;
         }
 
+        int IndexValueRegistrationCount()
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            int count = 0;
+            for (const std::string& message : sentMessages_) {
+                if (
+                    message.find("\"type\":[\"0J\"]") !=
+                        std::string::npos &&
+                    message.find("\"refresh\":\"1\"") !=
+                        std::string::npos &&
+                    message.find("\"001\"") != std::string::npos)
+                {
+                    ++count;
+                }
+            }
+            return count;
+        }
+
+        int IndexValueRemovalCount()
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            int count = 0;
+            for (const std::string& message : sentMessages_) {
+                if (
+                    message.find("\"trnm\":\"REMOVE\"") !=
+                        std::string::npos &&
+                    message.find("\"type\":[\"0J\"]") !=
+                        std::string::npos &&
+                    message.find("\"refresh\"") ==
+                        std::string::npos &&
+                    message.find("\"001\"") != std::string::npos)
+                {
+                    ++count;
+                }
+            }
+            return count;
+        }
+
         void PushStockTrade()
         {
             PushText(
@@ -224,6 +262,16 @@ namespace
                 "\"name\":\"주식체결\",\"values\":{"
                 "\"20\":\"123701\",\"10\":\"+1584000\","
                 "\"15\":\"-3\",\"13\":\"552\"}}]}");
+        }
+
+        void PushIndexValue()
+        {
+            PushText(
+                "{\"trnm\":\"REAL\",\"return_code\":0,\"data\":[{"
+                "\"type\":\"0J\",\"item\":\"001\","
+                "\"name\":\"업종지수\",\"values\":{"
+                "\"20\":\"123701\",\"10\":\"+2,845.67\","
+                "\"15\":\"15\",\"13\":\"124500\"}}]}");
         }
 
     private:
@@ -275,6 +323,7 @@ namespace
         std::atomic<int> logCount{ 0 };
         std::atomic<int> wakeCount{ 0 };
         std::atomic<int> stockTradeCount{ 0 };
+        std::atomic<int> indexValueCount{ 0 };
         std::atomic<bool> observe{ false };
 
         trading::platform::KiwoomRunnerCallbacks callbacks;
@@ -290,6 +339,11 @@ namespace
         callbacks.stockTrade = [&](const trading::StockTradeTick& tick) {
             if (tick.code == "000660" && tick.priceWon == 1584000) {
                 stockTradeCount.fetch_add(1, std::memory_order_relaxed);
+            }
+        };
+        callbacks.indexValue = [&](const trading::IndexValueTick& tick) {
+            if (tick.code == "001" && tick.value == 284567) {
+                indexValueCount.fetch_add(1, std::memory_order_relaxed);
             }
         };
 
@@ -319,6 +373,16 @@ namespace
         WaitUntil(
             [&] { return stockTradeCount.load(std::memory_order_relaxed) == 1; },
             "runner did not decode and deliver 0B stock trade");
+
+        Check(runner.SubscribeIndexValues("001", error),
+              "ready runner must accept index value subscription");
+        WaitUntil(
+            [&] { return fake->IndexValueRegistrationCount() >= 1; },
+            "runner did not send 0J index value registration");
+        fake->PushIndexValue();
+        WaitUntil(
+            [&] { return indexValueCount.load(std::memory_order_relaxed) == 1; },
+            "runner did not decode and deliver 0J index value");
 
         trading::OrderIntent buy;
         buy.code = "005930";
@@ -351,15 +415,25 @@ namespace
         WaitUntil(
             [&] { return fake->StockTradeRegistrationCount() >= 2; },
             "runtime did not restore 0B subscription after reconnect");
+        WaitUntil(
+            [&] { return fake->IndexValueRegistrationCount() >= 2; },
+            "runtime did not restore 0J subscription after reconnect");
 
         Check(runner.UnsubscribeStockTrades("000660", error),
               "runner must accept stock trade removal");
         WaitUntil(
             [&] { return fake->StockTradeRemovalCount() >= 1; },
             "runner did not send 0B REMOVE message");
+        Check(runner.UnsubscribeIndexValues("001", error),
+              "runner must accept index value removal");
+        WaitUntil(
+            [&] { return fake->IndexValueRemovalCount() >= 1; },
+            "runner did not send 0J REMOVE message");
 
         const int registrationsBeforeSecondReconnect =
             fake->StockTradeRegistrationCount();
+        const int indexRegistrationsBeforeSecondReconnect =
+            fake->IndexValueRegistrationCount();
         fake->SimulatePhysicalDisconnect();
         WaitUntil(
             [&] { return fake->ConnectCount() >= 3; },
@@ -372,6 +446,10 @@ namespace
             fake->StockTradeRegistrationCount() ==
                 registrationsBeforeSecondReconnect,
             "removed 0B subscription must not return after reconnect");
+        Check(
+            fake->IndexValueRegistrationCount() ==
+                indexRegistrationsBeforeSecondReconnect,
+            "removed 0J subscription must not return after reconnect");
 
         Check(!observe.load(std::memory_order_acquire),
               "single recoverable disconnect must not force observe mode");

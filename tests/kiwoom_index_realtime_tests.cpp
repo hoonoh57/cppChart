@@ -20,7 +20,7 @@ namespace
 int main()
 {
     trading::RealTimeRecord record;
-    record.type = "0I";
+    record.type = "0J";
     record.item = "001";
     record.values["20"] = "101530";
     record.values["10"] = "+2,845.67";
@@ -30,7 +30,7 @@ int main()
     trading::IndexValueDecodeResult decimal =
         trading::DecodeIndexValueRecord(record);
     Check(decimal.result.ok,
-          "decimal 0I index value must decode");
+          "decimal 0J index value must decode");
     Check(decimal.tick.code == "001",
           "decimal index code mismatch");
     Check(decimal.tick.value == 284567,
@@ -46,7 +46,7 @@ int main()
     trading::IndexValueDecodeResult scaled =
         trading::DecodeIndexValueRecord(record);
     Check(scaled.result.ok,
-          "pre-scaled 0I index value must decode");
+          "pre-scaled 0J index value must decode");
     Check(scaled.tick.value == decimal.tick.value,
           "decimal and pre-scaled index values must normalize identically");
 
@@ -57,7 +57,7 @@ int main()
     record.type = "0B";
     record.values["10"] = "+284567";
     Check(!trading::DecodeIndexValueRecord(record).result.ok,
-          "non-0I record must fail closed");
+          "non-0J record must fail closed");
 
     std::puts("[PASS] kiwoom_index_realtime_tests");
     return 0;

@@ -2198,7 +2198,7 @@ int WINAPI wWinMain(
                 WakeFrames(2);
             }
             else if (!applied.stale && !applied.error.empty()) {
-                g_log.Add("FAULT", "0I 지수 병합 실패: %s", applied.error.c_str());
+                g_log.Add("FAULT", "0J 지수 병합 실패: %s", applied.error.c_str());
             }
         };
 

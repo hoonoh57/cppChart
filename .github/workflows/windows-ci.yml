@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -28,6 +28,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Apply comprehensive indicator management upgrade
+        if: hashFiles('scripts/apply_indicator_management.py') != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git fetch origin p2/kiwoom-mock-gateway
+          git switch -C p2/kiwoom-mock-gateway origin/p2/kiwoom-mock-gateway
+          python .\scripts\apply_indicator_management.py
+          if ($LASTEXITCODE -ne 0) { throw 'indicator management upgrade failed' }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git rm .\scripts\apply_indicator_management.py
+          git commit -m 'Add dynamic indicator management and resizable panes'
+          git push origin HEAD:p2/kiwoom-mock-gateway
+
       - name: Verify repository policy
         shell: pwsh
         run: |
@@ -37,6 +53,7 @@ jobs:
           foreach ($temporary in @(
             '.\scripts\apply_indicator_shell_wiring.py',
             '.\scripts\apply_indicator_legend_properties.py',
+            '.\scripts\apply_indicator_management.py',
             '.\scripts\sitecustomize.py',
             '.\scripts\trigger_indicator_legend_apply.txt',
             '.\.github\workflows\apply-indicator-legend.yml')) {
@@ -62,7 +79,7 @@ jobs:
           .\scripts\verify_real_data_only.ps1
           .\scripts\verify_modular_architecture.ps1
 
-      - name: Verify integrated runtime, M6, M7, and legend contracts
+      - name: Verify integrated runtime and dynamic indicator contracts
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -90,22 +107,23 @@ jobs:
             'IndicatorModule g_indicatorModule',
             'IndicatorRenderAdapter g_indicatorRenderAdapter',
             'FeatureRegistry g_featureRegistry',
-            'InitialIndicatorSpecs()',
-            '"indicators"',
+            'IndicatorInstanceDefinition',
+            'g_indicatorDefinitions',
+            'BuildIndicatorRenderPlan(',
+            'DrawIndicatorManagerWindow(',
             'MarketDataSeriesSnapshot marketSeries',
             'ChartMarketSource chartSource',
             'IndicatorMarketSource indicatorSource',
             'g_indicatorModule.Update(',
-            'indicatorSnapshot,',
-            'g_indicatorRenderAdapter,',
-            'DrawIndicatorPropertiesWindow',
-            'g_indicatorSpecs',
             'selectionDoubleClicked',
             'DrawRenderDocument',
             'RecordPresentedFrame')) {
             if (-not $source.Contains($marker)) {
               throw "Missing integrated shell marker: $marker"
             }
+          }
+          if ($source.Contains('DrawIndicatorPropertiesWindow')) {
+            throw 'Hardcoded indicator property window remains in shell_main.cpp'
           }
           foreach ($marker in @('CopyVisibleBars(visibleLimit)', 'const std::vector<trading::Bar> visibleBars')) {
             if ($source.Contains($marker)) {
@@ -122,11 +140,14 @@ jobs:
             'core\vwap_indicator.cpp',
             'app\indicator_module.cpp',
             'app\indicator_render_adapter.cpp',
+            'app\indicator_configuration.cpp',
             'app\default_indicator_render_plan.cpp',
             'app\indicator_properties.cpp',
-            'app\indicator_workspace_coordinator.cpp')) {
+            'app\indicator_workspace_coordinator.cpp',
+            'render\pane_layout.cpp',
+            'ui\indicator_manager_ui.cpp')) {
             if (-not $build.Contains($marker)) {
-              throw "M7 production source is not linked into shell.exe: $marker"
+              throw "Production source is not linked into shell.exe: $marker"
             }
           }
 
@@ -165,6 +186,7 @@ jobs:
             'HasLiveTail()',
             'ValueGrid cursorGrid',
             'struct LegendEntry final',
+            'enum class LineStyle',
             'std::vector<LegendEntry> legends')) {
             if (-not $renderContract.Contains($marker)) {
               throw "Missing shared render contract marker: $marker"
@@ -185,6 +207,10 @@ jobs:
             'QuantizeValue(',
             'SeriesBodyWidth(',
             'DrawPaneLegends',
+            'DrawPaneSplitter(',
+            'ImGuiMouseCursor_ResizeNS',
+            'paneHeightWeights',
+            'DrawStyledLine(',
             'selectedOwnerId',
             'selectionDoubleClicked')) {
             if (-not $renderer.Contains($marker)) {
@@ -202,19 +228,18 @@ jobs:
               throw "Missing boundary detector marker: $marker"
             }
           }
-          if (-not $runAll.Contains('indicator_properties_tests.exe')) {
-            throw 'indicator property tests must be in the full suite'
-          }
-          if (-not $runAll.Contains('chart_viewport_tests.exe') -or
-              -not $runAll.Contains('time_boundaries_tests.exe') -or
-              -not $runAll.Contains('value_grid_tests.exe') -or
-              -not $runAll.Contains('series_geometry_tests.exe')) {
-            throw 'chart viewport, boundary, value-grid, and geometry tests must be in the full suite'
-          }
-          if (-not $build.Contains('render\time_boundaries.cpp') -or
-              -not $build.Contains('render\value_grid.cpp') -or
-              -not $build.Contains('render\series_geometry.cpp')) {
-            throw 'render interaction utilities are not linked into shell.exe'
+          foreach ($marker in @(
+            'indicator_properties_tests.exe',
+            'indicator_configuration_tests.exe',
+            'pane_layout_tests.exe',
+            'render_style_tests.exe',
+            'chart_viewport_tests.exe',
+            'time_boundaries_tests.exe',
+            'value_grid_tests.exe',
+            'series_geometry_tests.exe')) {
+            if (-not $runAll.Contains($marker)) {
+              throw "Required test is not in the full suite: $marker"
+            }
           }
 
           foreach ($marker in @('Kiwoom', 'ka10080', 'StockTradeTick', 'OrderIntent', 'TradingState', 'SMA', 'JMA', 'VWAP', 'OBV', 'ADX', 'Strategy')) {

@@ -26,13 +26,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Apply M8 search and normalized comparison wiring
-        if: hashFiles('scripts/apply_m8_search_normalized_v4.py') != ''
+        if: hashFiles('scripts/apply_m8_search_normalized_v5.py') != ''
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           git fetch origin p2/kiwoom-mock-gateway
           git switch -C p2/kiwoom-mock-gateway origin/p2/kiwoom-mock-gateway
-          python .\scripts\apply_m8_search_normalized_v4.py
+          python .\scripts\apply_m8_search_normalized_v5.py
           if ($LASTEXITCODE -ne 0) { throw 'M8 migration failed' }
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -41,6 +41,7 @@ jobs:
           git rm .\scripts\apply_m8_search_normalized_v2.py
           git rm .\scripts\apply_m8_search_normalized_v3.py
           git rm .\scripts\apply_m8_search_normalized_v4.py
+          git rm .\scripts\apply_m8_search_normalized_v5.py
           git commit -m 'Add symbol search and normalized comparison modes'
           git push origin HEAD:p2/kiwoom-mock-gateway
 

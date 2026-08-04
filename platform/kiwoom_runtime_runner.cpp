@@ -36,6 +36,8 @@ namespace trading::platform
                 return "stock-minute-bars";
             case KiwoomRuntimeActionType::RequestIndexMinuteBars:
                 return "index-minute-bars";
+            case KiwoomRuntimeActionType::RequestSymbolCatalog:
+                return "symbol-catalog";
             case KiwoomRuntimeActionType::SubmitOrderHttp:
                 return "order";
             default:
@@ -171,6 +173,22 @@ namespace trading::platform
                 minuteUnit,
                 continuation,
                 error);
+        if (actions.empty()) return false;
+        Enqueue(std::move(actions));
+        return true;
+    }
+
+    bool KiwoomRuntimeRunner::RequestSymbolCatalog(
+        const std::string& marketType,
+        const Continuation& continuation,
+        std::string& error)
+    {
+        if (!running_.load(std::memory_order_acquire)) {
+            error = "Kiwoom runtime is not running";
+            return false;
+        }
+        std::vector<KiwoomRuntimeAction> actions =
+            engine_.RequestSymbolCatalog(marketType, continuation, error);
         if (actions.empty()) return false;
         Enqueue(std::move(actions));
         return true;
@@ -546,6 +564,7 @@ namespace trading::platform
         case KiwoomRuntimeActionType::RequestAccountBalance:
         case KiwoomRuntimeActionType::RequestStockMinuteBars:
         case KiwoomRuntimeActionType::RequestIndexMinuteBars:
+        case KiwoomRuntimeActionType::RequestSymbolCatalog:
         case KiwoomRuntimeActionType::SubmitOrderHttp: {
             const RuntimeConfig config = engine_.ConfigSnapshot();
             const RuntimeTransportResponse response = transport_->SendRest(
@@ -559,6 +578,28 @@ namespace trading::platform
                 action.type == KiwoomRuntimeActionType::RequestIndexMinuteBars)
             {
                 DeliverMinuteBars(action, response, continuation);
+            }
+            else if (action.type == KiwoomRuntimeActionType::RequestSymbolCatalog) {
+                SymbolCatalogPage page;
+                if (!response.transportOk) {
+                    page.result.error = response.error;
+                }
+                else if (response.statusCode < 200 || response.statusCode >= 300) {
+                    page.result.error = "symbol catalog HTTP failure";
+                }
+                else {
+                    page = ParseSymbolCatalogResponse(action.marketCode, response.body);
+                }
+                if (callbacks_.symbolCatalog) {
+                    callbacks_.symbolCatalog(action.marketCode, page, continuation);
+                }
+                Log(page.result.ok ? "DATA" : "FAULT",
+                    page.result.ok
+                        ? "symbol catalog received: " + action.marketCode +
+                            " rows=" + std::to_string(page.entries.size())
+                        : (page.result.error.empty()
+                            ? "symbol catalog rejected"
+                            : page.result.error));
             }
             else if (action.type == KiwoomRuntimeActionType::RequestOpenOrders) {
                 Enqueue(engine_.OnOpenOrdersHttpResponse(

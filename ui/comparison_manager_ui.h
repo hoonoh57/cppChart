@@ -1,6 +1,7 @@
-#pragma once
+﻿#pragma once
 
 #include "../app/comparison_module.h"
+#include "../core/kiwoom_symbol_catalog.h"
 
 #include <string>
 #include <vector>
@@ -16,6 +17,8 @@ namespace trading::ui
         bool focusRequested = false;
         int addKind = 0;
         int addPlacement = 0;
+        int addValueMode = 0;
+        char searchQuery[96]{};
         char addCode[32]{};
         char addName[64]{};
         std::string error;
@@ -29,6 +32,8 @@ namespace trading::ui
         const std::string&,
         std::string&);
 
+    using RefreshSymbolCatalog = bool(*)(std::string&);
+
     void SelectComparison(
         ComparisonManagerUiState& state,
         const std::string& comparisonId,
@@ -37,7 +42,9 @@ namespace trading::ui
     void DrawComparisonManagerWindow(
         std::vector<app::ComparisonDefinition>& definitions,
         const app::ComparisonModuleSnapshot& snapshot,
+        const std::vector<SymbolCatalogEntry>& symbolCatalog,
         ComparisonManagerUiState& state,
         ApplyComparisonDefinitions applyDefinitions,
-        RequestComparisonData requestData);
+        RequestComparisonData requestData,
+        RefreshSymbolCatalog refreshCatalog);
 }

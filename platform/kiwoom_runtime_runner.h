@@ -2,6 +2,7 @@
 
 #include "../core/kiwoom_runtime_engine.h"
 #include "../core/kiwoom_index_realtime.h"
+#include "../core/kiwoom_symbol_catalog.h"
 
 #include <atomic>
 #include <chrono>
@@ -81,6 +82,10 @@ namespace trading::platform
             const StockTradeTick& tick)> stockTrade;
         std::function<void(
             const IndexValueTick& tick)> indexValue;
+        std::function<void(
+            const std::string& marketType,
+            const SymbolCatalogPage& page,
+            const Continuation& continuation)> symbolCatalog;
     };
 
     class KiwoomRuntimeRunner final
@@ -111,6 +116,11 @@ namespace trading::platform
         bool RequestIndexMinuteBars(
             const std::string& indexCode,
             int minuteUnit,
+            const Continuation& continuation,
+            std::string& error);
+
+        bool RequestSymbolCatalog(
+            const std::string& marketType,
             const Continuation& continuation,
             std::string& error);
 

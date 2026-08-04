@@ -35,6 +35,7 @@
 #include "core/kiwoom_gateway_core.h"
 #include "core/safe_liquidation.h"
 #include "core/kiwoom_runtime_engine.h"
+#include "core/kiwoom_symbol_catalog.h"
 #include "platform/kiwoom_runtime_runner.h"
 #include "platform/winhttp_kiwoom_transport.h"
 #include "app/feature_registry.h"
@@ -262,6 +263,31 @@ static trading::app::ComparisonRenderAdapter g_comparisonRenderAdapter;
 static std::vector<trading::app::ComparisonDefinition>
     g_comparisonDefinitions;
 static trading::ui::ComparisonManagerUiState g_comparisonManagerUi;
+static std::mutex g_symbolCatalogMutex;
+static std::vector<trading::SymbolCatalogEntry> g_symbolCatalog;
+
+static bool RefreshSymbolCatalog(std::string& error)
+{
+    if (!g_runtimeRunner || !g_runtimeRunner->IsRunning()) {
+        error = "키움 런타임이 실행 중이 아닙니다.";
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_symbolCatalogMutex);
+        g_symbolCatalog.clear();
+    }
+    trading::Continuation empty;
+    std::string firstError;
+    std::string secondError;
+    const bool kospi = g_runtimeRunner->RequestSymbolCatalog("0", empty, firstError);
+    const bool kosdaq = g_runtimeRunner->RequestSymbolCatalog("10", empty, secondError);
+    if (!kospi || !kosdaq) {
+        error = !firstError.empty() ? firstError : secondError;
+        return false;
+    }
+    error.clear();
+    return true;
+}
 
 static int MinuteUnitFromSelection(int selection) noexcept
 {
@@ -2194,8 +2220,7 @@ int WINAPI wWinMain(
                 0,
                 comparisonApplied.stale ? 1 : 0);
         };
-        callbacks.indexValue = [](
-            const trading::IndexValueTick& tick) {
+        callbacks.indexValue = [](const trading::IndexValueTick& tick) {
             const trading::app::ComparisonApplyResult applied =
                 g_comparisonModule.ApplyIndexValueTick(tick);
             if (applied.applied) {
@@ -2204,7 +2229,31 @@ int WINAPI wWinMain(
             else if (!applied.stale && !applied.error.empty()) {
                 g_log.Add("FAULT", "0J 지수 병합 실패: %s", applied.error.c_str());
             }
-        };
+      
+    callbacks.symbolCatalog = [](
+        const std::string& marketType,
+        const trading::SymbolCatalogPage& page,
+        const trading::Continuation& continuation)
+    {
+        if (page.result.ok) {
+            std::lock_guard<std::mutex> lock(g_symbolCatalogMutex);
+            for (const trading::SymbolCatalogEntry& entry : page.entries) {
+                const auto found = std::find_if(
+                    g_symbolCatalog.begin(), g_symbolCatalog.end(),
+                    [&](const trading::SymbolCatalogEntry& existing) {
+                        return existing.code == entry.code;
+                    });
+                if (found == g_symbolCatalog.end()) g_symbolCatalog.push_back(entry);
+            }
+        }
+        if (continuation.continueYn == "Y" && !continuation.nextKey.empty() && g_runtimeRunner) {
+            std::string nextError;
+            g_runtimeRunner->RequestSymbolCatalog(
+                marketType, continuation, nextError);
+            if (!nextError.empty()) g_log.Add("FAULT", "%s", nextError.c_str());
+        }
+        WakeFrames(6);
+    };  };
 
         g_runtimeRunner =
             std::make_unique<
@@ -2343,12 +2392,19 @@ int WINAPI wWinMain(
             g_indicatorDefinitions,
             g_indicatorManagerUi,
             ApplyIndicatorConfiguration);
+        std::vector<trading::SymbolCatalogEntry> symbolCatalog;
+        {
+            std::lock_guard<std::mutex> lock(g_symbolCatalogMutex);
+            symbolCatalog = g_symbolCatalog;
+        }
         trading::ui::DrawComparisonManagerWindow(
             g_comparisonDefinitions,
             g_comparisonModule.Snapshot(),
+            symbolCatalog,
             g_comparisonManagerUi,
             ApplyComparisonDefinitions,
-            RequestComparisonData);
+            RequestComparisonData,
+            RefreshSymbolCatalog);
         DrawDashboard();
         DrawLogWindow("로그", g_log);
         DrawLogWindow("신호", g_signalLog);

@@ -399,6 +399,27 @@ namespace trading
     }
 
     std::vector<KiwoomRuntimeAction>
+    KiwoomRuntimeEngine::RequestSymbolCatalog(
+        const std::string& marketType,
+        const Continuation& continuation,
+        std::string& error)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (accessToken_.empty()) {
+            error = "access token is not available";
+            return {};
+        }
+        RestRequest request = BuildSymbolCatalogRestRequest(
+            marketType, accessToken_, continuation, error);
+        if (!error.empty()) return {};
+        KiwoomRuntimeAction action = MakeRestActionLocked(
+            KiwoomRuntimeActionType::RequestSymbolCatalog,
+            std::move(request));
+        action.marketCode = marketType;
+        return { std::move(action) };
+    }
+
+    std::vector<KiwoomRuntimeAction>
     KiwoomRuntimeEngine::SubmitOrder(
         const OrderIntent& intent,
         std::string& error)

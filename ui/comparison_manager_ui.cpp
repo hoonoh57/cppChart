@@ -177,6 +177,8 @@ namespace trading::ui
             definition.placement = state.addPlacement == 1
                 ? app::ComparisonPlacement::PriceSecondaryAxis
                 : app::ComparisonPlacement::SeparatePane;
+            definition.valueMode = static_cast<app::ComparisonValueMode>(
+                (std::max)(0, (std::min)(3, state.addValueMode)));
             definition.paneId =
                 "comparison." + definition.id + ".pane";
             definition.paneTitle = definition.displayName;
@@ -205,9 +207,11 @@ namespace trading::ui
 
         void DrawAddPopup(
             std::vector<app::ComparisonDefinition>& definitions,
+            const std::vector<SymbolCatalogEntry>& symbolCatalog,
             ComparisonManagerUiState& state,
             ApplyComparisonDefinitions applyDefinitions,
-            RequestComparisonData requestData)
+            RequestComparisonData requestData,
+            RefreshSymbolCatalog refreshCatalog)
         {
             if (!ImGui::BeginPopupModal(
                     "비교 시계열 추가",
@@ -219,14 +223,44 @@ namespace trading::ui
 
             const char* kinds[] = { "종목", "지수/업종" };
             ImGui::Combo("종류", &state.addKind, kinds, 2);
-            ImGui::InputText(
-                "코드",
-                state.addCode,
-                sizeof(state.addCode));
-            ImGui::InputText(
-                "표시명",
-                state.addName,
-                sizeof(state.addName));
+            if (state.addKind == 0) {
+                ImGui::InputTextWithHint(
+                    "종목 검색",
+                    "코드 또는 한글 종목명",
+                    state.searchQuery,
+                    sizeof(state.searchQuery));
+                if (ImGui::Button("종목 목록 새로고침")) {
+                    std::string refreshError;
+                    if (refreshCatalog == nullptr || !refreshCatalog(refreshError)) {
+                        state.error = refreshError.empty()
+                            ? "종목 목록 조회를 시작하지 못했습니다."
+                            : refreshError;
+                    }
+                }
+                ImGui::SameLine();
+                ImGui::TextDisabled("%zu종목", symbolCatalog.size());
+                const std::vector<SymbolCatalogEntry> matches =
+                    SearchSymbolCatalog(symbolCatalog, state.searchQuery, 12U);
+                if (!matches.empty() && ImGui::BeginListBox(
+                        "##symbol_matches", ImVec2(-1.0f, 150.0f)))
+                {
+                    for (const SymbolCatalogEntry& entry : matches) {
+                        const std::string label = entry.code + "  " +
+                            entry.name + "  [" + entry.market + "]";
+                        if (ImGui::Selectable(label.c_str())) {
+                            std::snprintf(state.addCode, sizeof(state.addCode),
+                                "%s", entry.code.c_str());
+                            std::snprintf(state.addName, sizeof(state.addName),
+                                "%s", entry.name.c_str());
+                            std::snprintf(state.searchQuery, sizeof(state.searchQuery),
+                                "%s", entry.name.c_str());
+                        }
+                    }
+                    ImGui::EndListBox();
+                }
+            }
+            ImGui::InputText("코드", state.addCode, sizeof(state.addCode));
+            ImGui::InputText("표시명", state.addName, sizeof(state.addName));
             const char* placements[] = {
                 "별도 하단 패널",
                 "가격 패널 이중축" };
@@ -235,6 +269,10 @@ namespace trading::ui
                 &state.addPlacement,
                 placements,
                 2);
+            const char* valueModes[] = {
+                "원시 종가", "기준값 100",
+                "누적 수익률 %", "주 종목 대비 상대강도" };
+            ImGui::Combo("표시 모드", &state.addValueMode, valueModes, 4);
 
             ImGui::Separator();
             ImGui::TextDisabled("지수 빠른 선택");
@@ -315,9 +353,11 @@ namespace trading::ui
     void DrawComparisonManagerWindow(
         std::vector<app::ComparisonDefinition>& definitions,
         const app::ComparisonModuleSnapshot& snapshot,
+        const std::vector<SymbolCatalogEntry>& symbolCatalog,
         ComparisonManagerUiState& state,
         ApplyComparisonDefinitions applyDefinitions,
-        RequestComparisonData requestData)
+        RequestComparisonData requestData,
+        RefreshSymbolCatalog refreshCatalog)
     {
         if (state.focusRequested) ImGui::SetNextWindowFocus();
         ImGui::Begin("비교");
@@ -422,9 +462,11 @@ namespace trading::ui
 
         DrawAddPopup(
             definitions,
+            symbolCatalog,
             state,
             applyDefinitions,
-            requestData);
+            requestData,
+            refreshCatalog);
 
         selected = FindDefinition(definitions, state.selectedId);
         if (selected == nullptr || !state.draftValid) {
@@ -484,6 +526,15 @@ namespace trading::ui
             state.draft.placement = placement == 1
                 ? app::ComparisonPlacement::PriceSecondaryAxis
                 : app::ComparisonPlacement::SeparatePane;
+            state.dirty = true;
+        }
+        const char* valueModes[] = {
+            "원시 종가", "기준값 100",
+            "누적 수익률 %", "주 종목 대비 상대강도" };
+        int valueMode = static_cast<int>(state.draft.valueMode);
+        if (ImGui::Combo("표시 모드", &valueMode, valueModes, 4)) {
+            state.draft.valueMode =
+                static_cast<app::ComparisonValueMode>(valueMode);
             state.dirty = true;
         }
         if (placement == 0) {

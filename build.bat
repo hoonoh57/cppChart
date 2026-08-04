@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 setlocal
 cd /d %~dp0
 if not exist obj mkdir obj
@@ -19,6 +19,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    core\kiwoom_realtime_subscription.cpp ^
    core\kiwoom_market_data.cpp ^
    core\kiwoom_index_realtime.cpp ^
+   core\kiwoom_symbol_catalog.cpp ^
    core\runtime_config.cpp ^
    core\kiwoom_session.cpp ^
    core\trading_state.cpp ^

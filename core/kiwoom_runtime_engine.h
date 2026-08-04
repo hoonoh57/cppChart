@@ -1,7 +1,8 @@
-#pragma once
+﻿#pragma once
 
 #include "kiwoom_gateway_core.h"
 #include "kiwoom_market_data.h"
+#include "kiwoom_symbol_catalog.h"
 #include "kiwoom_reconciliation.h"
 #include "kiwoom_session.h"
 #include "order_coordinator.h"
@@ -25,6 +26,7 @@ namespace trading
         RequestAccountBalance,
         RequestStockMinuteBars,
         RequestIndexMinuteBars,
+        RequestSymbolCatalog,
         SubmitOrderHttp,
         ScheduleReconnect,
         EnterObserveMode
@@ -125,6 +127,11 @@ namespace trading
         std::vector<KiwoomRuntimeAction> RequestIndexMinuteBars(
             const std::string& indexCode,
             int minuteUnit,
+            const Continuation& continuation,
+            std::string& error);
+
+        std::vector<KiwoomRuntimeAction> RequestSymbolCatalog(
+            const std::string& marketType,
             const Continuation& continuation,
             std::string& error);
 

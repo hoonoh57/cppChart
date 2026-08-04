@@ -13,13 +13,13 @@ namespace trading::ui
         {
             switch (state) {
             case SymbolCatalogLoadState::Loading:
-                return "종목 목록 불러오는 중";
+                return "종목명 목록 불러오는 중";
             case SymbolCatalogLoadState::Loaded:
-                return "종목 목록 준비";
+                return "종목명 검색 가능";
             case SymbolCatalogLoadState::Failed:
-                return "종목 목록 오류";
+                return "종목명 검색 불가";
             default:
-                return "종목 목록 미요청";
+                return "종목명 목록 미요청";
             }
         }
     }
@@ -38,6 +38,9 @@ namespace trading::ui
             sizeof(state.query));
 
         const bool inputActive = ImGui::IsItemActive();
+        if (ImGui::IsItemActivated() && state.query[0] == '\0') {
+            RefreshSymbolMatches(state, catalog);
+        }
         if (result.queryChanged) {
             RejectFreeSymbolText(state);
             RefreshSymbolMatches(state, catalog);
@@ -56,7 +59,7 @@ namespace trading::ui
         if (inputActive && ImGui::IsKeyPressed(ImGuiKey_Enter)) {
             result.selectionConfirmed = ConfirmHighlightedSymbol(state);
             if (!result.selectionConfirmed) {
-                result.selectionConfirmed = ConfirmExactSymbolCode(state, catalog);
+                result.selectionConfirmed = ConfirmDirectSymbolCode(state);
             }
         }
 
@@ -73,8 +76,13 @@ namespace trading::ui
                 {
                     const SymbolCatalogEntry& entry =
                         state.matches[static_cast<std::size_t>(index)];
-                    const std::string label = entry.code + "  " +
-                        entry.name + "  [" + entry.market + "]";
+                    std::string label = entry.code;
+                    if (!entry.name.empty() && entry.name != entry.code) {
+                        label += "  " + entry.name;
+                    }
+                    if (!entry.market.empty()) {
+                        label += "  [" + entry.market + "]";
+                    }
                     const bool highlighted = index == state.highlightedIndex;
                     if (ImGui::Selectable(label.c_str(), highlighted)) {
                         result.selectionConfirmed =
@@ -101,7 +109,7 @@ namespace trading::ui
                     state.catalogError.c_str());
             }
             ImGui::SameLine();
-            result.refreshRequested = ImGui::SmallButton("새로고침");
+            result.refreshRequested = ImGui::SmallButton("종목명 새로고침");
         }
 
         return result;

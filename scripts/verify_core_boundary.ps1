@@ -7,6 +7,21 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $coreRoot = Join-Path $repoRoot "core"
 
+$shellSource = Get-Content (Join-Path $repoRoot 'shell_main.cpp') -Raw
+$disabledScopeMarkers = @(
+    'const bool applyDisabled = !g_indicatorPropertyDirty;',
+    'if (applyDisabled) ImGui::BeginDisabled();',
+    'if (applyDisabled) ImGui::EndDisabled();'
+)
+foreach ($marker in $disabledScopeMarkers) {
+    if (($shellSource.Split($marker).Count - 1) -ne 1) {
+        throw "Indicator property disabled-scope marker must occur exactly once: $marker"
+    }
+}
+if ($shellSource.Contains('if (!g_indicatorPropertyDirty) ImGui::EndDisabled();')) {
+    throw 'Indicator property disabled scope must not re-read mutable dirty state at EndDisabled'
+}
+
 $forbiddenPatterns = @(
     '#\s*include\s*[<"]windows\.h[>"]',
     '#\s*include\s*[<"]d3d[^>"]*[>"]',

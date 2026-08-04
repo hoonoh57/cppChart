@@ -107,26 +107,32 @@ int main()
 
     trading::StockTradeTick stockTick;
     stockTick.code = "005930";
-    stockTick.tradeTimeHhmmss = 1;
+    stockTick.tradeTimeHhmmss = 90001;
     stockTick.priceWon = 70020;
     stockTick.tradeVolume = 3;
     stockTick.cumulativeVolume = 1013;
-    stockTick.tradeTimeHhmmss = 1;
     auto stockRealtime = module.ApplyStockTradeTick(stockTick);
-    Check(stockRealtime.applied || stockRealtime.stale,
-          "stock comparison realtime must be handled deterministically");
+    Check(stockRealtime.applied,
+          "stock comparison 0B must replace the KST live minute");
 
     trading::IndexValueTick indexTick;
     indexTick.code = "001";
-    indexTick.tradeTimeHhmmss = 1;
+    indexTick.tradeTimeHhmmss = 90001;
     indexTick.value = 280050;
     indexTick.tradeVolume = 2;
     indexTick.cumulativeVolume = 1002;
     auto indexRealtime = module.ApplyIndexValueTick(indexTick);
-    Check(indexRealtime.applied || indexRealtime.stale,
-          "index comparison realtime must be handled deterministically");
+    Check(indexRealtime.applied,
+          "index comparison 0I must replace the KST live minute");
 
     snapshot = module.Snapshot();
+    stockSeries = Find(snapshot, stock.id);
+    indexSeries = Find(snapshot, index.id);
+    Check(stockSeries != nullptr && stockSeries->liveBar.close == 70020,
+          "stock live close replacement mismatch");
+    Check(indexSeries != nullptr && indexSeries->liveBar.close == 280050,
+          "index live close replacement mismatch");
+
     const std::uint64_t beforeStyleRevision = snapshot.revision;
     stock.color = { 255, 196, 64, 255 };
     stock.width = 2.5f;

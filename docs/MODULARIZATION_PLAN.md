@@ -5,7 +5,7 @@
 Preserve verified real Kiwoom minute, realtime, account, and order paths while
 building detachable feature modules joined to one generic renderer. Production is
 fail-closed and synthetic-free. Windows MSVC build and the full headless suite are
-mandatory.
+mandatory, but CI success alone never proves a user-visible feature is complete.
 
 ## Permanent rules
 
@@ -16,7 +16,25 @@ mandatory.
 - drag-resizable panes and stable viewport/selection/layout during live updates;
 - isolated failures never corrupt the primary real chart;
 - manual chart observation state belongs to the render surface and is never inferred
-  from or written into calculation data.
+  from or written into calculation data;
+- an approved implementation plan is an execution contract and must not be silently
+  reduced, reordered, or partially declared complete;
+- UI milestones are complete only after the full user path is visible and operable.
+
+## Execution-control rules
+
+These rules prevent repeated multi-hour delays on small UI changes.
+
+1. Track every approved item as `not started / code / related tests / visual acceptance`.
+2. Never remove or defer an approved item without explicit approval.
+3. Implement the user path first: `input → candidates → selection → confirmation → action → result`.
+4. If a UI task produces no direct screen-path change for 30 minutes, stop and recheck scope.
+5. After two identical failures, abandon the current method; do not attempt a third equivalent retry.
+6. Do not use full CI as the inner development loop. Run focused compile/tests first.
+7. Full CI is normally limited to one integration run and one final retry.
+8. Do not enable workflow write-back or commit source from CI unless explicitly approved.
+9. Use `complete` only for actual-screen acceptance. Build/test success is `automated verification complete`.
+10. A user asking whether work is still progressing is a process alarm: compare the approved checklist with actual source and screen changes immediately.
 
 ## M1-M6
 
@@ -27,31 +45,21 @@ viewport preservation.
 
 ### Chart observation viewport extension
 
-Implementation and automated verification are complete. Actual-screen acceptance
-remains.
+Implementation, automated verification, and actual-screen acceptance are complete.
 
-Implemented:
+Implemented and accepted:
 
 - configurable future bar slots to the right of the latest candle;
 - right-side space retained by initial view, live auto-follow, and reset;
-- horizontal manual pan beyond the latest data index without clipping the future
-  observation area;
-- pane-local vertical range pan by dragging inside the chart body;
+- horizontal manual pan beyond the latest data index;
+- pane-local vertical range pan;
 - right Y-axis drag scaling anchored around the mouse value;
 - minimum/finite range guards;
 - pane-local manual Y state retained across live-tail updates;
-- double-click reset to latest X position plus automatic Y range with top/bottom
-  padding;
+- double-click reset to latest X plus automatic Y range with margins;
 - independent hit regions for viewport pan, Y scaling, wheel zoom, legends,
-  crosshair, and pane splitters.
-
-Verified viewport implementation:
-
-- branch HEAD: `80542a44cfcaea570703b46d4a84ad36025837b3`
-- pull-request verification SHA: `96204f598925a302707b8d37f4351233e551e46b`
-- Windows CI: `30898400950`
-- artifact: `8888150112`
-- digest: `sha256:1396a02c41e52434ba3ff828e775aa05fb8380a6d454d335762a245088caa226`
+  crosshair, and pane splitters;
+- chart internal vertical scroll removed and bottom X axis always visible.
 
 ## M7 — indicators
 
@@ -66,10 +74,11 @@ styles, references, axis/pane settings, legends, and drag-resizable pane layout.
 
 ## M8 — real stock/index comparison
 
-First production slice implemented and automatically verified. Actual
-`ka20005 + 0J` visual/data acceptance remains.
+M8 infrastructure and normalized comparison calculations are implemented and
+automatically verified. **M8.2 is not complete because the approved top-toolbar
+symbol-search user path is still missing.**
 
-### Implemented
+### Implemented and automatically verified
 
 - up to 32 stock/index comparison definitions;
 - arbitrary stock minutes and multiple stock `0B` live tails;
@@ -77,21 +86,77 @@ First production slice implemented and automatically verified. Actual
 - reconnect restoration and explicit unsubscribe;
 - KOSPI `001`, KOSDAQ `101` presets;
 - decimal/x100 index-value normalization;
-- docked editor with add/reload/hide/show/delete and styling;
+- docked comparison editor;
 - separate lower pane primary axis;
 - price-pane left secondary axis through generic `axisId`;
 - multiple left-axis columns and independent ranges/precision;
-- document-wide shared left-axis width preserving pane/time alignment;
+- document-wide shared left-axis width;
 - cached completed comparison render points;
-- source failure isolation.
+- source failure isolation;
+- `ka10099` symbol catalog request/parsing/search foundation;
+- comparison-add popup code/name search;
+- RawClose;
+- Indexed100;
+- ReturnPercent;
+- RelativeStrength100;
+- fixed first-common-timestamp anchor;
+- transformed live point updates;
+- completed-point cache reuse on live-only updates.
 
-### Next after focused acceptance
+Verified baseline:
 
-- code/name search instead of code-only entry;
-- synchronized timeframe reload for all comparisons;
-- normalized return, relative strength, beta, and correlation;
-- measured subscription/series limits and multi-workspace sharing;
+- branch HEAD before documentation update: `bd0dc433fbf3b071834f4a116387dfed712d4ffa`
+- Windows CI: `30950313269` / `#1176`
+- artifact: `8908930495`
+- digest: `sha256:1e241704fc48e3f8f860f9b6f5d17e01a0a1dbc45b14eeffd4339e850107f770`
+
+### Approved but not implemented or not accepted
+
+- top toolbar code/Korean-name autocomplete;
+- candidate list under the main symbol input;
+- mouse selection in the main toolbar;
+- Up/Down keyboard navigation;
+- Enter confirmation;
+- confirmed code/name/market state;
+- rejection of arbitrary unconfirmed text before `Cmd::LoadSymbol`;
+- one shared search component for main toolbar and comparison popup;
+- duplicate comparison-source prevention;
+- explicit catalog loading/loaded/error UI;
+- recent symbol selection;
+- actual-screen acceptance of all four normalized comparison modes;
+- synchronized timeframe reload for every comparison;
+- actual `ka20005 + 0J` visual/data acceptance;
 - physical multi-source reconnect and intraday soak.
+
+### Immediate P0 sequence
+
+Do not start beta, correlation, ranking, or unrelated optimization before P0 acceptance.
+
+1. Extract a shared symbol-search UI/state helper.
+2. Replace `shell_main.cpp::DrawToolbar()` code-only `InputText` with the helper.
+3. Implement candidate popup/list, mouse, Up/Down, Enter, Escape.
+4. Keep a valid selected code/name/market separate from free query text.
+5. Allow `Cmd::LoadSymbol` only from a valid catalog selection/exact six-digit match.
+6. Replace comparison-popup private search UI with the shared helper.
+7. Reject duplicate comparison kind+code.
+8. Show catalog loading, symbol count, refresh, and exact failure.
+9. Run focused search/catalog/UI-helper tests.
+10. Build and verify the actual toolbar path locally.
+11. Run full Windows CI once.
+12. Obtain user screenshot acceptance.
+
+P0 acceptance path:
+
+```text
+Type "삼성"
+→ show catalog candidates
+→ select "005930 삼성전자 [KOSPI]"
+→ confirm code/name/market
+→ request actual 005930 ka10080/0B
+→ perform the same search in comparison add
+```
+
+No `M8.2 complete` statement is allowed before this path is accepted.
 
 ## M9
 
@@ -100,6 +165,9 @@ signal/order/fill/result chart contributions.
 
 ## Continuous verification
 
-Every milestone runs policy, architecture, real-data-only, MSVC build, full tests,
-clean-tree, and artifact publication. User testing is reserved for actual data,
-visual/GPU interaction, reconnect, orders/fills, and soak.
+Every milestone eventually runs policy, architecture, real-data-only, MSVC build,
+full tests, clean-tree, and artifact publication. These are final integration gates,
+not substitutes for focused development or actual-screen acceptance.
+
+The exact operational handoff, current checklist, failure-prevention protocol, and
+file-by-file next steps are maintained in `SESSION_HANDOFF.md`.

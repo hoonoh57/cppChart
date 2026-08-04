@@ -15,17 +15,18 @@ Read these before changing code:
 - development branch: `p2/kiwoom-mock-gateway`
 - PR: `#1`, Draft
 - protected baseline: `main` at `f1a7d8db7a5d1b145781bfcb6ce11c2e24ef6683`
-- verified implementation HEAD: `8ed98e94abd32fdd4e5d1e93604da7708a2f9bc0`
-- successful Windows CI: `30864225906` (`Windows CI #857`)
-- successful CI artifact id: `8875539604`
-- artifact digest: `sha256:af4026373e47bc77f7b6f3420887a19156639378beb174cff8a56b98487ffc9d`
+- verified implementation HEAD: `544d3ccecc1fdf9121f921916c66896a872413b5`
+- indicator disabled-scope fix commit: `7ee3b7bcb5b870ca7150062397a8c45a38347ee1`
+- successful Windows CI: `30865890159` (`Windows CI #888`)
+- successful CI artifact id: `8876151448`
+- artifact digest: `sha256:53c919e13e969842c6a9619b1f04a1b8b9700636755a58da33d994a808c08cf0`
 - production policy: real Kiwoom mock data only; no synthetic fallback
 
 The verified implementation passed repository policy, architecture gates, M6/M7
-and interactive-legend integration gates, MSVC x64 shell build, the complete
-headless suite, clean-tree verification, and executable artifact publication.
-Documentation commits follow the verified implementation. Always use the live
-branch HEAD after pulling.
+and interactive-legend integration gates, the indicator property disabled-scope
+symmetry gate, MSVC x64 shell build, the complete headless suite, clean-tree
+verification, and executable artifact publication. Documentation commits may follow
+the verified implementation. Always use the live branch HEAD after pulling.
 
 ## Exact next-session opening commands
 
@@ -68,6 +69,8 @@ multi-symbol trading-result visualization without returning to a monolithic
   instance ID, not an individual output line.
 - Parameter schema, validation, Apply/Revert, and recalculation stay outside the
   renderer.
+- ImGui scoped stacks must use one captured condition for both begin and end; a
+  button callback must not change the condition used later by the matching end.
 
 ## Verified real-data and M1-M6 baseline
 
@@ -124,8 +127,7 @@ M6 visual/GPU acceptance was completed successfully by the user. M6 is closed.
 - renderer source contains no indicator-name or calculation branches.
 
 The supplied real-screen screenshot confirmed that price overlays, JMA Slope, OBV,
-ADX, and reference lines render on the actual chart. The missing identification and
-edit interaction reported from that screen is addressed below.
+ADX, and reference lines render on the actual chart.
 
 ## Interactive pane legends and indicator properties — implementation complete
 
@@ -171,11 +173,44 @@ candidate spec set, rebuilds the default plan, reconfigures the indicator module
 and recalculates from the same shared real market history. Invalid values are
 rejected without publishing a partial configuration.
 
+## 2026-08-04 real-screen defect and fix
+
+The user changed JMA period from 20 to 50. Calculation and legend refresh completed,
+but Dear ImGui raised:
+
+```text
+Assertion failed: Calling EndDisabled() too many times!
+imgui.cpp line 9001
+```
+
+Root cause:
+
+- the Apply button entered its frame while `g_indicatorPropertyDirty == true`, so
+  `BeginDisabled()` was not called;
+- successful Apply called `ResetIndicatorPropertyDraft()`, changing the same flag
+  to `false` inside the button callback;
+- the old code re-read the mutated flag and called `EndDisabled()` without a
+  matching begin.
+
+Fix:
+
+```cpp
+const bool applyDisabled = !g_indicatorPropertyDirty;
+if (applyDisabled) ImGui::BeginDisabled();
+// Apply may change g_indicatorPropertyDirty.
+if (applyDisabled) ImGui::EndDisabled();
+```
+
+`scripts/verify_core_boundary.ps1` now requires exactly one captured condition,
+one matching begin, one matching end, and rejects the old mutable-state end pattern.
+
 ### Verification
 
-Windows CI `30864225906` (`#857`) passed:
+Windows CI `30865890159` (`#888`) passed:
 
-- temporary implementation files removed and workflow permissions restored to read
+- workflow permissions restored to read-only
+- temporary migration logic removed
+- disabled-scope symmetry regression gate
 - architecture and real-data-only boundaries
 - generic legend/owner validation and renderer selection gates
 - renderer no-indicator-name gate
@@ -190,14 +225,13 @@ Windows CI `30864225906` (`#857`) passed:
 
 Run the actual shell and confirm:
 
-1. the price pane shows stock, SMA, JMA, and VWAP legends;
-2. JMA Slope, OBV, and ADX panes show their own legends;
+1. changing JMA 20 to 50 and pressing Apply updates the line and legend without any
+   Microsoft Visual C++ assertion dialog;
+2. Revert restores the current applied values before Apply;
 3. single click highlights the complete indicator instance;
 4. double click activates the docked `프로퍼티` tab/window;
-5. changing one parameter and pressing Apply updates calculation and legend;
-6. Revert restores the current applied values before Apply;
-7. clicking a legend does not pan, zoom, or reset the chart;
-8. live `0B` replacement preserves selection and manual viewport.
+5. clicking a legend does not pan, zoom, or reset the chart;
+6. live `0B` replacement preserves selection and manual viewport.
 
 ## Exact local acceptance commands
 

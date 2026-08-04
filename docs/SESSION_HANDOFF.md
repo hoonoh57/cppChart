@@ -2,8 +2,6 @@
 
 ## Mandatory first read
 
-Read before changing code:
-
 1. `docs/ARCHITECTURE_CONSTITUTION.md`
 2. `docs/MODULARIZATION_PLAN.md`
 3. this handoff
@@ -15,21 +13,20 @@ Read before changing code:
 - branch: `p2/kiwoom-mock-gateway`
 - PR: `#1`, Draft
 - protected `main`: `f1a7d8db7a5d1b145781bfcb6ce11c2e24ef6683`
-- verified dynamic-indicator implementation HEAD: `dba98bb7bb4690aeee170b2c6e971f1fa5aa1bc1`
+- verified implementation HEAD: `dba98bb7bb4690aeee170b2c6e971f1fa5aa1bc1`
 - successful Windows CI: `30868440522` (`#922`)
 - artifact ID: `8877052838`
 - artifact digest: `sha256:9f2e83f83f807b198a7a68c1d1743b4da857dfa69fccd9335e31f8a57c6976c7`
-- workflow permissions: `contents: read`
-- production policy: real Kiwoom mock data only; no synthetic fallback
+- workflow permission: `contents: read`
+- production: real Kiwoom mock data only; no synthetic fallback
 
-Documentation commits follow the verified code baseline. Always pull and use the
-live branch HEAD; do not reset to the implementation SHA.
+Documentation commits follow the verified code baseline. Pull and use the live
+branch HEAD; do not reset to the implementation SHA.
 
 ## Opening commands
 
 ```powershell
 Set-Location "E:\2026\gpt\cpp\shell"
-
 git fetch origin
 git switch p2/kiwoom-mock-gateway
 git pull --ff-only origin p2/kiwoom-mock-gateway
@@ -42,124 +39,80 @@ keys, tokens, or account-sensitive payloads.
 
 ## Permanent invariants
 
-- normalized real Kiwoom data only; dependent features fail closed;
-- renderer consumes only generic `RenderDocument` metadata and standard series;
-- indicator calculations never enter renderer or shell code;
-- batch and incremental paths share one indicator implementation;
+- real normalized data only; dependent capabilities fail closed;
+- renderer consumes generic `RenderDocument` only;
+- indicator calculations and type switches never enter renderer or shell;
+- batch/incremental/replay/backtest share one calculation implementation;
 - completed history is immutable/shared; only the live tail is replaced;
-- legend selection resolves to a feature-owned instance ID;
-- dynamic instance lifecycle and presentation belong to application/UI modules;
-- one complete candidate definition set is validated before publication;
-- user viewport, selection, and pane sizes survive live-tail replacement;
+- legend selection resolves to one feature-owned instance ID;
+- dynamic lifecycle/presentation belong to application/UI modules;
+- candidate definition sets validate completely before publication;
+- viewport, selection, and pane sizes survive live-tail replacement;
 - paired ImGui scopes use one captured condition;
-- vector replacement must not leave same-frame pointers/references alive.
+- vector replacement does not leave same-frame pointers/references alive.
 
-## Verified real-data and M1-M6 baseline
+## Verified baseline
 
-- OAuth, WebSocket login, account registration/reconciliation
-- `ka10080` minute bars and selected-symbol `0B` registration/restoration
-- same-minute live-tail OHLCV/tick-count replacement
-- actual positions and PnL
-- `MarketDataModule`, `ChartWorkspaceModule`, `FeatureRegistry`
-- generic renderer, ordinal trading-time axis, common pane slot geometry
-- synchronized crosshair, pan/zoom, latest reset, time/session boundaries
-- actual `0B` updates preserve a manually panned viewport
+M1-M6 are complete, including real `ka10080`, selected-symbol `0B`, account
+reconciliation, actual positions/PnL, generic renderer, ordinal axis, synchronized
+crosshair, pan/zoom/latest reset, and manual viewport preservation. M6 real-screen
+acceptance is closed.
 
-M6 real-screen/GPU acceptance is complete.
+M7 calculation engine is complete for SMA, JMA Value/Up/Down/Slope, VWAP bands,
+OBV/Signal/Direction, and Wilder ADX. Trading-date propagation and session VWAP,
+batch/incremental parity, live-tail cache reuse, execution levels, metrics, and
+generic render contributions are verified.
 
-## M7 calculation engine — complete
+## Dynamic indicator management — implemented
 
-Implemented:
+### Instance operations
 
-- SMA: Value
-- JMA: Value / Up / Down / Slope
-- VWAP: Value / Upper1 / Lower1 / Upper2 / Lower2
-- OBV: Value / Signal / Direction
-- ADX: Wilder ADX
+- property-grid top combo selects any configured instance;
+- `지표 추가` dialog inserts SMA/JMA/VWAP/OBV/ADX;
+- insertion target: default, price, new lower, or existing lower pane;
+- duplicate creates a unique ID and distinguishable color while preserving pane placement;
+- same-type instances retain independent parameters and may overlay in one pane;
+- hide/show stops/restores calculation and rendering;
+- delete permanently removes the instance and presentation settings;
+- zero visible indicators produces the real market-only chart.
 
-Contracts:
+### Parameter and presentation operations
 
-- deterministic `IndicatorSpec` serialization
-- maximum eight fixed outputs/readiness mask
-- batch/incremental parity and same-timestamp live replacement
-- invalid/descending input fail closed without partial output
-- explicit `Bar.TradingDateYmd` and VWAP session reset
-- execution levels, cache reuse, metrics, monotonic revisions
-- generic line/histogram/reference/legend contributions
-
-## Dynamic indicator management — implemented and CI verified
-
-### Instance model
-
-`app/indicator_configuration.*` defines `IndicatorInstanceDefinition`, combining
-one calculation spec with instance visibility, outputs, pane placement, colors,
-widths, styles, and reference lines.
-
-Supported operations:
-
-- select any configured instance from the property-grid top combo;
-- add SMA/JMA/VWAP/OBV/ADX through the `지표 추가` dialog;
-- choose default, price, new lower, or existing lower pane;
-- duplicate an instance with a unique ID and distinguishable color variant;
-- preserve the source pane placement when duplicating, enabling same-pane overlay;
-- hide/show an instance; hidden instances stop calculation and rendering;
-- permanently delete an instance and its presentation configuration;
-- run with zero visible indicator instances using the real market-only chart.
-
-### Parameters and presentation
-
-The manager supports:
-
-- calculation parameters for each indicator type;
-- per-output visible/hidden state;
-- per-output pane assignment;
-- primary and histogram secondary colors;
-- line width;
-- solid, dashed, and dotted line style;
-- pane default height weight;
-- auto, fixed, or symmetric value scale;
-- fixed minimum/maximum and decimal precision;
+- calculation parameters by indicator type;
+- per-output visibility and pane assignment;
+- primary/secondary colors;
+- line width and solid/dashed/dotted style;
+- pane default height and auto/fixed/symmetric value scale;
+- fixed min/max and decimal precision;
 - create/edit/hide/delete arbitrary reference lines;
 - quick overbought/oversold reference creation;
-- Apply/Revert with complete validation before replacement.
+- Apply/Revert with full validation before replacement.
 
-### Pane interaction
+### Generic pane interaction
 
-The generic renderer now provides:
-
-- separator hit areas between every adjacent pane;
-- vertical resize cursor and highlighted separator on hover/drag;
+- separator hit area between adjacent panes;
+- vertical resize cursor and hover/drag highlight;
 - adjacent weight adjustment with minimum pane height;
-- persistent user drag weights across live updates;
-- adoption of an explicitly changed configured default weight;
-- generic styled line/reference drawing and reference labels.
+- user resize state retained across live updates;
+- explicit configured default-height changes adopted without minute-by-minute reset;
+- generic styled lines/references and reference labels.
 
 ### Runtime hardening
 
-- successful JMA parameter Apply no longer causes the ImGui `EndDisabled` assertion;
-- duplicate/hide/delete controls snapshot selected state before replacing the vector;
-- no same-frame dangling selection pointer remains after configuration replacement;
-- temporary migration scripts are absent and workflow permissions are read-only.
+- JMA Apply no longer triggers the ImGui `EndDisabled` assertion;
+- selected instance state is copied before duplicate/hide/delete replaces the vector;
+- no same-frame dangling selection pointer remains;
+- temporary migration scripts are absent and CI is read-only.
 
 ## Verification
 
-Windows CI `30868440522` (`#922`) passed:
-
-- repository, temporary-file, and real-data-only policy
-- core/module/workspace/dynamic-instance architecture gates
-- generic renderer no-indicator-name gate
-- instance catalog/add/hide/duplicate/shared-pane/color tests
-- line-style/reference render-contract tests
-- pane splitter minimum-height and weight-preservation tests
-- property validation and existing indicator parity/cache tests
-- MSVC x64 `shell.exe` build
-- complete legacy and M7 headless suite
-- clean-tree verification
-- executable artifact publication
+Windows CI `30868440522` (`#922`) passed repository/real-data policy,
+core/module/workspace/dynamic-instance gates, generic renderer isolation,
+instance hide/duplicate/shared-pane/color tests, style/reference/pane-layout tests,
+MSVC x64 build, full legacy and M7 headless suite, clean-tree, and artifact
+publication.
 
 ## Focused actual-screen acceptance
-
-Run:
 
 ```powershell
 Set-Location "E:\2026\gpt\cpp\shell"
@@ -170,23 +123,22 @@ git pull --ff-only origin p2/kiwoom-mock-gateway
 .\shell.exe
 ```
 
-Confirm these in one session using actual `ka10080 + 0B` data:
+Using actual `ka10080 + 0B` data, confirm:
 
-1. `프로퍼티` top `지표` combo lists all configured instances.
-2. `지표 추가` creates a selected indicator in default/new/existing pane as chosen.
-3. `복제` creates a second instance; change its parameter and color, then overlay it in the same lower pane.
-4. `감추기/표시` removes/restores calculation and rendering; `삭제` removes it permanently.
-5. Output color, line width, line style, and pane assignment update after Apply.
-6. A reference/overbought/oversold line can be added, edited, hidden, and deleted.
-7. Hovering a pane separator shows the vertical-resize cursor/highlight; dragging changes adjacent heights without collapsing either pane.
-8. Live `0B` updates preserve viewport, selected instance, and dragged pane sizes.
-9. No assertion dialog appears during Apply, duplicate, hide/show, delete, or reference editing.
+1. top `지표` combo lists configured instances;
+2. `지표 추가` creates an instance in the selected pane;
+3. `복제` creates a second instance, which can use different parameters/colors in the same lower pane;
+4. hide/show and delete work;
+5. output color, width, style, and pane assignment apply;
+6. reference/overbought/oversold lines can be added, edited, hidden, and deleted;
+7. separator hover shows resize cursor/highlight and drag changes adjacent heights without collapse;
+8. live `0B` preserves viewport, selected instance, and dragged pane sizes;
+9. no assertion dialog occurs during any management action.
 
-Return a screenshot only when a visible result is wrong. If all items are normal,
-record M7 dynamic indicator management as visually accepted and select the next
-product priority.
+Return a screenshot only if a visible result is wrong. If all are normal, close M7
+dynamic indicator management and select the next product priority.
 
 ## PR policy
 
-PR #1 remains Draft until the remaining actual account/order, physical reconnect,
-and intraday soak acceptance is complete.
+PR #1 remains Draft until actual account/order, physical reconnect, and intraday
+soak acceptance are complete.

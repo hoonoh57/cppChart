@@ -52,6 +52,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    render\market_chart_builder.cpp ^
    ui\render_document_renderer.cpp ^
    ui\indicator_manager_ui.cpp ^
+   ui\symbol_search_ui.cpp ^
    ui\comparison_manager_ui.cpp ^
    platform\kiwoom_runtime_runner.cpp ^
    platform\winhttp_transport.cpp ^

@@ -19,16 +19,51 @@ namespace trading::render
                     : 0.0;
         }
 
-        AxisCoordinate ClampSpan(
-            AxisCoordinate requested,
+        double SafeFraction(double value, double maximum) noexcept
+        {
+            if (!std::isfinite(value)) return 0.0;
+            return (std::max)(0.0, (std::min)(maximum, value));
+        }
+
+        AxisCoordinate MaximumViewportSpan(
             AxisCoordinate dataSpan,
-            AxisCoordinate minimumSpan) noexcept
+            double maximumRightOverscrollFraction) noexcept
         {
             if (dataSpan <= 0.0) return 0.0;
+            const double overscroll = SafeFraction(
+                maximumRightOverscrollFraction,
+                0.90);
+            return overscroll > 0.0
+                ? dataSpan / (1.0 - overscroll)
+                : dataSpan;
+        }
+
+        AxisCoordinate ClampSpan(
+            AxisCoordinate requested,
+            AxisCoordinate maximumSpan,
+            AxisCoordinate minimumSpan) noexcept
+        {
+            if (maximumSpan <= 0.0) return 0.0;
             const AxisCoordinate safeMinimum = (std::max)(0.001, minimumSpan);
             return (std::max)(
-                (std::min)(requested, dataSpan),
-                (std::min)(safeMinimum, dataSpan));
+                (std::min)(requested, maximumSpan),
+                (std::min)(safeMinimum, maximumSpan));
+        }
+
+        AxisCoordinate LatestPadding(
+            AxisCoordinate span,
+            double rightPaddingFraction) noexcept
+        {
+            return span * SafeFraction(rightPaddingFraction, 0.45);
+        }
+
+        bool Near(
+            AxisCoordinate left,
+            AxisCoordinate right,
+            AxisCoordinate span) noexcept
+        {
+            return std::fabs(left - right) <=
+                (std::max)(0.001, span / 100.0);
         }
     }
 
@@ -36,7 +71,9 @@ namespace trading::render
         ChartViewport& viewport,
         AxisCoordinate dataStart,
         AxisCoordinate dataEnd,
-        AxisCoordinate preferredSpan) noexcept
+        AxisCoordinate preferredDataSpan,
+        double rightPaddingFraction,
+        double maximumRightOverscrollFraction) noexcept
     {
         const AxisCoordinate dataSpan = SafeDataSpan(dataStart, dataEnd);
         if (dataSpan <= 0.0) {
@@ -44,12 +81,35 @@ namespace trading::render
             return;
         }
 
-        const AxisCoordinate span =
-            preferredSpan > 0.0
-                ? ClampSpan(preferredSpan, dataSpan, 0.001)
+        const double paddingFraction = SafeFraction(
+            rightPaddingFraction,
+            0.45);
+        const AxisCoordinate requestedDataSpan =
+            preferredDataSpan > 0.0
+                ? (std::min)(preferredDataSpan, dataSpan)
                 : dataSpan;
-        viewport.visibleEnd = dataEnd;
-        viewport.visibleStart = dataEnd - span;
+        const AxisCoordinate requestedSpan = paddingFraction < 1.0
+            ? requestedDataSpan / (1.0 - paddingFraction)
+            : requestedDataSpan;
+        const AxisCoordinate maximumSpan = MaximumViewportSpan(
+            dataSpan,
+            (std::max)(
+                maximumRightOverscrollFraction,
+                paddingFraction));
+        const AxisCoordinate span = ClampSpan(
+            requestedSpan,
+            maximumSpan,
+            0.001);
+        const AxisCoordinate padding = LatestPadding(
+            span,
+            paddingFraction);
+
+        viewport.visibleEnd = dataEnd + padding;
+        viewport.visibleStart = viewport.visibleEnd - span;
+        if (viewport.visibleStart < dataStart) {
+            viewport.visibleStart = dataStart;
+            viewport.visibleEnd = viewport.visibleStart + span;
+        }
         viewport.initialized = true;
         viewport.autoScroll = true;
     }
@@ -57,7 +117,9 @@ namespace trading::render
     void FollowLatest(
         ChartViewport& viewport,
         AxisCoordinate dataStart,
-        AxisCoordinate dataEnd) noexcept
+        AxisCoordinate dataEnd,
+        double rightPaddingFraction,
+        double maximumRightOverscrollFraction) noexcept
     {
         const AxisCoordinate dataSpan = SafeDataSpan(dataStart, dataEnd);
         if (dataSpan <= 0.0) {
@@ -65,20 +127,39 @@ namespace trading::render
             return;
         }
         if (!viewport.initialized) {
-            ResetViewport(viewport, dataStart, dataEnd);
+            ResetViewport(
+                viewport,
+                dataStart,
+                dataEnd,
+                0.0,
+                rightPaddingFraction,
+                maximumRightOverscrollFraction);
             return;
         }
         if (!viewport.autoScroll) {
-            ClampViewport(viewport, dataStart, dataEnd, 0.001);
+            ClampViewport(
+                viewport,
+                dataStart,
+                dataEnd,
+                0.001,
+                maximumRightOverscrollFraction);
             return;
         }
 
         const AxisCoordinate span = ClampSpan(
             viewport.Span(),
-            dataSpan,
+            MaximumViewportSpan(
+                dataSpan,
+                maximumRightOverscrollFraction),
             0.001);
-        viewport.visibleEnd = dataEnd;
-        viewport.visibleStart = dataEnd - span;
+        viewport.visibleEnd = dataEnd + LatestPadding(
+            span,
+            rightPaddingFraction);
+        viewport.visibleStart = viewport.visibleEnd - span;
+        if (viewport.visibleStart < dataStart) {
+            viewport.visibleStart = dataStart;
+            viewport.visibleEnd = viewport.visibleStart + span;
+        }
         viewport.initialized = true;
     }
 
@@ -86,7 +167,8 @@ namespace trading::render
         ChartViewport& viewport,
         AxisCoordinate dataStart,
         AxisCoordinate dataEnd,
-        AxisCoordinate minimumSpan) noexcept
+        AxisCoordinate minimumSpan,
+        double maximumRightOverscrollFraction) noexcept
     {
         const AxisCoordinate dataSpan = SafeDataSpan(dataStart, dataEnd);
         if (dataSpan <= 0.0) {
@@ -100,18 +182,28 @@ namespace trading::render
 
         const AxisCoordinate span = ClampSpan(
             viewport.Span(),
-            dataSpan,
+            MaximumViewportSpan(
+                dataSpan,
+                maximumRightOverscrollFraction),
             minimumSpan);
         AxisCoordinate start = viewport.visibleStart;
         AxisCoordinate end = start + span;
+        const AxisCoordinate maximumEnd =
+            dataEnd + span * SafeFraction(
+                maximumRightOverscrollFraction,
+                0.90);
 
         if (start < dataStart) {
             start = dataStart;
             end = start + span;
         }
-        if (end > dataEnd) {
-            end = dataEnd;
+        if (end > maximumEnd) {
+            end = maximumEnd;
             start = end - span;
+        }
+        if (start < dataStart) {
+            start = dataStart;
+            end = start + span;
         }
 
         viewport.visibleStart = start;
@@ -125,7 +217,9 @@ namespace trading::render
         AxisCoordinate dataEnd,
         double anchorRatio,
         double wheelSteps,
-        AxisCoordinate minimumSpan) noexcept
+        AxisCoordinate minimumSpan,
+        double rightPaddingFraction,
+        double maximumRightOverscrollFraction) noexcept
     {
         const AxisCoordinate dataSpan = SafeDataSpan(dataStart, dataEnd);
         if (
@@ -136,38 +230,54 @@ namespace trading::render
             return;
         }
         if (!viewport.initialized) {
-            ResetViewport(viewport, dataStart, dataEnd);
+            ResetViewport(
+                viewport,
+                dataStart,
+                dataEnd,
+                0.0,
+                rightPaddingFraction,
+                maximumRightOverscrollFraction);
         }
 
         anchorRatio = (std::max)(0.0, (std::min)(1.0, anchorRatio));
+        const AxisCoordinate maximumSpan = MaximumViewportSpan(
+            dataSpan,
+            maximumRightOverscrollFraction);
         const AxisCoordinate oldSpan = ClampSpan(
             viewport.Span(),
-            dataSpan,
+            maximumSpan,
             minimumSpan);
         const double factor = std::pow(0.80, wheelSteps);
         const AxisCoordinate newSpan = ClampSpan(
             oldSpan * factor,
-            dataSpan,
+            maximumSpan,
             minimumSpan);
         const AxisCoordinate anchor =
             viewport.visibleStart + oldSpan * anchorRatio;
 
         viewport.visibleStart = anchor - newSpan * anchorRatio;
         viewport.visibleEnd = viewport.visibleStart + newSpan;
-        viewport.autoScroll =
-            viewport.visibleEnd >= dataEnd - (std::max)(0.001, newSpan / 100.0);
+        const AxisCoordinate latestEnd =
+            dataEnd + LatestPadding(newSpan, rightPaddingFraction);
+        viewport.autoScroll = Near(
+            viewport.visibleEnd,
+            latestEnd,
+            newSpan);
         ClampViewport(
             viewport,
             dataStart,
             dataEnd,
-            minimumSpan);
+            minimumSpan,
+            maximumRightOverscrollFraction);
     }
 
     void PanViewport(
         ChartViewport& viewport,
         AxisCoordinate dataStart,
         AxisCoordinate dataEnd,
-        double visibleSpanFraction) noexcept
+        double visibleSpanFraction,
+        double rightPaddingFraction,
+        double maximumRightOverscrollFraction) noexcept
     {
         const AxisCoordinate dataSpan = SafeDataSpan(dataStart, dataEnd);
         if (
@@ -178,21 +288,36 @@ namespace trading::render
             return;
         }
         if (!viewport.initialized) {
-            ResetViewport(viewport, dataStart, dataEnd);
+            ResetViewport(
+                viewport,
+                dataStart,
+                dataEnd,
+                0.0,
+                rightPaddingFraction,
+                maximumRightOverscrollFraction);
         }
 
         const AxisCoordinate span = ClampSpan(
             viewport.Span(),
-            dataSpan,
+            MaximumViewportSpan(
+                dataSpan,
+                maximumRightOverscrollFraction),
             0.001);
         const AxisCoordinate delta = span * visibleSpanFraction;
 
         viewport.visibleStart += delta;
         viewport.visibleEnd += delta;
         viewport.autoScroll = false;
-        ClampViewport(viewport, dataStart, dataEnd, 0.001);
+        ClampViewport(
+            viewport,
+            dataStart,
+            dataEnd,
+            0.001,
+            maximumRightOverscrollFraction);
 
-        if (viewport.visibleEnd >= dataEnd - 0.001) {
+        const AxisCoordinate latestEnd =
+            dataEnd + LatestPadding(span, rightPaddingFraction);
+        if (Near(viewport.visibleEnd, latestEnd, span)) {
             viewport.autoScroll = true;
         }
     }

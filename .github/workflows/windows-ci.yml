@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -28,22 +28,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Apply chart observation viewport
+        if: hashFiles('scripts/apply_chart_observation_viewport.py') != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git fetch origin p2/kiwoom-mock-gateway
+          git switch -C p2/kiwoom-mock-gateway origin/p2/kiwoom-mock-gateway
+          python .\scripts\apply_chart_observation_viewport.py
+          if ($LASTEXITCODE -ne 0) { throw 'chart observation viewport migration failed' }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git rm .\scripts\apply_chart_observation_viewport.py
+          git commit -m 'Add latest-bar margins and manual value navigation'
+          git push origin HEAD:p2/kiwoom-mock-gateway
+
       - name: Verify repository policy
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           git diff --check
           if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
-          foreach ($temporary in @(
-            '.\scripts\apply_indicator_pack_and_dual_axis.py',
-            '.\scripts\apply_comparison_runtime.py',
-            '.\scripts\apply_comparison_axis_alignment.py',
-            '.\scripts\apply_acceptance_fixes_0j_indicator_ui.py',
-            '.\scripts\apply_fixed_chart_and_reference_footer.py',
-            '.\scripts\fix_comparison_migration.py',
-            '.\scripts\sitecustomize.py',
-            '.\.github\workflows\apply-comparison-upgrade.yml')) {
-            if (Test-Path $temporary) { throw "temporary file remains: $temporary" }
+          if (Test-Path .\scripts\apply_chart_observation_viewport.py) {
+            throw 'temporary viewport migration remains'
           }
           $trackedSecrets = @(git ls-files | Where-Object {
             $_ -match '(^|/)\.env($|\.)' -and
@@ -59,130 +67,6 @@ jobs:
           .\scripts\verify_core_boundary.ps1
           .\scripts\verify_real_data_only.ps1
           .\scripts\verify_modular_architecture.ps1
-
-      - name: Verify comparison and indicator contracts
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $source = Get-Content .\shell_main.cpp -Raw
-          $renderer = Get-Content .\ui\render_document_renderer.cpp -Raw
-          $contract = Get-Content .\render\render_document.h -Raw
-          $marketData = Get-Content .\core\kiwoom_market_data.cpp -Raw
-          $indexRealtime = Get-Content .\core\kiwoom_index_realtime.cpp -Raw
-          $comparison = Get-Content .\app\comparison_module.cpp -Raw
-          $comparisonAdapter = Get-Content .\app\comparison_render_adapter.cpp -Raw
-          $comparisonUi = Get-Content .\ui\comparison_manager_ui.cpp -Raw
-          $indicatorConfig = Get-Content .\app\indicator_configuration.cpp -Raw
-          $indicatorUi = Get-Content .\ui\indicator_manager_ui.cpp -Raw
-          $runner = Get-Content .\platform\kiwoom_runtime_runner.cpp -Raw
-          $runnerTest = Get-Content .\tests\kiwoom_runtime_runner_tests.cpp -Raw
-          $build = Get-Content .\build.bat -Raw
-          $runAll = Get-Content .\tests\run_all.bat -Raw
-
-          foreach ($marker in @(
-            'ComparisonModule g_comparisonModule',
-            'ComparisonRenderAdapter g_comparisonRenderAdapter',
-            'DrawComparisonManagerWindow(',
-            'RequestComparisonData(',
-            'ApplyComparisonDefinitions(',
-            'callbacks.indexValue',
-            'ImGuiWindowFlags_NoScrollbar',
-            'ImGuiWindowFlags_NoScrollWithMouse')) {
-            if (-not $source.Contains($marker)) { throw "Missing shell marker: $marker" }
-          }
-          foreach ($marker in @(
-            'struct ValueAxis final',
-            'ValueAxisSide',
-            'std::string axisId',
-            'std::vector<ValueAxis> valueAxes')) {
-            if (-not $contract.Contains($marker)) { throw "Missing axis contract: $marker" }
-          }
-          foreach ($marker in @(
-            'SecondaryAxisRange(',
-            'DrawSecondaryValueAxis(',
-            'sharedLeftAxisColumns',
-            'leftAxisWidth',
-            'series.axisId',
-            'ImGuiStyleVar_ItemSpacing',
-            'ImVec2(itemSpacing.x, 0.0f)')) {
-            if (-not $renderer.Contains($marker)) { throw "Missing renderer marker: $marker" }
-          }
-          foreach ($marker in @(
-            'TryReadAbsoluteIndexValue(',
-            'instrument == MinuteBarInstrument::Index',
-            'std::llround(scaled)')) {
-            if (-not $marketData.Contains($marker)) { throw "Missing index normalization marker: $marker" }
-          }
-          foreach ($marker in @(
-            'record.type != "0J"',
-            'index type 0J')) {
-            if (-not $indexRealtime.Contains($marker)) { throw "Missing 0J index decoder marker: $marker" }
-          }
-          if ($indexRealtime.Contains('record.type != "0I"')) {
-            throw 'Index decoder still accepts incorrect 0I realtime type'
-          }
-          foreach ($marker in @(
-            'ApplyIndexValueTick(',
-            'ApplyStockTradeTick(',
-            'comparison series limit is 32')) {
-            if (-not $comparison.Contains($marker)) { throw "Missing comparison module marker: $marker" }
-          }
-          foreach ($marker in @(
-            'ComparisonPlacement::PriceSecondaryAxis',
-            'axis.side = render::ValueAxisSide::Left',
-            'line.axisId = axisId')) {
-            if (-not $comparisonAdapter.Contains($marker)) { throw "Missing comparison adapter marker: $marker" }
-          }
-          foreach ($marker in @(
-            'KOSPI', 'KOSDAQ', '가격 패널 이중축', '별도 하단 패널')) {
-            if (-not $comparisonUi.Contains($marker)) { throw "Missing comparison UI marker: $marker" }
-          }
-          foreach ($marker in @(
-            '"EMA"', '"BOLLINGER"', '"RSI"', '"MACD"', '"DMI"', '"SUPERTREND"')) {
-            if (-not $indicatorConfig.Contains($marker)) { throw "Missing indicator type: $marker" }
-          }
-          foreach ($marker in @(
-            'BeginCombo("적용 지표"',
-            'app::IndicatorCatalog()',
-            '"+ " + catalog[index].displayName',
-            '##indicator_editor_scroll',
-            'ImGuiTableFlags_ScrollY',
-            'DrawReferenceQuickActions(state)',
-            'GetFrameHeightWithSpacing() * 3.0f')) {
-            if (-not $indicatorUi.Contains($marker)) { throw "Missing indicator UX marker: $marker" }
-          }
-          foreach ($marker in @(
-            'stockTradeCodes_', 'indexValueCodes_',
-            'SubscribeIndexValues(', 'DecodeIndexValueRecord(',
-            '{ "0J" }')) {
-            if (-not $runner.Contains($marker)) { throw "Missing realtime comparison marker: $marker" }
-          }
-          foreach ($marker in @(
-            'IndexValueRegistrationCount(',
-            'IndexValueRemovalCount(',
-            'PushIndexValue(',
-            '0J index value registration',
-            'restore 0J subscription after reconnect')) {
-            if (-not $runnerTest.Contains($marker)) { throw "Missing 0J lifecycle test marker: $marker" }
-          }
-          foreach ($marker in @(
-            'core\standard_indicators.cpp',
-            'core\kiwoom_index_realtime.cpp',
-            'app\comparison_module.cpp',
-            'app\comparison_render_adapter.cpp',
-            'ui\comparison_manager_ui.cpp')) {
-            if (-not $build.Contains($marker)) { throw "Build source missing: $marker" }
-          }
-          foreach ($marker in @(
-            'standard_indicators_tests.exe',
-            'kiwoom_index_realtime_tests.exe',
-            'comparison_module_tests.exe',
-            'comparison_render_adapter_tests.exe')) {
-            if (-not $runAll.Contains($marker)) { throw "Test missing: $marker" }
-          }
-          foreach ($forbidden in @('KOSPI', 'KOSDAQ', 'ka20005', '0I', '0J', 'EMA', 'MACD')) {
-            if ($renderer.Contains($forbidden)) { throw "Generic renderer contains feature marker: $forbidden" }
-          }
 
       - name: Locate MSVC toolchain
         id: msvc

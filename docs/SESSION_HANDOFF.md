@@ -17,11 +17,11 @@
 - Windows CI: `30868440522` (`#922`)
 - artifact: `8877052838`
 - digest: `sha256:9f2e83f83f807b198a7a68c1d1743b4da857dfa69fccd9335e31f8a57c6976c7`
-- workflow: `contents: read`
+- workflow: read-only
 - production: real Kiwoom mock data only; no synthetic fallback
 
-Pull and use the live branch HEAD; documentation commits follow the verified code
-baseline.
+Use the live branch HEAD after pulling; documentation commits follow the verified
+implementation baseline.
 
 ## Opening commands
 
@@ -37,51 +37,45 @@ git rev-parse HEAD
 Do not alter `.env` without a concrete configuration fault. Never expose keys,
 tokens, or account-sensitive payloads.
 
-## Invariants
+## Permanent invariants
 
-- real normalized data only and fail-closed dependencies;
-- generic renderer with no indicator/broker/strategy calculation branches;
-- one calculation implementation across batch/incremental/replay/backtest;
+- normalized real data only; dependent features fail closed;
+- generic renderer, with no indicator/broker/strategy calculation branches;
+- one calculation implementation for batch/incremental/replay/backtest;
 - immutable completed history plus mutable live tail;
 - owner-based instance selection;
-- dynamic lifecycle/presentation in app/UI modules;
+- lifecycle/presentation in app/UI modules;
 - complete candidate validation before publication;
-- viewport, selection, pane sizes retained across live updates;
-- stable ImGui scope conditions and no same-frame dangling pointers.
+- viewport, selection, and pane sizes survive live updates;
+- stable ImGui scope conditions and no dangling same-frame pointers.
 
-## Verified baseline
+## Completed baseline
 
 M1-M6 are complete and M6 is visually accepted. Real `ka10080`, selected-symbol
 `0B`, account reconciliation, positions/PnL, generic renderer, ordinal axis,
-crosshair, pan/zoom/latest reset, and manual viewport preservation remain intact.
+crosshair, pan/zoom/latest reset, and viewport preservation remain intact.
 
 M7 calculation is complete for SMA, JMA Value/Up/Down/Slope, VWAP bands,
-OBV/Signal/Direction, and Wilder ADX, including trading-date/session VWAP,
-batch/incremental parity, live-tail cache reuse, execution levels, metrics, and
-generic render contributions.
+OBV/Signal/Direction, and Wilder ADX, including session dates, parity, cache reuse,
+execution levels, metrics, and generic render contributions.
 
-## Dynamic indicator management
+## Dynamic indicator management — implemented
 
-Implemented:
-
-- top instance selector and Add dialog;
+- top selector and Add dialog;
 - default/price/new/existing pane insertion;
 - duplicate with unique ID/color and preserved pane placement;
 - independent same-type parameters and same-pane overlay;
 - hide/show and permanent delete;
-- per-output visibility/pane/color/width/style;
-- pane height and auto/fixed/symmetric scale settings;
+- per-output visibility, pane, color, width, and style;
+- pane height and axis-scale settings;
 - reference CRUD and overbought/oversold creation;
-- generic line styles/reference labels;
-- drag-resizable pane separators with resize cursor/highlight/minimum height;
-- persistent user pane weights and configured-default synchronization;
-- market-only chart when no indicator is visible.
-
-Runtime hardening:
-
+- generic styled lines/reference labels;
+- drag-resizable separators with cursor/highlight/minimum height;
+- persistent pane weights and configured-default synchronization;
+- market-only chart when no indicator is visible;
 - JMA Apply assertion fixed;
-- duplicate/hide/delete copy selected state before vector replacement;
-- temporary migration logic removed and CI restored read-only.
+- vector replacement uses copied selection state;
+- temporary migration logic removed and CI read-only.
 
 ## Verification
 
@@ -103,16 +97,16 @@ git pull --ff-only origin p2/kiwoom-mock-gateway
 Using actual `ka10080 + 0B`, confirm:
 
 1. top selector and Add dialog work;
-2. duplicate creates a differently colored instance that can overlay in the same lower pane;
+2. duplicate creates a differently colored instance that can share a lower pane;
 3. parameters, color, width, style, and pane assignment apply;
 4. hide/show and delete work;
-5. references and overbought/oversold can be created, edited, hidden, deleted;
-6. pane separator hover/drag works without pane collapse;
-7. live updates retain viewport, selection, and dragged pane sizes;
+5. references/overbought/oversold can be created, edited, hidden, deleted;
+6. separator hover/drag works without pane collapse;
+7. live updates retain viewport, selection, and pane sizes;
 8. no assertion appears during management actions.
 
 Return a screenshot only for a visible failure. If normal, close M7 dynamic
-indicator management and choose the next product priority.
+indicator management and choose the next priority.
 
 ## PR policy
 

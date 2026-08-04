@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -27,6 +27,24 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply 0J and indicator UI acceptance fixes
+        if: hashFiles('scripts/apply_acceptance_fixes_0j_indicator_ui.py') != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git fetch origin p2/kiwoom-mock-gateway
+          git switch -C p2/kiwoom-mock-gateway origin/p2/kiwoom-mock-gateway
+          python .\scripts\apply_acceptance_fixes_0j_indicator_ui.py
+          if ($LASTEXITCODE -ne 0) { throw 'acceptance fix migration failed' }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git rm .\scripts\apply_acceptance_fixes_0j_indicator_ui.py
+          git commit -m 'Fix 0J index realtime and indicator manager UX'
+          git push origin HEAD:p2/kiwoom-mock-gateway
 
       - name: Verify repository policy
         shell: pwsh
@@ -38,6 +56,7 @@ jobs:
             '.\scripts\apply_indicator_pack_and_dual_axis.py',
             '.\scripts\apply_comparison_runtime.py',
             '.\scripts\apply_comparison_axis_alignment.py',
+            '.\scripts\apply_acceptance_fixes_0j_indicator_ui.py',
             '.\scripts\fix_comparison_migration.py',
             '.\scripts\sitecustomize.py',
             '.\.github\workflows\apply-comparison-upgrade.yml')) {
@@ -144,7 +163,7 @@ jobs:
             'comparison_render_adapter_tests.exe')) {
             if (-not $runAll.Contains($marker)) { throw "Test missing: $marker" }
           }
-          foreach ($forbidden in @('KOSPI', 'KOSDAQ', 'ka20005', '0I', 'EMA', 'MACD')) {
+          foreach ($forbidden in @('KOSPI', 'KOSDAQ', 'ka20005', '0I', '0J', 'EMA', 'MACD')) {
             if ($renderer.Contains($forbidden)) { throw "Generic renderer contains feature marker: $forbidden" }
           }
 

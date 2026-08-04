@@ -1,9 +1,10 @@
-﻿#pragma once
+#pragma once
 
 #include "../render/chart_viewport.h"
 #include "../render/render_document.h"
 #include "../render/time_axis.h"
 #include "../render/time_boundaries.h"
+#include "../render/value_viewport.h"
 
 #include "imgui.h"
 
@@ -34,6 +35,7 @@ namespace trading::ui
         bool selectionDoubleClicked = false;
         std::map<std::string, float> paneHeightWeights;
         std::map<std::string, float> paneDefaultHeightWeights;
+        std::map<std::string, render::ValueViewport> paneValueViewports;
     };
 
     void DrawRenderDocument(

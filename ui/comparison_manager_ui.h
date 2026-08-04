@@ -2,6 +2,7 @@
 
 #include "../app/comparison_module.h"
 #include "../core/kiwoom_symbol_catalog.h"
+#include "symbol_search_ui.h"
 
 #include <string>
 #include <vector>
@@ -18,7 +19,7 @@ namespace trading::ui
         int addKind = 0;
         int addPlacement = 0;
         int addValueMode = 0;
-        char searchQuery[96]{};
+        SymbolSearchState addSearch;
         char addCode[32]{};
         char addName[64]{};
         std::string error;

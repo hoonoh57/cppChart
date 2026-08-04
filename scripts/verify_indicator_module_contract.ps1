@@ -9,6 +9,8 @@ $requiredFiles = @(
     'app\indicator_module.cpp',
     'app\indicator_render_adapter.h',
     'app\indicator_render_adapter.cpp',
+    'app\indicator_configuration.h',
+    'app\indicator_configuration.cpp',
     'app\default_indicator_render_plan.h',
     'app\default_indicator_render_plan.cpp',
     'app\chart_workspace_module.h',
@@ -18,6 +20,7 @@ $requiredFiles = @(
     'tests\indicator_render_adapter_tests.cpp',
     'tests\indicator_reference_adapter_tests.cpp',
     'tests\default_indicator_render_plan_tests.cpp',
+    'tests\indicator_configuration_tests.cpp',
     'tests\chart_workspace_indicator_tests.cpp'
 )
 foreach ($relative in $requiredFiles) {
@@ -63,6 +66,8 @@ foreach ($marker in @(
     'struct IndicatorReferenceBinding final',
     'IndicatorRenderKind kind',
     'std::size_t outputIndex',
+    'render::LineStyle style',
+    'std::string legendRole',
     'std::vector<IndicatorReferenceBinding> references',
     'class IndicatorRenderAdapter final',
     'render::RenderDocument& document')) {
@@ -79,10 +84,12 @@ foreach ($marker in @(
     'binding.kind == IndicatorRenderKind::Line',
     'cache.completedIdentity',
     'line.points.SetShared(',
+    'line.style = binding.style',
     'histogram.points.SetShared(',
     'RebuildLineCache(',
     'RebuildHistogramCache(',
     'for (const IndicatorReferenceBinding& reference',
+    'line.style = reference.style',
     'pane->referenceLines.push_back(',
     'render::ValidateRenderDocument(document, validationError)')) {
     if (-not $adapter.Contains($marker)) {
@@ -100,8 +107,24 @@ foreach ($forbidden in @(
     }
 }
 
-$defaultPlan = Get-Content (
-    Join-Path $repoRoot 'app\default_indicator_render_plan.cpp') -Raw
+$configurationHeader = Get-Content (
+    Join-Path $repoRoot 'app\indicator_configuration.h') -Raw
+foreach ($marker in @(
+    'struct IndicatorCatalogEntry final',
+    'struct IndicatorInstanceDefinition final',
+    'IndicatorCatalog()',
+    'CreateDefaultIndicatorDefinition(',
+    'VisibleIndicatorSpecs(',
+    'BuildIndicatorRenderPlan(',
+    'DuplicateIndicatorDefinition(',
+    'MoveIndicatorToPane(')) {
+    if (-not $configurationHeader.Contains($marker)) {
+        throw "Dynamic indicator configuration API is missing: $marker"
+    }
+}
+
+$configuration = Get-Content (
+    Join-Path $repoRoot 'app\indicator_configuration.cpp') -Raw
 foreach ($marker in @(
     'spec.type == "SMA"',
     'spec.type == "JMA"',
@@ -112,16 +135,33 @@ foreach ($marker in @(
     'ObvDirectionOutput',
     'AdxValueOutput',
     'VwapLower2Output',
+    'definition.visible',
+    'ApplyIndicatorColorVariant(',
     'candidate.references.push_back')) {
+    if (-not $configuration.Contains($marker)) {
+        throw "Dynamic indicator definition/render plan is missing: $marker"
+    }
+}
+
+$defaultPlan = Get-Content (
+    Join-Path $repoRoot 'app\default_indicator_render_plan.cpp') -Raw
+foreach ($marker in @(
+    'CreateIndicatorDefinition(',
+    'BuildIndicatorRenderPlan(')) {
     if (-not $defaultPlan.Contains($marker)) {
-        throw "Default indicator render plan is missing: $marker"
+        throw "Default indicator compatibility wrapper is missing: $marker"
     }
 }
 
 $renderContract = Get-Content (
     Join-Path $repoRoot 'render\render_document.h') -Raw
-if (-not $renderContract.Contains('SharedTailSeries<LinePoint> points')) {
-    throw 'LineSeries must share immutable completed history and a mutable live tail'
+foreach ($marker in @(
+    'SharedTailSeries<LinePoint> points',
+    'enum class LineStyle',
+    'LineStyle style = LineStyle::Solid')) {
+    if (-not $renderContract.Contains($marker)) {
+        throw "Styled shared render contract is missing: $marker"
+    }
 }
 
 $workspaceHeader = Get-Content (
@@ -212,6 +252,20 @@ foreach ($marker in @(
     }
 }
 
+$configurationTests = Get-Content (
+    Join-Path $repoRoot 'tests\indicator_configuration_tests.cpp') -Raw
+foreach ($marker in @(
+    'hidden indicator must stop calculation',
+    'duplicate must preserve source pane placement',
+    'duplicate must receive a distinguishable color variant',
+    'multi-instance indicator plan must build',
+    'all duplicated outputs must share remapped pane',
+    'hidden output must not contribute a render series')) {
+    if (-not $configurationTests.Contains($marker)) {
+        throw "Dynamic indicator configuration regression coverage is missing: $marker"
+    }
+}
+
 $workspaceTests = Get-Content (
     Join-Path $repoRoot 'tests\chart_workspace_indicator_tests.cpp') -Raw
 foreach ($marker in @(
@@ -232,14 +286,16 @@ foreach ($marker in @(
     'indicator_render_adapter_tests.exe',
     'indicator_reference_adapter_tests.exe',
     'default_indicator_render_plan_tests.exe',
+    'indicator_configuration_tests.exe',
     'chart_workspace_indicator_tests.exe',
     'app\indicator_module.cpp',
     'app\indicator_render_adapter.cpp',
+    'app\indicator_configuration.cpp',
     'app\default_indicator_render_plan.cpp',
     'app\chart_workspace_module.cpp')) {
     if (-not $runAll.Contains($marker)) {
-        throw "Indicator module/adapter/workspace test is not in the complete suite: $marker"
+        throw "Indicator module/adapter/configuration/workspace test is not in the complete suite: $marker"
     }
 }
 
-Write-Host 'Indicator module, generic render adapter, default plan, and chart workspace composition contracts passed.' -ForegroundColor Green
+Write-Host 'Indicator module, dynamic configuration, generic render adapter, and chart workspace composition contracts passed.' -ForegroundColor Green

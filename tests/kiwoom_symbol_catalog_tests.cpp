@@ -33,7 +33,6 @@ int main()
     Check(request.body.find("\"mrkt_tp\":\"0\"") != std::string::npos,
           "catalog market body mismatch");
 
-    continuation.hasMore = true;
     continuation.continueYn = "Y";
     continuation.nextKey = "NEXT";
     const RestRequest continued = BuildSymbolCatalogRestRequest(

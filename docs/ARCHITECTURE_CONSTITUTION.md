@@ -2,283 +2,133 @@
 
 ## 1. Product objective
 
-cppChart is not a clone of a fixed HTS chart. The product must let a user:
-
-1. connect normalized real market and account data;
-2. create arbitrary indicators without editing the renderer;
-3. compare indices, sectors, and many stocks on synchronized charts;
-4. run the same strategy code in replay, backtest, monitoring, and live execution;
-5. inspect multi-symbol trade results directly on charts;
-6. save validated parameter sets and reuse them without translation.
-
-The user defines the analytical and trading result. The implementation must absorb protocol, concurrency, rendering, storage, performance, and recovery complexity without exposing accidental technical work to the user.
+cppChart is a modular chart-based trading workbench. Users must be able to connect
+normalized real market/account data, add and manage indicator instances, compare
+symbols and indices, reuse one strategy implementation across replay/backtest/live,
+and inspect trading results without changing the renderer.
 
 ## 2. Non-negotiable invariants
 
-### 2.1 Real-data-only production runtime
+### 2.1 Real-data-only production
 
-Production code must never hide a real data error with synthetic prices, positions, fills, rankings, or fallback candles. Missing or invalid data produces an explicit state and blocks dependent actions.
+Production never replaces missing or invalid real data with synthetic prices,
+bars, positions, fills, rankings, or indicator values. Dependent capabilities fail
+closed and expose the exact fault. Deterministic fixtures remain test-only.
 
-Deterministic fixtures are allowed only in tests and cannot enter production snapshots.
+### 2.2 Major-feature modules and compact values
 
-### 2.2 Major-feature modularity, not object-per-value design
+Only units with independent state, lifecycle, execution level, or failure policy
+become modules: MarketData, ChartWorkspace, Indicators, Compare, Strategy, Trading,
+and Replay/Backtest. Tick, Bar, IndicatorValue, render points, and markers remain
+compact value types in contiguous storage.
 
-Only units with independent state, lifetime, execution level, or failure policy become feature modules.
+### 2.3 One generic renderer contract
 
-Examples:
+All visual features publish `RenderDocument` containing generic panes, legends,
+candles, lines, histograms, markers, references, and annotations. Generic color,
+width, line style, pane scale, pane weight, and owner identity are metadata.
 
-- MarketData
-- ChartWorkspace
-- Indicators
-- Compare
-- Strategy
-- Trading
-- Replay/Backtest
+The renderer never calculates or identifies indicators, strategies, brokers, or
+account objects. A new indicator must not add a branch to renderer source.
 
-High-frequency values remain compact value types in contiguous storage:
+### 2.4 Indicator-instance boundary
 
-- Tick
-- Bar
-- PricePoint
-- IndicatorValue
-- DrawPoint
-- Marker
+`IndicatorSpec` is the pure calculation contract. Application-owned
+`IndicatorInstanceDefinition` combines one spec with:
 
-No heap allocation, virtual dispatch, or ownership graph is introduced per tick, bar, or rendered point.
+- stable unique instance ID;
+- visible/hidden state;
+- output visibility and pane placement;
+- colors, widths, and line styles;
+- editable reference lines, including overbought/oversold levels.
 
-### 2.3 One renderer contract
+The application owns the indicator catalog, insertion, duplication, hide/show,
+deletion, parameter validation, and render-plan construction. Multiple instances
+of the same type may share one pane while retaining independent parameters and
+presentation. A complete candidate configuration is validated before replacing the
+active calculation or render plan. Invalid or duplicate state never publishes
+partially.
 
-Feature modules never draw directly and the renderer never knows indicator, strategy, broker, or API names.
+### 2.5 Legend and selection boundary
 
-Every visual feature publishes the same renderer-facing contract:
+Legends are explicit metadata. Child outputs and references carry a generic
+`ownerId`; every selectable legend resolves to one feature-owned instance. A
+multi-output indicator remains one selectable/editable object. The renderer emits
+generic click/double-click events and highlighting but never edits parameters.
+Legend hit-testing suppresses conflicting viewport gestures.
 
-```text
-RenderDocument
-  Pane[]
-    LegendEntry[]
-    Axis[]
-    CandleSeries[]
-    LineSeries[]
-    HistogramSeries[]
-    MarkerSeries[]
-    ReferenceLine[]
-    TextAnnotation[]
-```
+### 2.6 Pane layout boundary
 
-A new indicator or strategy contributes standard series. It must not add feature-specific branches to the renderer.
+Pane default weights come from the document. Drag-resized weights belong to the
+render surface. Separators expose a vertical-resize cursor and highlighted hit
+area. Adjacent resizing preserves total weight and minimum visible height. Live
+market revisions do not reset a user's layout; an explicit configured default
+height change may replace the prior default.
 
-### 2.3.1 Generic legend and instance-selection boundary
+### 2.7 One calculation implementation
 
-- Legends are explicit `RenderDocument` metadata. The renderer does not infer feature identity from display text, color, or naming conventions.
-- Generic child series may carry an `ownerId` used only for hit-testing, highlighting, and selection handoff.
-- Every selectable legend resolves to a feature-owned instance ID.
-- Multi-output indicators remain one selectable and editable instance. Their value lines, direction lines, bands, histograms, and reference lines do not become independent parameter objects.
-- The renderer may emit single-click and double-click selection events, but it never knows the selected feature's parameter schema and never mutates feature configuration.
-- Parameter descriptors, validation, Apply/Revert behavior, and recalculation belong to the feature/application layer.
-- Legend hit-testing must suppress conflicting viewport pan, zoom, and reset gestures.
+Batch history, incremental live updates, replay, backtest, parameter sweep, and
+live monitoring/execution share one indicator or strategy implementation. Identical
+normalized inputs must produce equivalent declared results.
 
-### 2.4 Slim renderer hot path
+### 2.8 Command, snapshot, and broker boundaries
 
-The renderer is responsible only for:
+UI intent flows through CommandBus or explicit application APIs. Workers publish
+normalized events. Modules publish immutable snapshots/render contributions.
+Broker-specific fields end inside the broker adapter; chart, indicator, strategy,
+replay, and risk modules do not depend on transport payload fields.
 
-- pane layout;
-- time and value axes;
-- visible-range calculation;
-- clipping and downsampling;
-- GPU buffer and off-screen render-target management;
-- dirty-region decisions;
-- interaction such as zoom, pan, crosshair, synchronized cursors, and generic legend selection;
-- rendering standard series types.
+### 2.9 Fail closed
 
-The renderer must not:
+Malformed input, stale events, time conflicts, sequence gaps, reconciliation
+mismatch, unsupported data, and invalid parameter/presentation changes disable only
+the dependent capability and preserve the last valid state where appropriate.
 
-- parse Kiwoom JSON;
-- aggregate `0B` ticks into bars;
-- calculate SMA, JMA, VWAP, RSI, or strategy logic;
-- calculate positions or PnL;
-- submit orders;
-- rank symbols;
-- interpret indicator parameter definitions.
+### 2.10 Scoped UI state
 
-The render loop must not allocate per point, wait for network locks, or recalculate indicators.
+Paired UI stack operations must use one captured condition for both begin and end.
+Callbacks must not invalidate pointers or change the condition used by a later
+matching end operation in the same frame.
 
-### 2.5 Command and snapshot discipline
+## 3. Execution levels
 
-User actions flow through CommandBus. Worker threads publish normalized events. UI state changes occur through explicit module APIs. The UI renders snapshots and does not directly mutate broker, strategy, or market-data state.
+Every major feature supports `Off`, `Standby`, `Visible`, and `Active`.
 
-```text
-UI intent -> CommandBus -> feature/application coordinator
-worker event -> normalized event -> feature module
-feature module -> snapshot/render contribution -> UI renderer
-```
+- Off stops subscriptions/calculation/rendering and releases optional caches.
+- Standby preserves minimal state while stopping expensive work.
+- Visible calculates and renders without execution behavior.
+- Active permits execution subject to readiness and risk gates.
 
-### 2.6 One calculation implementation
-
-An indicator or strategy has one implementation shared by:
-
-- historical batch calculation;
-- live incremental update;
-- replay;
-- backtest;
-- parameter sweep;
-- real-time monitoring and execution.
-
-Given identical normalized input, batch and incremental results must be equivalent within the declared numerical contract.
-
-### 2.7 Normalized broker boundary
-
-Broker-specific fields end inside the broker adapter.
-
-```text
-Kiwoom REST/WebSocket -> Kiwoom adapter -> normalized Tick/Bar/Order/Fill/Position
-```
-
-Chart, indicator, strategy, replay, and risk modules do not depend on Kiwoom JSON keys or HTTP/WebSocket details.
-
-### 2.8 Fail closed
-
-Missing configuration, authentication failure, malformed response, stale event, timestamp conflict, sequence gap, reconciliation mismatch, unsupported data, or invalid parameter change disables only the dependent capability and reports the exact fault. It never invents substitute state or publishes a partial configuration.
-
-Emergency liquidation remains available when the broker account is reconciled even if chart data is unavailable.
-
-## 3. Feature execution levels
-
-Every major feature supports an explicit execution level.
-
-### Off
-
-- no subscription;
-- no calculation;
-- no rendering;
-- release optional caches and GPU resources.
-
-### Standby
-
-- preserve minimal state and cache;
-- stop expensive calculations and rendering;
-- remain ready for fast activation.
-
-### Visible
-
-- acquire data required for display;
-- calculate and render;
-- do not execute strategies or orders.
-
-### Active
-
-- acquire data;
-- calculate;
-- render;
-- allow the module's execution behavior, subject to risk and readiness gates.
-
-Hiding a window is not equivalent to disabling a feature. Off must stop its upstream work.
+Instance visibility is separate from the Indicators feature execution level.
 
 ## 4. Performance policy
 
-### 4.1 Hot-path data
+- integer prices/quantities and contiguous storage on hot paths;
+- no per-event heap ownership graph or per-point virtual dispatch;
+- bounded queues with explicit merge/drop accounting;
+- immutable completed history plus a mutable live tail;
+- visible-range-only rendering and shared completed render caches;
+- viewport, selection, and pane-size state preserved across live-tail replacement.
 
-- integer won prices and integer quantities;
-- contiguous vectors, ring buffers, or chunked stores;
-- no per-event `new/delete`;
-- no per-point virtual calls;
-- bounded queues and explicit overflow policy;
-- incremental updates for the live bar and dependent indicator window.
-
-### 4.2 Rendering
-
-- render only visible ranges;
-- share market series across charts;
-- rebuild GPU buffers only when the series revision or viewport changes;
-- separate static history from the mutable live tail;
-- render off-screen charts only when dirty;
-- background or hidden workspaces use reduced or Off execution levels.
-
-### 4.3 Backpressure
-
-When event rate exceeds UI refresh capacity, normalized events may be coalesced only under an explicit semantic rule. Order, fill, balance, and fault events are never silently dropped. Quote/tick coalescing records the number of merged events.
-
-## 5. Feature registry contract
-
-The application owns a registry of major features. Each registered feature has:
-
-- stable ID;
-- display name;
-- dependencies;
-- current execution level;
-- readiness and health state;
-- performance metrics;
-- optional renderer contribution capability.
-
-Initial implementation is statically linked. A binary DLL ABI is deferred until the contract is stable. Runtime attach/detach means registering, changing execution level, and removing contributions without changing renderer source.
-
-## 6. Required performance metrics
-
-Each major feature reports at least:
-
-- latest processing time;
-- maximum processing time;
-- event count;
-- queue depth;
-- merged/dropped event count;
-- approximate retained bytes;
-- calculated symbol count;
-- renderer series count;
-- last error and readiness.
-
-Optimization decisions must use measurements rather than guessed bottlenecks.
-
-## 7. Source-code boundaries
-
-Recommended top-level responsibilities:
+## 5. Source boundaries
 
 ```text
-core/       normalized domain contracts and pure calculations
-app/        major feature modules, property metadata, and application coordination
-platform/   Kiwoom, WinHTTP, operating-system adapters
-render/     broker-independent RenderDocument and builders
-ui/         ImGui/D3D presentation and generic interaction
-shell_main  process composition, window/device lifecycle, main loop only
+core/       normalized contracts and pure calculations
+app/        feature modules, indicator configuration, validation, coordination
+platform/   broker, transport, and operating-system adapters
+render/     generic documents, builders, geometry, pure layout helpers
+ui/         ImGui/D3D presentation and feature-owned editors
+shell_main  process composition, device/window lifecycle, main loop
 ```
 
-`core/` must not include Win32, D3D, ImGui, or WinHTTP.
+`core/` has no Win32, D3D, ImGui, or transport dependency. Indicator-type switches
+may exist in the feature-owned catalog/factory but not in the renderer or shell.
 
-## 8. Complexity controls
+## 6. Verification and acceptance
 
-A feature must be split before more functionality is added when any of these are true:
-
-- one file owns UI, network, calculation, and state mutation;
-- a small change requires editing unrelated sections of a large file;
-- a function implements multiple workflow stages;
-- testing requires a real D3D window or live network unnecessarily;
-- the same validation or transformation appears twice;
-- adding a new indicator or symbol requires editing central switches;
-- a module's responsibility cannot be stated in one sentence.
-
-File size is a warning, not the sole rule. A split is valid only when ownership, input, output, and tests become clearer.
-
-## 9. Change acceptance rules
-
-A change is not complete until:
-
-1. production and test boundaries are explicit;
-2. the relevant module contract is documented;
-3. headless tests cover success and failure paths;
-4. Windows MSVC build succeeds;
-5. CI prevents regression of the new invariant;
-6. one-shot migration scripts and temporary workflows are removed;
-7. the session handoff records exact HEAD, completed behavior, remaining faults, and next order.
-
-## 10. User-intervention rule
-
-Remote implementation, refactoring, fixtures, CI, and static verification continue without asking the user to perform repetitive local checks.
-
-The user is requested to test only when a result depends on something unavailable remotely, such as:
-
-- real Kiwoom credentials;
-- actual intraday REST/WebSocket payloads;
-- physical network disconnection and reconnection;
-- visual interaction or GPU behavior;
-- real-account/mock-account order and fill behavior;
-- long-running intraday soak.
-
-At that point the request must be a minimal, exact acceptance procedure with the expected visible result and the evidence to return on failure.
+A change is complete only when its boundary is documented, success/failure paths
+are covered headlessly, Windows MSVC build succeeds, CI guards the new invariant,
+temporary migration logic and elevated workflow permissions are removed, and the
+handoff records the exact verified state. User testing is reserved for actual
+market payloads, physical reconnection, visual/GPU interaction, order/fill behavior,
+and long-running soak.

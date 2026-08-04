@@ -4,6 +4,7 @@
 #include "../render/pane_layout.h"
 #include "../render/series_geometry.h"
 #include "../render/value_grid.h"
+#include "../render/value_viewport.h"
 
 #include <algorithm>
 #include <cmath>
@@ -25,6 +26,10 @@ namespace trading::ui
         constexpr float PaneSplitterHeight = 7.0f;
         constexpr float MinimumPaneHeight = 48.0f;
         constexpr double MinimumVisibleSpan = 12.0;
+        constexpr double LatestRightPaddingFraction = 0.12;
+        constexpr double MaximumRightOverscrollFraction = 0.60;
+        constexpr double AutomaticTopPaddingFraction = 0.10;
+        constexpr double AutomaticBottomPaddingFraction = 0.06;
 
         ImU32 ToImColor(const render::ColorRgba& color) noexcept
         {
@@ -112,6 +117,19 @@ namespace trading::ui
                 maximum = (std::max)(maximum, value);
             }
         };
+
+        ValueRange ValueRangeFromViewport(
+            const render::ValueViewport& viewport) noexcept
+        {
+            ValueRange result;
+            if (!viewport.initialized || viewport.Span() <= 0.0) {
+                return result;
+            }
+            result.minimum = viewport.minimum;
+            result.maximum = viewport.maximum;
+            result.valid = true;
+            return result;
+        }
 
         struct PaneGeometry final
         {
@@ -598,6 +616,7 @@ namespace trading::ui
                 const double ratio = static_cast<double>(index) / 4.0;
                 const render::AxisCoordinate coordinate =
                     range.minimum + range.Span() * ratio;
+                if (coordinate > axis.Maximum() + 0.0001) continue;
                 const EpochMillis timestamp =
                     axis.TimestampForCoordinate(coordinate);
                 const float x =
@@ -744,7 +763,8 @@ namespace trading::ui
             const AxisRange& dataRange,
             double defaultVisibleSpan,
             const render::Pane& pane,
-            const ValueRange& values,
+            ValueRange& values,
+            render::ValueViewport& valueViewport,
             bool legendHovered,
             RenderSurfaceState& state)
         {
@@ -752,20 +772,55 @@ namespace trading::ui
             if (!ImGui::IsItemHovered() && !ImGui::IsItemActive()) return;
 
             ImGuiIO& io = ImGui::GetIO();
+            const float plotRight = plotOrigin.x + plotWidth;
+            const bool mouseInPlot =
+                io.MousePos.x >= plotOrigin.x &&
+                io.MousePos.x <= plotRight &&
+                io.MousePos.y >= plotOrigin.y &&
+                io.MousePos.y <= plotOrigin.y + plotHeight;
+            const bool mouseInRightAxis =
+                io.MousePos.x > plotRight &&
+                io.MousePos.x <= plotRight + ValueAxisWidth &&
+                io.MousePos.y >= plotOrigin.y &&
+                io.MousePos.y <= plotOrigin.y + plotHeight;
             const double mouseRatio = (std::max)(
                 0.0,
                 (std::min)(1.0,
                     static_cast<double>(io.MousePos.x - plotOrigin.x) /
                     static_cast<double>((std::max)(1.0f, plotWidth))));
+            const double valueAnchorRatio = (std::max)(
+                0.0,
+                (std::min)(1.0,
+                    static_cast<double>(io.MousePos.y - plotOrigin.y) /
+                    static_cast<double>((std::max)(1.0f, plotHeight))));
 
-            if (io.MouseWheel != 0.0f) {
+            if (mouseInRightAxis &&
+                ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            {
+                state.activeValueAxisPaneId = pane.id;
+            }
+            if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+                state.activeValueAxisPaneId == pane.id)
+            {
+                state.activeValueAxisPaneId.clear();
+            }
+            const bool draggingValueAxis =
+                state.activeValueAxisPaneId == pane.id &&
+                ImGui::IsMouseDragging(ImGuiMouseButton_Left, 1.0f);
+            if (mouseInRightAxis || draggingValueAxis) {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+            }
+
+            if (io.MouseWheel != 0.0f && mouseInPlot) {
                 render::ZoomViewport(
                     state.viewport,
                     dataRange.minimum,
                     dataRange.maximum,
                     mouseRatio,
                     static_cast<double>(io.MouseWheel),
-                    MinimumVisibleSpan);
+                    MinimumVisibleSpan,
+                    LatestRightPaddingFraction,
+                    MaximumRightOverscrollFraction);
                 state.dirty = true;
             }
 
@@ -773,29 +828,75 @@ namespace trading::ui
                 ImGui::IsMouseDragging(ImGuiMouseButton_Left, 1.0f);
             const bool draggingRight =
                 ImGui::IsMouseDragging(ImGuiMouseButton_Right, 1.0f);
-            if (draggingLeft || draggingRight) {
-                render::PanViewport(
-                    state.viewport,
-                    dataRange.minimum,
-                    dataRange.maximum,
-                    -static_cast<double>(io.MouseDelta.x) /
-                        static_cast<double>((std::max)(1.0f, plotWidth)));
+            if (draggingValueAxis) {
+                render::ZoomValueViewport(
+                    valueViewport,
+                    valueAnchorRatio,
+                    static_cast<double>(io.MouseDelta.y));
+                values = ValueRangeFromViewport(valueViewport);
+                state.dirty = true;
+            }
+            else if (mouseInPlot && (draggingLeft || draggingRight)) {
+                if (io.MouseDelta.x != 0.0f) {
+                    render::PanViewport(
+                        state.viewport,
+                        dataRange.minimum,
+                        dataRange.maximum,
+                        -static_cast<double>(io.MouseDelta.x) /
+                            static_cast<double>((std::max)(1.0f, plotWidth)),
+                        LatestRightPaddingFraction,
+                        MaximumRightOverscrollFraction);
+                }
+                if (io.MouseDelta.y != 0.0f) {
+                    render::PanValueViewport(
+                        valueViewport,
+                        static_cast<double>(io.MouseDelta.y),
+                        static_cast<double>(plotHeight));
+                    values = ValueRangeFromViewport(valueViewport);
+                }
                 state.dirty = true;
             }
 
             if (!draggingLeft &&
-                ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                render::ResetViewport(
-                    state.viewport,
-                    dataRange.minimum,
-                    dataRange.maximum,
-                    defaultVisibleSpan);
-                state.dirty = true;
+                ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+            {
+                if (mouseInRightAxis) {
+                    const double topPadding =
+                        pane.valueScale == render::PaneValueScale::Fixed
+                            ? 0.0
+                            : AutomaticTopPaddingFraction;
+                    const double bottomPadding =
+                        pane.valueScale == render::PaneValueScale::Fixed
+                            ? 0.0
+                            : AutomaticBottomPaddingFraction;
+                    render::ResetValueViewport(
+                        valueViewport,
+                        values.minimum,
+                        values.maximum,
+                        topPadding,
+                        bottomPadding);
+                    values = ValueRangeFromViewport(valueViewport);
+                    state.dirty = true;
+                }
+                else if (mouseInPlot) {
+                    render::ResetViewport(
+                        state.viewport,
+                        dataRange.minimum,
+                        dataRange.maximum,
+                        defaultVisibleSpan,
+                        LatestRightPaddingFraction,
+                        MaximumRightOverscrollFraction);
+                    valueViewport = {};
+                    state.dirty = true;
+                }
             }
 
+            if (!mouseInPlot) return;
             const render::AxisCoordinate crosshairCoordinate =
                 state.viewport.visibleStart +
                 state.viewport.Span() * mouseRatio;
+            if (crosshairCoordinate > axis.Maximum() + 0.0001) return;
+
             state.crosshairVisible = true;
             state.crosshairTimestampMs =
                 axis.TimestampForCoordinate(crosshairCoordinate);
@@ -907,7 +1008,28 @@ namespace trading::ui
                 40.0f,
                 size.x - ValueAxisWidth - leftAxisWidth);
             const float plotHeight = (std::max)(30.0f, size.y - timeAxisHeight);
-            const ValueRange values = PaneValueRange(pane, axis, visibleRange);
+            const ValueRange automaticValues =
+                PaneValueRange(pane, axis, visibleRange);
+            render::ValueViewport& valueViewport =
+                state.paneValueViewports[pane.id];
+            if (automaticValues.valid) {
+                const double topPadding =
+                    pane.valueScale == render::PaneValueScale::Fixed
+                        ? 0.0
+                        : AutomaticTopPaddingFraction;
+                const double bottomPadding =
+                    pane.valueScale == render::PaneValueScale::Fixed
+                        ? 0.0
+                        : AutomaticBottomPaddingFraction;
+                render::FollowValueRange(
+                    valueViewport,
+                    automaticValues.minimum,
+                    automaticValues.maximum,
+                    topPadding,
+                    bottomPadding);
+            }
+            ValueRange values =
+                ValueRangeFromViewport(valueViewport);
 
             ImGui::PushID(pane.id.c_str());
             const ImVec2 itemSpacing = ImGui::GetStyle().ItemSpacing;
@@ -964,6 +1086,7 @@ namespace trading::ui
                 defaultVisibleSpan,
                 pane,
                 values,
+                valueViewport,
                 legendHovered,
                 state);
 
@@ -1377,19 +1500,24 @@ namespace trading::ui
                 surfaceState.viewport,
                 dataRange.minimum,
                 dataRange.maximum,
-                surfaceState.defaultVisibleSpan);
+                surfaceState.defaultVisibleSpan,
+                LatestRightPaddingFraction,
+                MaximumRightOverscrollFraction);
         }
         else if (surfaceState.renderedRevision != document.revision) {
             render::FollowLatest(
                 surfaceState.viewport,
                 dataRange.minimum,
-                dataRange.maximum);
+                dataRange.maximum,
+                LatestRightPaddingFraction,
+                MaximumRightOverscrollFraction);
         }
         render::ClampViewport(
             surfaceState.viewport,
             dataRange.minimum,
             dataRange.maximum,
-            MinimumVisibleSpan);
+            MinimumVisibleSpan,
+            MaximumRightOverscrollFraction);
 
         AxisRange visibleRange;
         visibleRange.minimum = surfaceState.viewport.visibleStart;

@@ -17,6 +17,8 @@ $requiredFiles = @(
     '.\ui\indicator_manager_ui.cpp',
     '.\render\pane_layout.h',
     '.\render\pane_layout.cpp',
+    '.\render\value_viewport.h',
+    '.\render\value_viewport.cpp',
     '.\core\indicator_engine.h',
     '.\core\indicator_engine.cpp',
     '.\core\sma_indicator.h',
@@ -455,3 +457,42 @@ foreach ($marker in @(
 }
 
 Write-Host 'Major-feature modules, accepted M6 chart contracts, and dynamic M7 indicator management are verified.'
+
+
+$valueViewport = Get-Content '.\render\value_viewport.cpp' -Raw
+foreach ($marker in @(
+    'ResetValueViewport(',
+    'FollowValueRange(',
+    'PanValueViewport(',
+    'ZoomValueViewport(',
+    'viewport.autoScale = false')) {
+    if (-not $valueViewport.Contains($marker)) {
+        throw "Pane value viewport contract is missing: $marker"
+    }
+}
+
+foreach ($marker in @(
+    'LatestRightPaddingFraction',
+    'MaximumRightOverscrollFraction',
+    'paneValueViewports',
+    'activeValueAxisPaneId',
+    'ImGuiMouseCursor_ResizeNS',
+    'PanValueViewport(',
+    'ZoomValueViewport(',
+    'crosshairCoordinate > axis.Maximum()')) {
+    if (-not $renderer.Contains($marker)) {
+        throw "Chart observation viewport marker is missing: $marker"
+    }
+}
+
+foreach ($marker in @(
+    'latest reset must reserve visible space after the newest bar',
+    'manual future-space viewport must survive live updates',
+    'dragging the value axis upward must magnify candles',
+    'manual value range must survive live data updates')) {
+    if (-not $runAll.Contains('value_viewport_tests.exe') -and
+        $marker -like '*value*') {
+        throw 'value_viewport_tests.exe is not in the complete suite'
+    }
+}
+

@@ -71,6 +71,9 @@ if errorlevel 1 exit /b 1
 call :build_and_run value_grid_tests.exe "tests\value_grid_tests.cpp render\value_grid.cpp"
 if errorlevel 1 exit /b 1
 
+call :build_and_run value_viewport_tests.exe "tests\value_viewport_tests.cpp render\value_viewport.cpp"
+if errorlevel 1 exit /b 1
+
 call :build_and_run series_geometry_tests.exe "tests\series_geometry_tests.cpp render\series_geometry.cpp"
 if errorlevel 1 exit /b 1
 

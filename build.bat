@@ -42,6 +42,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    render\chart_viewport.cpp ^
    render\time_axis.cpp ^
    render\value_grid.cpp ^
+   render\value_viewport.cpp ^
    render\series_geometry.cpp ^
    render\pane_layout.cpp ^
    render\time_boundaries.cpp ^

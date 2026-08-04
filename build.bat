@@ -42,6 +42,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    app\comparison_module.cpp ^
    app\comparison_render_adapter.cpp ^
    app\symbol_master_cache.cpp ^
+   app\symbol_master_cache_compat.cpp ^
    render\chart_viewport.cpp ^
    render\time_axis.cpp ^
    render\value_grid.cpp ^

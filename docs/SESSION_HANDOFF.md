@@ -6,11 +6,11 @@ Repository: `hoonoh57/cppChart`
 Branch: `p2/kiwoom-mock-gateway`
 Local: `E:\2026\gpt\cpp\shell`
 PR #1: Draft
-Viewport/footer implementation: `2b87b40097cd36be46de4f956664302ef74a6558`
-Read-only verification contract: `63827a6c88469911e3eab784c1d427bdd0bfdc0f`
-Windows CI #1078: `30895139617`
-Artifact: `8886840070`
-Digest: `sha256:40727e1612a3d4b64022890170cd62205f67a3ea9b4ce432bd21e397a2cae9da`
+Verified viewport implementation HEAD: `80542a44cfcaea570703b46d4a84ad36025837b3`
+Pull-request verification merge SHA: `96204f598925a302707b8d37f4351233e551e46b`
+Windows CI run: `30898400950`
+Artifact: `8888150112`
+Digest: `sha256:1396a02c41e52434ba3ff828e775aa05fb8380a6d454d335762a245088caa226`
 Workflow: read-only
 
 Pull and use live branch HEAD.
@@ -24,63 +24,95 @@ git status
 git rev-parse HEAD
 ```
 
-M1-M6 are complete. M7 dynamic indicator calculation/management is stabilized. The
-11-type catalog is SMA, EMA, JMA, Bollinger Bands, RSI, MACD, DMI, SuperTrend,
-VWAP, OBV, and Wilder ADX. Comparison supports stock `0B`, `ka20005` index history,
-sector-index realtime `0J`, KOSPI `001`, KOSDAQ `101`, separate panes, and price
-secondary axes.
+M1-M6 are complete. M7 dynamic indicator calculation/management is stabilized and
+visually accepted. The 11-type catalog is SMA, EMA, JMA, Bollinger Bands, RSI,
+MACD, DMI, SuperTrend, VWAP, OBV, and Wilder ADX. Comparison supports stock `0B`,
+`ka20005` index history, sector-index realtime `0J`, KOSPI `001`, KOSDAQ `101`,
+separate panes, and price secondary axes.
 
-## 2026-08-04 actual-screen corrections
+## 2026-08-04 actual-screen layout corrections
 
-### Sector-index realtime and indicator discovery
+The user confirmed these corrections as normal:
 
-- Corrected sector-index realtime from invalid `0I` to official `0J`.
-- Added `0J` registration, decode, delivery, reconnect restoration, removal, and
-  removed-subscription non-resurrection coverage.
-- `적용 지표` distinguishes active instances from the full 11-type
-  `새 지표 추가` catalog.
-- The output table has bounded internal scrolling and Apply/Revert remain in a
-  fixed properties footer.
+- `기준선 추가 / 과매수 추가 / 과매도 추가` stay in the fixed properties footer.
+- Apply/Revert remain visible without scrolling the editor body.
+- pane/splitter item spacing no longer enlarges chart content.
+- the chart window no longer develops an internal vertical scrollbar.
+- the bottom X axis remains visible with several lower panes.
 
-### Reference controls and chart X axis
+## Chart observation viewport — implemented and CI verified
 
-The user then confirmed two additional layout failures:
+The latest candle previously remained attached to the right price axis and the Y
+range was always automatic, making live candle observation difficult. The renderer
+now provides the following generic viewport behavior:
 
-1. `기준선 추가 / 과매수 추가 / 과매도 추가` remained inside the scrolling editor
-   and were hidden until the properties page was scrolled.
-2. ImGui vertical item spacing accumulated between every pane and splitter, making
-   chart content taller than the supplied viewport and pushing the final X axis
-   below an internal chart scrollbar.
+### Horizontal observation space
 
-Corrections:
+- initial view, live auto-follow, and double-click reset reserve future bar slots to
+  the right of the latest candle;
+- the user may drag the chart horizontally so the latest candle is not attached to
+  the price axis;
+- manual horizontal placement remains stable during `0B`/`0J` live-tail updates;
+- double-click restores the latest view with the configured right-side margin.
 
-- The three reference quick-action buttons are a fixed footer row immediately
-  above Apply/Revert, outside the editor child region.
-- Footer space is explicitly reserved for quick actions, Apply/Revert, and errors.
-- Pane and splitter invisible items use zero vertical `ItemSpacing`, so their total
-  height equals the renderer-provided chart height.
-- The `실제 시세` window forbids internal vertical scrolling and mouse-wheel window
-  scrolling. Wheel input remains available to chart viewport interaction.
-- CI guards the fixed quick actions, enlarged footer, no-scroll chart flags, and
-  zero pane/splitter spacing.
+### Vertical pane movement
 
-CI #1078 passed repository/real-data policy, architecture boundaries, comparison
-and indicator contracts, the viewport/footer guards, MSVC x64 build, the full
-headless suite, clean-tree verification, and artifact publication.
+- dragging inside a pane vertically moves that pane's visible value range;
+- a sharply rising latest candle can therefore be moved down into view without
+  changing calculation data;
+- each pane owns independent manual Y state;
+- manual Y offset remains stable during live-tail replacement.
+
+### Y-axis scale drag
+
+- dragging the right Y-axis expands or contracts candle/series height vertically;
+- scaling is anchored around the mouse value so the inspected price region remains
+  under the cursor;
+- minimum span and finite-range guards prevent collapse or invalid ranges;
+- double-click in the pane/Y-axis restores an automatic visible-data range with
+  top and bottom padding.
+
+### Interaction boundaries
+
+- horizontal pan, vertical pane pan, right-axis Y scaling, wheel X zoom, pane
+  separator resize, legends, and crosshair use separate hit regions;
+- manual Y state is stored in `RenderSurfaceState`, not the immutable document;
+- live market revisions do not clear manual viewport state;
+- double-click explicitly clears manual X/Y state and reapplies observation margins.
+
+## Verification
+
+Windows CI `30898400950` passed:
+
+- repository and real-data-only policy;
+- architecture, indicator, comparison, and chart-observation contracts;
+- future-space and auto-follow/reset viewport tests;
+- vertical range pan and mouse-anchored Y-scale tests;
+- invalid/minimum-range fail-closed tests;
+- MSVC x64 `shell.exe` build;
+- complete headless suite;
+- clean-tree verification;
+- executable artifact publication.
 
 ## Focused actual-screen acceptance
 
-1. At normal narrow dock width, confirm the three reference buttons and
-   Apply/Revert are visible without scrolling.
-2. Expand/collapse parameter, output, pane, and reference sections; only the editor
-   body must scroll while both footer rows remain fixed.
-3. Load multiple lower panes and confirm the bottom X axis is always visible without
-   a chart-window vertical scrollbar.
-4. Confirm wheel zoom, horizontal pan, pane separator drag, legends, and synchronized
-   crosshair still work.
-5. Confirm live `0B`/`0J` updates preserve viewport, selection, pane sizes, fixed
-   footer visibility, and X-axis visibility.
+```powershell
+.\build.bat
+.\shell.exe
+```
 
-Return a screenshot only for a failed item. After acceptance, proceed to code/name
-search and normalized relative-strength comparison. PR #1 remains Draft until actual
-account/order, physical multi-source reconnect, and intraday soak are accepted.
+Confirm using actual `ka10080 + 0B` data:
+
+1. the latest candle starts with visible space between it and the right Y axis;
+2. horizontal drag can increase or reduce that right-side space;
+3. vertical drag inside the price pane moves candles up/down;
+4. dragging the right Y axis expands/contracts candle height around the cursor;
+5. double-click restores a latest view with right, top, and bottom margins;
+6. lower panes retain independent Y movement/scaling;
+7. live updates preserve manual X/Y state until explicit reset;
+8. wheel zoom, crosshair, legend selection, and pane splitters still work.
+
+Return a screenshot only for a failed item. After acceptance, continue M8 with
+code/name search and normalized relative-strength comparison. PR #1 remains Draft
+until actual account/order, physical multi-source reconnect, and intraday soak are
+accepted.

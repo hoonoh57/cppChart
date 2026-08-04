@@ -55,6 +55,7 @@ Every visual feature publishes the same renderer-facing contract:
 ```text
 RenderDocument
   Pane[]
+    LegendEntry[]
     Axis[]
     CandleSeries[]
     LineSeries[]
@@ -66,6 +67,16 @@ RenderDocument
 
 A new indicator or strategy contributes standard series. It must not add feature-specific branches to the renderer.
 
+### 2.3.1 Generic legend and instance-selection boundary
+
+- Legends are explicit `RenderDocument` metadata. The renderer does not infer feature identity from display text, color, or naming conventions.
+- Generic child series may carry an `ownerId` used only for hit-testing, highlighting, and selection handoff.
+- Every selectable legend resolves to a feature-owned instance ID.
+- Multi-output indicators remain one selectable and editable instance. Their value lines, direction lines, bands, histograms, and reference lines do not become independent parameter objects.
+- The renderer may emit single-click and double-click selection events, but it never knows the selected feature's parameter schema and never mutates feature configuration.
+- Parameter descriptors, validation, Apply/Revert behavior, and recalculation belong to the feature/application layer.
+- Legend hit-testing must suppress conflicting viewport pan, zoom, and reset gestures.
+
 ### 2.4 Slim renderer hot path
 
 The renderer is responsible only for:
@@ -76,7 +87,7 @@ The renderer is responsible only for:
 - clipping and downsampling;
 - GPU buffer and off-screen render-target management;
 - dirty-region decisions;
-- interaction such as zoom, pan, crosshair, and synchronized cursors;
+- interaction such as zoom, pan, crosshair, synchronized cursors, and generic legend selection;
 - rendering standard series types.
 
 The renderer must not:
@@ -86,7 +97,8 @@ The renderer must not:
 - calculate SMA, JMA, VWAP, RSI, or strategy logic;
 - calculate positions or PnL;
 - submit orders;
-- rank symbols.
+- rank symbols;
+- interpret indicator parameter definitions.
 
 The render loop must not allocate per point, wait for network locks, or recalculate indicators.
 
@@ -125,7 +137,7 @@ Chart, indicator, strategy, replay, and risk modules do not depend on Kiwoom JSO
 
 ### 2.8 Fail closed
 
-Missing configuration, authentication failure, malformed response, stale event, timestamp conflict, sequence gap, reconciliation mismatch, or unsupported data disables only the dependent capability and reports the exact fault. It never invents substitute state.
+Missing configuration, authentication failure, malformed response, stale event, timestamp conflict, sequence gap, reconciliation mismatch, unsupported data, or invalid parameter change disables only the dependent capability and reports the exact fault. It never invents substitute state or publishes a partial configuration.
 
 Emergency liquidation remains available when the broker account is reconciled even if chart data is unavailable.
 
@@ -221,10 +233,10 @@ Recommended top-level responsibilities:
 
 ```text
 core/       normalized domain contracts and pure calculations
-app/        major feature modules and application coordination
+app/        major feature modules, property metadata, and application coordination
 platform/   Kiwoom, WinHTTP, operating-system adapters
 render/     broker-independent RenderDocument and builders
-ui/         ImGui/D3D presentation and interaction
+ui/         ImGui/D3D presentation and generic interaction
 shell_main  process composition, window/device lifecycle, main loop only
 ```
 

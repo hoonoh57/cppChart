@@ -8,13 +8,13 @@ Local: `E:\2026\gpt\cpp\shell`
 PR #1: Draft
 Viewport/footer implementation: `2b87b40097cd36be46de4f956664302ef74a6558`
 Read-only verification contract: `63827a6c88469911e3eab784c1d427bdd0bfdc0f`
-Windows CI #1072: `30894054586`
-Artifact: `8886386766`
-Digest: `sha256:e70abd61e6d4297b8f90d749418f6538175d44f549873fe09921d46656255f6e`
+Documentation HEAD: `ffaaaba7a775bd4ff015e11f8bed6d26dfab4e7b`
+Windows CI #1074: `30894598030`
+Artifact: `8886617161`
+Digest: `sha256:edb5fb92aa9b9d8c77ac82753ca92fb42b4c6a58742ad04dd50c2ee9adadfbf2`
 Workflow: read-only
 
-Pull and use live branch HEAD; documentation commits may follow the verified code
-baseline.
+Pull and use live branch HEAD.
 
 ```powershell
 Set-Location "E:\2026\gpt\cpp\shell"
@@ -38,7 +38,7 @@ secondary axes.
 - Corrected sector-index realtime from invalid `0I` to official `0J`.
 - Added `0J` registration, decode, delivery, reconnect restoration, removal, and
   removed-subscription non-resurrection coverage.
-- `적용 지표` now distinguishes active instances from the full 11-type
+- `적용 지표` distinguishes active instances from the full 11-type
   `새 지표 추가` catalog.
 - The output table has bounded internal scrolling and Apply/Revert remain in a
   fixed properties footer.
@@ -55,34 +55,33 @@ The user then confirmed two additional layout failures:
 
 Corrections:
 
-- The three reference quick-action buttons are now a fixed footer row immediately
+- The three reference quick-action buttons are a fixed footer row immediately
   above Apply/Revert, outside the editor child region.
 - Footer space is explicitly reserved for quick actions, Apply/Revert, and errors.
 - Pane and splitter invisible items use zero vertical `ItemSpacing`, so their total
   height equals the renderer-provided chart height.
 - The `실제 시세` window forbids internal vertical scrolling and mouse-wheel window
-  scrolling. Wheel input remains available to the chart viewport interaction.
+  scrolling. Wheel input remains available to chart viewport interaction.
 - CI guards the fixed quick actions, enlarged footer, no-scroll chart flags, and
   zero pane/splitter spacing.
 
-CI #1072 passed repository/real-data policy, architecture boundaries, comparison
-and indicator contracts, the new viewport/footer guards, MSVC x64 build, the full
+CI #1074 passed repository/real-data policy, architecture boundaries, comparison
+and indicator contracts, the viewport/footer guards, MSVC x64 build, the full
 headless suite, clean-tree verification, and artifact publication.
 
 ## Focused actual-screen acceptance
 
-1. Open `프로퍼티` at the normal narrow dock width and confirm the three reference
-   buttons and Apply/Revert are visible without scrolling.
+1. At normal narrow dock width, confirm the three reference buttons and
+   Apply/Revert are visible without scrolling.
 2. Expand/collapse parameter, output, pane, and reference sections; only the editor
    body must scroll while both footer rows remain fixed.
-3. Load multiple lower panes and confirm the chart's bottom X axis is always visible
-   without using the chart-window vertical scrollbar.
+3. Load multiple lower panes and confirm the bottom X axis is always visible without
+   a chart-window vertical scrollbar.
 4. Confirm wheel zoom, horizontal pan, pane separator drag, legends, and synchronized
    crosshair still work.
-5. Confirm live `0B`/`0J` updates preserve viewport, selected instance, pane sizes,
-   fixed footer visibility, and X-axis visibility.
+5. Confirm live `0B`/`0J` updates preserve viewport, selection, pane sizes, fixed
+   footer visibility, and X-axis visibility.
 
-Return a screenshot only for a failed item. After this acceptance, proceed to
-code/name search and normalized relative-strength comparison. PR #1 remains Draft
-until actual account/order, physical multi-source reconnect, and intraday soak are
-accepted.
+Return a screenshot only for a failed item. After acceptance, proceed to code/name
+search and normalized relative-strength comparison. PR #1 remains Draft until actual
+account/order, physical multi-source reconnect, and intraday soak are accepted.

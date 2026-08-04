@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -30,7 +31,7 @@ namespace trading
             return value;
         }
 
-        bool ParseAbsolute(
+        bool ParseAbsoluteInteger(
             const std::string& text,
             std::int64_t& value) noexcept
         {
@@ -38,7 +39,8 @@ namespace trading
                 const std::string normalized = NormalizeNumber(text);
                 if (normalized.empty()) return false;
                 std::size_t consumed = 0;
-                long long parsed = std::stoll(normalized, &consumed, 10);
+                const long long parsed =
+                    std::stoll(normalized, &consumed, 10);
                 if (consumed != normalized.size() ||
                     parsed == (std::numeric_limits<long long>::min)())
                 {
@@ -52,7 +54,43 @@ namespace trading
             }
         }
 
-        bool ReadRequired(
+        bool ParseScaledIndexValue(
+            const std::string& text,
+            std::int64_t& value) noexcept
+        {
+            try {
+                const std::string normalized = NormalizeNumber(text);
+                if (normalized.empty()) return false;
+                if (normalized.find('.') == std::string::npos) {
+                    return ParseAbsoluteInteger(normalized, value);
+                }
+
+                std::size_t consumed = 0;
+                const double parsed =
+                    std::stod(normalized, &consumed);
+                if (consumed != normalized.size() ||
+                    !std::isfinite(parsed))
+                {
+                    return false;
+                }
+                const double absolute = std::fabs(parsed);
+                if (absolute >
+                    static_cast<double>(
+                        (std::numeric_limits<std::int64_t>::max)()) /
+                        100.0)
+                {
+                    return false;
+                }
+                value = static_cast<std::int64_t>(
+                    std::llround(absolute * 100.0));
+                return true;
+            }
+            catch (...) {
+                return false;
+            }
+        }
+
+        bool ReadRequiredInteger(
             const RealTimeRecord& record,
             const char* key,
             std::int64_t& value,
@@ -60,7 +98,7 @@ namespace trading
         {
             const auto found = record.values.find(key);
             if (found == record.values.end() ||
-                !ParseAbsolute(found->second, value))
+                !ParseAbsoluteInteger(found->second, value))
             {
                 error = std::string("index realtime field is invalid: ") + key;
                 return false;
@@ -68,14 +106,30 @@ namespace trading
             return true;
         }
 
-        std::int64_t ReadOptional(
+        bool ReadRequiredIndexValue(
+            const RealTimeRecord& record,
+            const char* key,
+            std::int64_t& value,
+            std::string& error)
+        {
+            const auto found = record.values.find(key);
+            if (found == record.values.end() ||
+                !ParseScaledIndexValue(found->second, value))
+            {
+                error = std::string("index realtime field is invalid: ") + key;
+                return false;
+            }
+            return true;
+        }
+
+        std::int64_t ReadOptionalInteger(
             const RealTimeRecord& record,
             const char* key) noexcept
         {
             const auto found = record.values.find(key);
             std::int64_t value = 0;
             return found != record.values.end() &&
-                   ParseAbsolute(found->second, value)
+                   ParseAbsoluteInteger(found->second, value)
                 ? value
                 : 0;
         }
@@ -101,8 +155,10 @@ namespace trading
 
         std::int64_t time = 0;
         std::int64_t value = 0;
-        if (!ReadRequired(record, "20", time, result.result.error) ||
-            !ReadRequired(record, "10", value, result.result.error))
+        if (!ReadRequiredInteger(
+                record, "20", time, result.result.error) ||
+            !ReadRequiredIndexValue(
+                record, "10", value, result.result.error))
         {
             return result;
         }
@@ -114,8 +170,10 @@ namespace trading
             return result;
         }
 
-        const std::int64_t tradeVolume = ReadOptional(record, "15");
-        const std::int64_t cumulativeVolume = ReadOptional(record, "13");
+        const std::int64_t tradeVolume =
+            ReadOptionalInteger(record, "15");
+        const std::int64_t cumulativeVolume =
+            ReadOptionalInteger(record, "13");
         result.tick.tradeTimeHhmmss = static_cast<int>(time);
         result.tick.value = static_cast<PriceWon>(value);
         result.tick.tradeVolume = tradeVolume;

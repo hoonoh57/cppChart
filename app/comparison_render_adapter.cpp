@@ -21,6 +21,12 @@ namespace trading::app
                 value + 0x9e3779b97f4a7c15ULL +
                 (seed << 6U) + (seed >> 2U);
         }
+
+        int ModeDecimals(ComparisonValueMode mode, int configured) noexcept
+        {
+            if (mode == ComparisonValueMode::RawClose) return configured;
+            return 2;
+        }
     }
 
     bool ComparisonRenderAdapter::Apply(
@@ -31,6 +37,13 @@ namespace trading::app
         if (!VisibleLevel(snapshot.level)) {
             error.clear();
             return true;
+        }
+
+        std::vector<Bar> primaryBars;
+        const void* primaryIdentity = nullptr;
+        if (!CopyPrimaryBars(document, primaryBars, primaryIdentity)) {
+            error = "primary candle series is missing for comparison transform";
+            return false;
         }
 
         std::set<std::string> activeIds;
@@ -59,21 +72,35 @@ namespace trading::app
             const void* identity = source.completedBars.get();
             if (!cache.completedPoints ||
                 cache.completedIdentity != identity ||
+                cache.primaryIdentity != primaryIdentity ||
                 cache.completedRevision != source.completedRevision ||
+                cache.primaryStructureRevision != document.structureRevision ||
+                cache.valueMode != source.definition.valueMode ||
                 std::fabs(
                     cache.valueDivisor -
                     source.definition.valueDivisor) > 1e-12)
             {
-                cache.completedPoints = BuildCompletedPoints(
-                    source.completedBars,
+                cache.transformed = TransformComparisonBars(
+                    *source.completedBars,
+                    primaryBars,
+                    source.definition.valueMode,
                     source.definition.valueDivisor);
+                cache.completedPoints =
+                    std::make_shared<const std::vector<render::LinePoint>>(
+                        cache.transformed.points);
                 cache.completedIdentity = identity;
+                cache.primaryIdentity = primaryIdentity;
                 cache.completedRevision = source.completedRevision;
+                cache.primaryStructureRevision = document.structureRevision;
                 cache.valueDivisor = source.definition.valueDivisor;
+                cache.valueMode = source.definition.valueMode;
             }
 
             render::Pane* pane = nullptr;
             std::string axisId;
+            const int decimals = ModeDecimals(
+                source.definition.valueMode,
+                source.definition.valueDecimals);
             if (source.definition.placement ==
                 ComparisonPlacement::PriceSecondaryAxis)
             {
@@ -89,7 +116,7 @@ namespace trading::app
                 axis.label = source.definition.displayName;
                 axis.side = render::ValueAxisSide::Left;
                 axis.valueScale = render::PaneValueScale::Auto;
-                axis.valueDecimals = source.definition.valueDecimals;
+                axis.valueDecimals = decimals;
                 axis.color = source.definition.color;
                 axis.cursorGrid.enabled = false;
                 pane->valueAxes.push_back(std::move(axis));
@@ -108,9 +135,13 @@ namespace trading::app
                         : source.definition.paneTitle;
                     created.heightWeight =
                         source.definition.paneHeightWeight;
-                    created.valueDecimals =
-                        source.definition.valueDecimals;
+                    created.valueDecimals = decimals;
                     created.cursorGrid.enabled = false;
+                    if (source.definition.valueMode ==
+                        ComparisonValueMode::ReturnPercent)
+                    {
+                        created.valueScale = render::PaneValueScale::Symmetric;
+                    }
                     document.panes.push_back(std::move(created));
                     pane = &document.panes.back();
                 }
@@ -121,17 +152,21 @@ namespace trading::app
                 "comparison." + source.definition.id + ".legend";
             legend.ownerId = source.definition.id;
             legend.label = source.definition.displayName + " " +
-                source.definition.code;
+                source.definition.code + " · " +
+                ComparisonValueModeName(source.definition.valueMode);
             legend.color = source.definition.color;
             legend.width = source.definition.width;
             legend.style = source.definition.style;
             pane->legends.push_back(std::move(legend));
 
             render::LinePoint livePoint;
-            livePoint.timestampMs = source.liveBar.closeTimestampMs;
-            livePoint.value =
-                static_cast<double>(source.liveBar.close) /
-                source.definition.valueDivisor;
+            const bool hasLivePoint = TransformComparisonLivePoint(
+                source.liveBar,
+                primaryBars,
+                cache.transformed,
+                source.definition.valueMode,
+                source.definition.valueDivisor,
+                livePoint);
 
             render::LineSeries line;
             line.id =
@@ -142,12 +177,33 @@ namespace trading::app
             line.color = source.definition.color;
             line.width = source.definition.width;
             line.style = source.definition.style;
-            line.points.SetShared(cache.completedPoints, &livePoint);
+            line.points.SetShared(
+                cache.completedPoints,
+                hasLivePoint ? &livePoint : nullptr);
             pane->lines.push_back(std::move(line));
+
+            if (source.definition.valueMode != ComparisonValueMode::RawClose &&
+                cache.transformed.hasAnchor)
+            {
+                render::ReferenceLine reference;
+                reference.id =
+                    "comparison." + source.definition.id + ".anchor";
+                reference.ownerId = source.definition.id;
+                reference.label = source.definition.valueMode ==
+                    ComparisonValueMode::ReturnPercent ? "기준 0%" : "기준 100";
+                reference.value = source.definition.valueMode ==
+                    ComparisonValueMode::ReturnPercent ? 0.0 : 100.0;
+                reference.color = { 150, 154, 166, 170 };
+                reference.width = 1.0f;
+                reference.style = render::LineStyle::Dashed;
+                pane->referenceLines.push_back(std::move(reference));
+            }
 
             MixRevision(nextRevision, source.revision);
             MixRevision(nextRevision, source.completedRevision);
             MixRevision(nextRevision, source.liveRevision);
+            MixRevision(nextRevision,
+                static_cast<std::uint64_t>(source.definition.valueMode));
         }
 
         for (auto iterator = caches_.begin(); iterator != caches_.end();) {
@@ -181,6 +237,8 @@ namespace trading::app
                     entry.second.completedPoints->capacity() *
                     sizeof(render::LinePoint);
             }
+            result += entry.second.transformed.points.capacity() *
+                sizeof(render::LinePoint);
         }
         return result;
     }
@@ -201,23 +259,21 @@ namespace trading::app
         return nullptr;
     }
 
-    std::shared_ptr<const std::vector<render::LinePoint>>
-    ComparisonRenderAdapter::BuildCompletedPoints(
-        const std::shared_ptr<const std::vector<Bar>>& bars,
-        double divisor)
+    bool ComparisonRenderAdapter::CopyPrimaryBars(
+        const render::RenderDocument& document,
+        std::vector<Bar>& bars,
+        const void*& identity)
     {
-        auto points =
-            std::make_shared<std::vector<render::LinePoint>>();
-        if (bars) {
-            points->reserve(bars->size());
-            for (const Bar& bar : *bars) {
-                render::LinePoint point;
-                point.timestampMs = bar.closeTimestampMs;
-                point.value =
-                    static_cast<double>(bar.close) / divisor;
-                points->push_back(point);
+        for (const render::Pane& pane : document.panes) {
+            for (const render::CandleSeries& candles : pane.candles) {
+                if (!candles.visible || candles.bars.empty()) continue;
+                bars.reserve(candles.bars.size());
+                for (const Bar& bar : candles.bars) bars.push_back(bar);
+                identity = candles.bars.SharedPrefix().get();
+                if (identity == nullptr) identity = &candles;
+                return true;
             }
         }
-        return points;
+        return false;
     }
 }

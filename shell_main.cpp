@@ -1146,7 +1146,8 @@ static void DrawIndicatorPropertiesWindow()
         ImGui::EndTable();
     }
 
-    if (!g_indicatorPropertyDirty) ImGui::BeginDisabled();
+    const bool applyDisabled = !g_indicatorPropertyDirty;
+    if (applyDisabled) ImGui::BeginDisabled();
     if (ImGui::Button("적용")) {
         const std::string selectedId = spec->id;
         std::vector<trading::indicators::IndicatorSpec> candidate =
@@ -1197,7 +1198,7 @@ static void DrawIndicatorPropertiesWindow()
                 error.c_str());
         }
     }
-    if (!g_indicatorPropertyDirty) ImGui::EndDisabled();
+    if (applyDisabled) ImGui::EndDisabled();
 
     ImGui::SameLine();
     if (ImGui::Button("되돌리기")) {

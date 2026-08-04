@@ -20,7 +20,6 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    core\kiwoom_market_data.cpp ^
    core\kiwoom_index_realtime.cpp ^
    core\kiwoom_symbol_catalog.cpp ^
-   core\symbol_master_cache.cpp ^
    core\runtime_config.cpp ^
    core\kiwoom_session.cpp ^
    core\trading_state.cpp ^
@@ -42,6 +41,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    app\comparison_transform.cpp ^
    app\comparison_module.cpp ^
    app\comparison_render_adapter.cpp ^
+   app\symbol_master_cache.cpp ^
    render\chart_viewport.cpp ^
    render\time_axis.cpp ^
    render\value_grid.cpp ^

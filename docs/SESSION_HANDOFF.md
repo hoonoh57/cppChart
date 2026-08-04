@@ -24,8 +24,8 @@ Read these before changing code:
 The verified implementation passed repository policy, architecture gates, M6/M7
 and interactive-legend integration gates, MSVC x64 shell build, the complete
 headless suite, clean-tree verification, and executable artifact publication.
-Always read the live branch HEAD after pulling in case a later documentation-only
-commit exists.
+Later branch commits may update documentation only; always read the live HEAD after
+pulling.
 
 ## Exact next-session opening commands
 
@@ -64,8 +64,10 @@ multi-symbol trading-result visualization without returning to a monolithic
 - Financial X coordinates use ordinal bar order rather than elapsed wall-clock
   milliseconds.
 - `Off / Standby / Visible / Active` must control real work and retained state.
-- Chart selection resolves to a feature-owned instance ID. Render child series do
-  not become independent editable indicator objects.
+- Legends are explicit generic metadata; selection resolves to a feature-owned
+  instance ID, not an individual output line.
+- Parameter schema, validation, Apply/Revert, and recalculation stay outside the
+  renderer.
 
 ## Verified real-data and M1-M6 baseline
 
@@ -103,55 +105,47 @@ M6 visual/GPU acceptance was completed successfully by the user. M6 is closed.
 - explicit `Bar.TradingDateYmd` from REST `cntr_tm` and `0B` new bars
 - VWAP resets by the explicit KST trading-date key
 
-### Module and renderer contract
+### Module, renderer, and production wiring
 
 - `IndicatorModule` owns execution level, revisions, metrics, completed-history
   reuse, and live-tail incremental calculation.
-- `IndicatorRenderAdapter` publishes only generic lines, histograms, and reference
-  lines.
+- `IndicatorRenderAdapter` publishes generic lines, histograms, references, and
+  legend contributions only.
 - `DefaultIndicatorRenderPlan` maps the initial indicators outside the renderer.
-- ADX publishes 20/25 references; JMA slope publishes a zero reference.
-- market and indicator revisions are composed independently into one immutable
-  chart document.
 - stable pane IDs `price` and `volume` prevent duplicate price panes.
-- renderer source contains no indicator-name or calculation branches.
-
-### Production shell wiring
-
-- `indicators` is registered with `market-data` dependency.
+- market and indicator revisions compose into one immutable chart document.
 - initial specs and render plan are configured once during startup.
 - shared completed bars and the live tail feed `IndicatorMarketSource`.
 - calculation runs only while the feature is `Visible` or `Active`.
-- indicator timing, memory, events, symbols, output count, readiness, and faults are
-  published to diagnostics.
-- `Off` releases calculation state and render-adapter caches.
+- diagnostics receives timing, memory, events, symbols, outputs, readiness, and
+  faults.
+- `Off` releases calculation state and adapter caches.
 - indicator failure retains the real market-only chart and reports the fault.
+- renderer source contains no indicator-name or calculation branches.
 
-The supplied real-screen screenshot confirmed that the price overlays, JMA Slope,
-OBV, ADX, and reference lines render on the actual chart. The missing identification
-and edit interaction reported from that screen is addressed below.
+The supplied real-screen screenshot confirmed that price overlays, JMA Slope, OBV,
+ADX, and reference lines render on the actual chart. The missing identification and
+edit interaction reported from that screen is addressed below.
 
 ## Interactive pane legends and indicator properties — implementation complete
 
-### Generic render contract
+### Generic render and selection contract
 
 - every pane can carry explicit `LegendEntry` metadata
-- every render series can carry a generic `ownerId`
+- every render series/reference can carry a generic `ownerId`
 - selectable legends require a non-empty feature-owned owner ID
 - market price and volume legends are non-selectable
-- indicator output lines, histograms, and reference lines resolve to their parent
-  indicator instance rather than to an individual child output
+- all outputs of one indicator resolve to the same indicator instance
 
-### Legend presentation and selection
+### Presentation and interaction
 
-- legends render at the upper-left of each pane and wrap when space is limited
-- the price pane groups JMA outputs and VWAP bands by indicator instance
-- lower panes expose JMA Slope, OBV Signal, and ADX labels with current parameters
-- single click selects the indicator instance
+- legends render at the upper-left of every pane and wrap when needed
+- price-pane JMA outputs and VWAP bands are grouped by indicator instance
+- lower panes expose JMA Slope, OBV Signal, and ADX labels with parameters
+- single click selects the complete indicator instance
 - double click selects it and focuses the docked `프로퍼티` window
-- selected indicator outputs are highlighted generically across all of their panes
-- legend hit-testing suppresses chart pan, zoom, and latest-reset interaction while
-  the pointer is over a legend
+- selected outputs are highlighted generically across their panes
+- legend hit-testing suppresses conflicting pan, zoom, and latest-reset gestures
 
 Default labels include:
 
@@ -164,7 +158,7 @@ Default labels include:
 
 ### Property-grid contract
 
-`app/indicator_properties.*` owns editable parameter metadata and validation:
+`app/indicator_properties.*` owns editable metadata and validation:
 
 - SMA: `period`
 - JMA: `period`, `phase`, `power`
@@ -173,10 +167,9 @@ Default labels include:
 - ADX: `period`
 
 The docked `프로퍼티` window provides Apply and Revert. Apply validates a complete
-candidate spec set, rebuilds the default render plan, reconfigures the indicator
-module, invalidates the chart contribution, and recalculates from the same shared
-real market history. Invalid values are rejected without publishing a partial
-configuration.
+candidate spec set, rebuilds the default plan, reconfigures the indicator module,
+and recalculates from the same shared real market history. Invalid values are
+rejected without publishing a partial configuration.
 
 ### Verification
 
@@ -184,11 +177,10 @@ Windows CI `30864225906` (`#857`) passed:
 
 - temporary implementation files removed and workflow permissions restored to read
 - architecture and real-data-only boundaries
-- generic legend contract and owner-ID validation
-- generic renderer selection and double-click markers
+- generic legend/owner validation and renderer selection gates
 - renderer no-indicator-name gate
-- indicator property metadata and range-validation tests
-- render-adapter grouped legend and owner tests
+- property metadata and range-validation tests
+- grouped legend and owner adapter tests
 - MSVC x64 `shell.exe` build
 - complete legacy and M7 headless suite
 - clean source-tree verification
@@ -198,14 +190,14 @@ Windows CI `30864225906` (`#857`) passed:
 
 Run the actual shell and confirm:
 
-1. the upper-left of the price pane shows stock, SMA, JMA, and VWAP legends;
+1. the price pane shows stock, SMA, JMA, and VWAP legends;
 2. JMA Slope, OBV, and ADX panes show their own legends;
 3. single click highlights the complete indicator instance;
 4. double click activates the docked `프로퍼티` tab/window;
-5. changing one parameter and pressing Apply updates both calculation and legend;
+5. changing one parameter and pressing Apply updates calculation and legend;
 6. Revert restores the current applied values before Apply;
 7. clicking a legend does not pan, zoom, or reset the chart;
-8. live `0B` replacement continues without losing selection or manual viewport.
+8. live `0B` replacement preserves selection and manual viewport.
 
 ## Exact local acceptance commands
 
@@ -219,9 +211,9 @@ git pull --ff-only origin p2/kiwoom-mock-gateway
 .\shell.exe
 ```
 
-If this focused interaction test is normal, record the interactive legend/property
-extension as accepted and close M7. The next product milestone is then M8 index and
-multi-symbol comparison unless the user explicitly reprioritizes another feature.
+If this focused interaction test is normal, record the legend/property extension as
+accepted and close M7. The next product milestone is M8 index and multi-symbol
+comparison unless the user explicitly reprioritizes another feature.
 
 ## PR policy
 

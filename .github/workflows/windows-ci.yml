@@ -39,7 +39,6 @@ jobs:
           git switch -C p2/kiwoom-mock-gateway origin/p2/kiwoom-mock-gateway
           python .\scripts\apply_comparison_axis_alignment.py
           if ($LASTEXITCODE -ne 0) { throw 'comparison axis alignment migration failed' }
-          git checkout HEAD^ -- .\.github\workflows\windows-ci.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A

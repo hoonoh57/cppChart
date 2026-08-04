@@ -22,7 +22,7 @@ DLL plugin ABI before the internal contracts stabilize.
 - broker-readiness-gated liquidation
 - Windows MSVC build and complete headless suite
 
-## Permanent rendering rules
+## Permanent rendering and interaction rules
 
 - Financial X coordinates use actual bar order, not elapsed wall-clock time.
 - Every visible bar slot has one shared horizontal pitch across all panes.
@@ -36,6 +36,11 @@ DLL plugin ABI before the internal contracts stabilize.
   branches.
 - Drag, zoom, crosshair, and manual viewport state remain stable while real `0B`
   updates arrive.
+- Legend presentation and hit-testing are generic renderer behavior.
+- Selection resolves through a generic `ownerId`; an indicator's child outputs do
+  not become separate editable objects.
+- Parameter metadata and reconfiguration belong to the feature/application layer,
+  not to the renderer.
 
 ## Milestone M1 — architecture contracts and regression gates
 
@@ -74,9 +79,9 @@ Status: complete.
 Delivered:
 
 - broker-independent `RenderDocument`
-- candle, line, histogram, marker, reference-line, and annotation contracts
+- candle, line, histogram, marker, reference-line, annotation, and legend contracts
 - generic ImGui renderer consuming only that document
-- independent viewport and render-surface state
+- independent viewport, selection, and render-surface state
 - separately testable document builder and renderer
 
 ## Milestone M4 — FeatureRegistry and execution levels
@@ -110,7 +115,8 @@ Completed:
 - normalized modules and immutable snapshot flow
 - generic chart workspace
 - headless-tested market and order coordination
-- indicator calculation and render contribution kept outside the renderer
+- indicator calculation, property metadata, and render contribution kept outside
+  the renderer
 
 Remaining long-term cleanup:
 
@@ -150,8 +156,9 @@ remains.
 ## Milestone M7 — reusable indicator engine
 
 Status: calculation engine, data contract, application modules, generic render
-contribution, production shell wiring, architecture gates, MSVC build, and complete
-headless regression are complete. One focused actual-screen acceptance remains.
+contribution, production shell wiring, interactive legends/properties, architecture
+gates, MSVC build, and complete headless regression are complete. Focused visual
+interaction acceptance remains.
 
 ### Verified core
 
@@ -181,14 +188,13 @@ Initial indicators:
 
 - `IndicatorModule` owns execution level, cache, revision, metrics, and calculation
 - completed indicator output is shared across live-tail replacements
-- `IndicatorRenderAdapter` publishes only generic line, histogram, and reference
-  series
+- `IndicatorRenderAdapter` publishes only generic line, histogram, reference, and
+  legend contributions
 - `DefaultIndicatorRenderPlan` maps initial outputs outside the renderer
 - ADX 20/25 and JMA slope zero are generic reference lines
 - `ChartWorkspaceModule` composes market and indicator revisions independently
 - contribution failure retains the last good document
-- `IndicatorWorkspaceCoordinator` verifies the complete headless application flow
-- standard pane IDs `price` and `volume` prevent duplicate price panes
+- stable pane IDs `price` and `volume` prevent duplicate price panes
 - adding/removing indicators requires no change to renderer source
 
 ### Verified production wiring
@@ -205,21 +211,50 @@ Initial indicators:
 - all indicator sources are linked into the production `shell.exe`
 - the renderer remains feature-agnostic
 
-Windows CI `30855098423` (`#829`) passed the production M7 shell gate, MSVC build,
-complete headless suite, clean-tree verification, and artifact publication.
+### Interactive legend and property extension
+
+Implemented:
+
+- explicit pane `LegendEntry` collection in `RenderDocument`
+- generic `ownerId` on render series and reference lines
+- upper-left pane legends with wrapping and color swatches
+- grouped price-pane legends for multi-output JMA and VWAP instances
+- dedicated lower-pane labels for JMA Slope, OBV, and ADX
+- single-click indicator-instance selection
+- double-click selection and focus of the docked `프로퍼티` window
+- generic selected-series highlighting across all panes owned by the instance
+- legend hit-test isolation from chart pan, zoom, and latest reset
+- feature-owned property descriptors and range validation
+- Apply/Revert workflow for SMA, JMA, VWAP, OBV, and ADX parameters
+- validated plan/module reconfiguration from the same real shared market history
+
+Windows CI `30864225906` (`#857`) passed:
+
+- repository and temporary-file policy
+- core and modular architecture boundaries
+- real-data-only production checks
+- M6/M7 and interactive-legend integration checks
+- generic renderer no-indicator-name gate
+- legend owner and grouped-render adapter tests
+- indicator property metadata/range tests
+- MSVC x64 shell build
+- complete headless suite
+- clean-tree verification
+- executable artifact publication
 
 ### Remaining M7 acceptance
 
 Run one actual `ka10080 + 0B` screen test and confirm:
 
-1. SMA/JMA/VWAP overlay the existing price pane without a duplicate pane.
-2. JMA Slope, OBV, and ADX render in lower panes.
-3. ADX 20/25 and JMA slope zero references render correctly.
-4. time crosshair and bar alignment remain synchronized across panes.
-5. manual pan/zoom remains stable during live-tail replacement.
-6. Indicators Off removes work/contributions and Visible or Active restores them.
+1. price and lower-pane legends are readable and correctly grouped;
+2. single click selects/highlights the whole indicator instance;
+3. double click focuses the docked property window;
+4. Apply changes calculation and the parameterized legend label;
+5. Revert restores the applied property values before Apply;
+6. legend interaction does not alter viewport state;
+7. selection and viewport survive live-tail replacement.
 
-After that focused acceptance, M7 can be marked complete.
+After this focused acceptance, M7 can be marked complete.
 
 ## Milestone M8 — index and multi-symbol comparison
 

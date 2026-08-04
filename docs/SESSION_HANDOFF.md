@@ -16,12 +16,12 @@ Pull live HEAD before work. M1-M6 are complete. M7 dynamic indicator management 
 user-accepted as highly stabilized. The 11-type catalog is SMA, EMA, JMA,
 Bollinger Bands, RSI, MACD, DMI, SuperTrend, VWAP, OBV, and Wilder ADX.
 
-The `비교` editor now supports arbitrary stock/index codes, KOSPI `001`, KOSDAQ
-`101`, separate lower panes, price-pane secondary axes, styling, reload,
-hide/show, and delete. Data paths are stock minutes + multiple `0B`, `ka20005`
-index minutes + multiple `0I`, reconnect restoration, source-error isolation, and
-decimal/x100 index normalization. Rendering uses generic `axisId`, multiple left
-axes, document-wide shared axis width, and completed-point cache reuse.
+The `비교` editor supports arbitrary stock/index codes, KOSPI `001`, KOSDAQ `101`,
+separate lower panes, price-pane secondary axes, styling, reload, hide/show, and
+delete. Data paths are stock minutes + multiple `0B`, `ka20005` index minutes +
+multiple `0I`, reconnect restoration, source-error isolation, and decimal/x100
+index normalization. Rendering uses generic `axisId`, multiple left axes,
+document-wide shared axis width, and completed-point cache reuse.
 
 CI #1016 passed policy/architecture gates, new indicator and comparison tests,
 index normalization, dual-axis geometry, MSVC build, full suite, clean-tree, and

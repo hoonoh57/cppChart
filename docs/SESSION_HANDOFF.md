@@ -6,14 +6,15 @@ Repository: `hoonoh57/cppChart`
 Branch: `p2/kiwoom-mock-gateway`
 Local: `E:\2026\gpt\cpp\shell`
 PR #1: Draft
-Acceptance-fix implementation: `25179bd7ba329741e9aa46cb99e22260d50424a5`
-Read-only verification workflow commit: `8ae847c9486110ee74d7b6901e6ecbae65487db0`
-Windows CI #1063: `30878682349`
-Artifact: `8880527526`
-Digest: `sha256:e236ec2c0789a4a140b307fd59e6fd1d982a7f9f8a4dd42ac370b0613681a917`
+Viewport/footer implementation: `2b87b40097cd36be46de4f956664302ef74a6558`
+Read-only verification contract: `63827a6c88469911e3eab784c1d427bdd0bfdc0f`
+Windows CI #1072: `30894054586`
+Artifact: `8886386766`
+Digest: `sha256:e70abd61e6d4297b8f90d749418f6538175d44f549873fe09921d46656255f6e`
 Workflow: read-only
 
-Always pull live HEAD before work:
+Pull and use live branch HEAD; documentation commits may follow the verified code
+baseline.
 
 ```powershell
 Set-Location "E:\2026\gpt\cpp\shell"
@@ -26,62 +27,62 @@ git rev-parse HEAD
 
 M1-M6 are complete. M7 dynamic indicator calculation/management is stabilized. The
 11-type catalog is SMA, EMA, JMA, Bollinger Bands, RSI, MACD, DMI, SuperTrend,
-VWAP, OBV, and Wilder ADX.
+VWAP, OBV, and Wilder ADX. Comparison supports stock `0B`, `ka20005` index history,
+sector-index realtime `0J`, KOSPI `001`, KOSDAQ `101`, separate panes, and price
+secondary axes.
 
-## 2026-08-04 actual-screen acceptance failures and fixes
+## 2026-08-04 actual-screen corrections
 
-The user confirmed three real UI/runtime failures:
+### Sector-index realtime and indicator discovery
 
-1. KOSPI/KOSDAQ history rendered in both the price overlay and lower pane, but the
-   index comparison did not update in real time.
-2. EMA, Bollinger Bands, RSI, MACD, DMI, and SuperTrend were implemented but were
-   not visible in the top selector because that combo showed only active instances.
-3. The output/style editor expanded vertically, placing Apply/Revert below the
-   viewport and causing users to mistake the editor for incomplete or inactive.
+- Corrected sector-index realtime from invalid `0I` to official `0J`.
+- Added `0J` registration, decode, delivery, reconnect restoration, removal, and
+  removed-subscription non-resurrection coverage.
+- `적용 지표` now distinguishes active instances from the full 11-type
+  `새 지표 추가` catalog.
+- The output table has bounded internal scrolling and Apply/Revert remain in a
+  fixed properties footer.
 
-Fixes now implemented:
+### Reference controls and chart X axis
 
-- Kiwoom sector-index realtime is registered, removed, decoded, delivered, and
-  restored after reconnect using `0J`. The previous `0I` contract was incorrect;
-  `0I` is not the sector-index realtime type.
-- Runtime tests now cover `0J` registration for KOSPI `001`, decimal payload decode,
-  callback delivery, reconnect restoration, explicit removal, and prevention of
-  removed-subscription resurrection.
-- The top combo is labeled `적용 지표`. It shows current instances first and the
-  complete 11-type catalog under `새 지표 추가`, so all available indicators are
-  discoverable without opening an unexplained secondary dialog.
-- `새 지표` opens the same catalog/pane insertion flow.
-- The output line/histogram table has bounded vertical height and its own scrolling.
-- The parameter/output/pane/reference editor is a scrolling child region while
-  Apply/Revert and errors remain pinned at the bottom of the properties window.
+The user then confirmed two additional layout failures:
 
-## Comparison implementation
+1. `기준선 추가 / 과매수 추가 / 과매도 추가` remained inside the scrolling editor
+   and were hidden until the properties page was scrolled.
+2. ImGui vertical item spacing accumulated between every pane and splitter, making
+   chart content taller than the supplied viewport and pushing the final X axis
+   below an internal chart scrollbar.
 
-The `비교` editor supports arbitrary stock/index codes, KOSPI `001`, KOSDAQ `101`,
-separate lower panes, price-pane secondary axes, styling, reload, hide/show, and
-delete. Data paths are stock minutes + multiple `0B`, `ka20005` index minutes +
-multiple `0J`, reconnect restoration, source-error isolation, and decimal/x100
-index normalization. Rendering uses generic `axisId`, multiple left axes,
-document-wide shared axis width, and completed-point cache reuse.
+Corrections:
 
-CI #1063 passed repository policy, architecture boundaries, explicit `0J` decoder
-and lifecycle guards, indicator-catalog visibility and pinned-footer guards, MSVC
-x64 build, the complete headless suite, clean-tree verification, and artifact
-publication.
+- The three reference quick-action buttons are now a fixed footer row immediately
+  above Apply/Revert, outside the editor child region.
+- Footer space is explicitly reserved for quick actions, Apply/Revert, and errors.
+- Pane and splitter invisible items use zero vertical `ItemSpacing`, so their total
+  height equals the renderer-provided chart height.
+- The `실제 시세` window forbids internal vertical scrolling and mouse-wheel window
+  scrolling. Wheel input remains available to the chart viewport interaction.
+- CI guards the fixed quick actions, enlarged footer, no-scroll chart flags, and
+  zero pane/splitter spacing.
 
-## Remaining actual-screen acceptance
+CI #1072 passed repository/real-data policy, architecture boundaries, comparison
+and indicator contracts, the new viewport/footer guards, MSVC x64 build, the full
+headless suite, clean-tree verification, and artifact publication.
 
-Rebuild and verify only the three corrected paths first:
+## Focused actual-screen acceptance
 
-1. Add KOSPI `001` or KOSDAQ `101`, confirm the log reports `0J` subscription and
-   confirm the latest comparison point changes without reload.
-2. Open `적용 지표` and confirm all 11 types appear under `새 지표 추가`; add each
-   of EMA/Bollinger/RSI/MACD/DMI/SuperTrend as needed.
-3. Resize the properties dock and confirm Apply/Revert remain visible while only
-   the editor body and bounded output table scroll.
+1. Open `프로퍼티` at the normal narrow dock width and confirm the three reference
+   buttons and Apply/Revert are visible without scrolling.
+2. Expand/collapse parameter, output, pane, and reference sections; only the editor
+   body must scroll while both footer rows remain fixed.
+3. Load multiple lower panes and confirm the chart's bottom X axis is always visible
+   without using the chart-window vertical scrollbar.
+4. Confirm wheel zoom, horizontal pan, pane separator drag, legends, and synchronized
+   crosshair still work.
+5. Confirm live `0B`/`0J` updates preserve viewport, selected instance, pane sizes,
+   fixed footer visibility, and X-axis visibility.
 
-Then complete stock/index overlay alignment, `0B`/`0J` live state preservation,
-failed-source isolation, physical multi-source reconnect, and intraday soak.
-Return screenshots/log evidence only for failed items. Next product work after
-acceptance is code/name search and normalized relative-strength comparison. Keep PR
-#1 Draft until actual account/order, physical reconnect, and soak acceptance close.
+Return a screenshot only for a failed item. After this acceptance, proceed to
+code/name search and normalized relative-strength comparison. PR #1 remains Draft
+until actual account/order, physical multi-source reconnect, and intraday soak are
+accepted.

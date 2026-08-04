@@ -25,8 +25,8 @@ boundaries/tooltips, and real `0B` viewport preservation.
 
 ## M7 — reusable and dynamically managed indicators
 
-Status: implemented, automated verification complete, and user reported the
-indicator-management path is highly stabilized.
+Status: implementation and automated verification complete; user acceptance closed
+with the report that indicator-management behavior is highly stabilized.
 
 ### Indicator engine and catalog
 
@@ -34,19 +34,8 @@ One batch/incremental implementation per type, deterministic specs, fixed output
 channels/readiness mask, same-timestamp replacement, fail-closed errors, and
 explicit trading-date/session VWAP.
 
-Current catalog: 11 types.
-
-- SMA
-- EMA
-- JMA Value / Up / Down / Slope
-- Bollinger Bands Middle / Upper / Lower
-- RSI with 70/30 defaults
-- MACD / Signal / Histogram
-- DMI +DI / -DI / ADX
-- SuperTrend Up / Down
-- VWAP / ±1σ / ±2σ
-- OBV / Signal / Direction
-- Wilder ADX
+Current catalog: SMA, EMA, JMA, Bollinger Bands, RSI, MACD, DMI, SuperTrend, VWAP,
+OBV, and Wilder ADX.
 
 ### Dynamic instances and presentation
 
@@ -57,7 +46,7 @@ Current catalog: 11 types.
 - hide/show/delete and market-only fallback;
 - per-output visibility, pane, colors, width, solid/dashed/dotted style;
 - pane height and auto/fixed/symmetric scale;
-- reference CRUD and overbought/oversold quick creation;
+- reference CRUD and overbought/oversold creation;
 - owner-based legends/selection and draggable pane separators;
 - complete candidate validation and safe same-frame vector replacement.
 
@@ -71,22 +60,20 @@ Actual `ka20005 + 0I` visual/data acceptance remains.
 `ComparisonModule` supports up to 32 configured comparison instances and preserves
 source data across style/placement changes.
 
-- arbitrary stock code history through normalized stock-minute requests;
-- arbitrary index/industry code history through `ka20005` normalized index minutes;
-- stock live tail through multiple `0B` subscriptions;
-- index live tail through multiple `0I` subscriptions;
+- arbitrary stock history and multiple stock `0B` live tails;
+- arbitrary index/industry history through `ka20005` and multiple `0I` live tails;
 - reconnect restoration and explicit unsubscribe;
 - KOSPI preset `001`, KOSDAQ preset `101`;
-- decimal (`2,845.67`) and x100 integer (`284567`) index values normalize identically;
+- decimal and x100 index values normalize identically;
 - one source failure is isolated from the primary chart and other comparisons.
 
 ### Placement and axes
 
 - separate lower pane using its primary right axis;
-- main price pane close-line overlay using a dedicated left secondary axis;
+- main price pane close overlay using a dedicated left secondary axis;
 - multiple secondary-axis columns with independent ranges and precision;
 - comparison color, width, style, label, divisor, decimals, pane title/height;
-- hide/show/delete/reload from the docked `비교` editor;
+- add/reload/hide/show/delete from the docked `비교` editor;
 - document-wide maximum left-axis width reserved by every pane, preserving candle,
   volume, indicator, crosshair, and time-axis alignment.
 
@@ -108,8 +95,8 @@ source data across style/placement changes.
 
 CI passed repository/real-data policy, architecture isolation, all existing tests,
 new indicator parity/replacement tests, comparison lifecycle and render-cache tests,
-`ka20005/0I` index normalization, shared dual-axis geometry, MSVC x64 build,
-clean-tree, and artifact publication.
+index normalization, shared dual-axis geometry, MSVC x64 build, clean-tree, and
+artifact publication.
 
 ## M9
 

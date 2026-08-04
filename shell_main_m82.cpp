@@ -20,6 +20,8 @@ namespace ImGui
 #include "shell_main.cpp"
 #undef InputText
 
+#include "core/symbol_master_cache.h"
+
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -28,13 +30,20 @@ namespace ImGui
 
 namespace
 {
+    constexpr const char* kSymbolMasterCachePath =
+        "data/kiwoom_symbol_master.json";
+
     std::vector<trading::SymbolCatalogEntry> g_m82ToolbarMatches;
     std::vector<trading::SymbolCatalogEntry> g_m82RecentSymbols;
     int g_m82ToolbarHighlight = -1;
     bool g_m82ToolbarPopupOpen = false;
-    double g_m82LastCatalogRequestSeconds = -1000.0;
-    std::size_t g_m82ObservedCatalogSize = 0U;
-    std::string g_m82CatalogError;
+    bool g_m82MasterInitialized = false;
+    bool g_m82RefreshRequested = false;
+    std::size_t g_m82ObservedMasterCount = 0U;
+    std::size_t g_m82SavedMasterCount = 0U;
+    double g_m82MasterChangedAt = 0.0;
+    std::string g_m82MasterStatus;
+    std::string g_m82MasterError;
 
     bool IsSixDigitCode(const std::string& value) noexcept
     {
@@ -64,6 +73,134 @@ namespace
         return value;
     }
 
+    void MergeSymbolMaster(
+        const std::vector<trading::SymbolCatalogEntry>& entries)
+    {
+        std::lock_guard<std::mutex> lock(g_symbolCatalogMutex);
+        for (const trading::SymbolCatalogEntry& entry : entries) {
+            const auto found = std::find_if(
+                g_symbolCatalog.begin(),
+                g_symbolCatalog.end(),
+                [&](const trading::SymbolCatalogEntry& existing) {
+                    return existing.code == entry.code;
+                });
+            if (found == g_symbolCatalog.end()) {
+                g_symbolCatalog.push_back(entry);
+            }
+            else {
+                *found = entry;
+            }
+        }
+    }
+
+    std::vector<trading::SymbolCatalogEntry> SymbolMasterSnapshot()
+    {
+        std::lock_guard<std::mutex> lock(g_symbolCatalogMutex);
+        return g_symbolCatalog;
+    }
+
+    void EnsureSymbolMasterLoaded()
+    {
+        if (g_m82MasterInitialized) return;
+        g_m82MasterInitialized = true;
+
+        const trading::SymbolMasterCacheLoadResult cached =
+            trading::SymbolMasterCache::Load(kSymbolMasterCachePath);
+        if (cached.loaded) {
+            MergeSymbolMaster(cached.entries);
+            g_m82ObservedMasterCount = cached.entries.size();
+            g_m82SavedMasterCount = cached.entries.size();
+            g_m82MasterStatus = cached.fresh
+                ? "종목 마스터 캐시 준비"
+                : "종목 마스터 캐시 준비(갱신 필요)";
+            g_log.Add(
+                "DATA",
+                "종목 마스터 캐시 로드: %zu종목%s",
+                cached.entries.size(),
+                cached.fresh ? "" : " (stale)");
+        }
+        else {
+            g_m82MasterStatus = "종목 마스터 최초 다운로드 대기";
+            g_m82MasterError = cached.error;
+            g_log.Add(
+                "DATA",
+                "종목 마스터 캐시 미사용: %s",
+                cached.error.c_str());
+        }
+    }
+
+    void RequestSymbolMasterRefreshIfReady()
+    {
+        if (g_m82RefreshRequested || !g_runtimeRunner ||
+            !g_runtimeRunner->IsRunning())
+        {
+            return;
+        }
+
+        const trading::KiwoomRuntimeSnapshot runtime = RuntimeSnapshot();
+        if (runtime.sessionState != trading::KiwoomSessionState::Ready) return;
+
+        trading::Continuation empty;
+        std::string kospiError;
+        std::string kosdaqError;
+        const bool kospi = g_runtimeRunner->RequestSymbolCatalog(
+            "0", empty, kospiError);
+        const bool kosdaq = g_runtimeRunner->RequestSymbolCatalog(
+            "10", empty, kosdaqError);
+        g_m82RefreshRequested = true;
+
+        if (!kospi || !kosdaq) {
+            g_m82MasterError = !kospiError.empty() ? kospiError : kosdaqError;
+            g_m82MasterStatus = "종목 마스터 REST 갱신 실패, 캐시 사용";
+            g_log.Add(
+                "FAULT",
+                "종목 마스터 REST 갱신 시작 실패: %s",
+                g_m82MasterError.c_str());
+            return;
+        }
+
+        g_m82MasterError.clear();
+        g_m82MasterStatus = "KOSPI/KOSDAQ 종목 마스터 갱신 중";
+        g_log.Add("DATA", "KOSPI/KOSDAQ 종목 마스터 REST 갱신 시작");
+    }
+
+    void PersistSymbolMasterWhenStable()
+    {
+        const std::vector<trading::SymbolCatalogEntry> snapshot =
+            SymbolMasterSnapshot();
+        const std::size_t count = snapshot.size();
+        if (count != g_m82ObservedMasterCount) {
+            g_m82ObservedMasterCount = count;
+            g_m82MasterChangedAt = NowSeconds();
+            return;
+        }
+        if (count == 0U || count == g_m82SavedMasterCount ||
+            g_m82MasterChangedAt <= 0.0 ||
+            NowSeconds() - g_m82MasterChangedAt < 1.0)
+        {
+            return;
+        }
+
+        std::string error;
+        if (!trading::SymbolMasterCache::SaveAtomic(
+                kSymbolMasterCachePath,
+                snapshot,
+                error))
+        {
+            g_m82MasterError = error;
+            g_m82MasterStatus = "종목 마스터 캐시 저장 실패";
+            g_log.Add("FAULT", "%s", error.c_str());
+            g_m82MasterChangedAt = NowSeconds();
+            return;
+        }
+
+        g_m82SavedMasterCount = count;
+        g_m82MasterChangedAt = 0.0;
+        g_m82MasterError.clear();
+        g_m82MasterStatus = "종목 마스터 준비";
+        g_log.Add("DATA", "종목 마스터 캐시 저장: %zu종목", count);
+    }
+
     void AddRecent(const trading::SymbolCatalogEntry& entry)
     {
         if (!IsSixDigitCode(entry.code) && !IsNxtCode(entry.code)) return;
@@ -81,25 +218,17 @@ namespace
         }
     }
 
-    std::vector<trading::SymbolCatalogEntry> SymbolCatalogSnapshot()
-    {
-        std::lock_guard<std::mutex> lock(g_symbolCatalogMutex);
-        return g_symbolCatalog;
-    }
-
     void RefreshToolbarMatches(const char* query)
     {
-        const std::vector<trading::SymbolCatalogEntry> catalog =
-            SymbolCatalogSnapshot();
-
+        const std::vector<trading::SymbolCatalogEntry> master =
+            SymbolMasterSnapshot();
         if (query == nullptr || query[0] == '\0') {
             g_m82ToolbarMatches = g_m82RecentSymbols;
         }
         else {
             g_m82ToolbarMatches =
-                trading::SearchSymbolCatalog(catalog, query, 12U);
+                trading::SearchSymbolCatalog(master, query, 12U);
         }
-
         g_m82ToolbarPopupOpen = !g_m82ToolbarMatches.empty();
         g_m82ToolbarHighlight = g_m82ToolbarPopupOpen ? 0 : -1;
     }
@@ -133,40 +262,17 @@ namespace
         entry.code = normalized;
         entry.name = normalized;
         entry.market = IsNxtCode(normalized) ? "NXT" : "최근 조회";
+
+        const std::vector<trading::SymbolCatalogEntry> master =
+            SymbolMasterSnapshot();
+        const auto found = std::find_if(
+            master.begin(),
+            master.end(),
+            [&](const trading::SymbolCatalogEntry& candidate) {
+                return candidate.code == normalized;
+            });
+        if (found != master.end()) entry = *found;
         AddRecent(entry);
-    }
-
-    void EnsureCatalogRequested()
-    {
-        if (!g_runtimeRunner || !g_runtimeRunner->IsRunning()) return;
-
-        const std::size_t catalogSize = SymbolCatalogSnapshot().size();
-        if (catalogSize > 0U) {
-            g_m82CatalogError.clear();
-            return;
-        }
-
-        const trading::KiwoomRuntimeSnapshot runtime = RuntimeSnapshot();
-        const bool tokenUsable =
-            runtime.orderSubmissionAllowed ||
-            runtime.sessionState == trading::KiwoomSessionState::RegistrationPending ||
-            runtime.sessionState == trading::KiwoomSessionState::ReconciliationPending ||
-            runtime.sessionState == trading::KiwoomSessionState::Ready;
-        if (!tokenUsable) return;
-
-        const double now = NowSeconds();
-        if (now - g_m82LastCatalogRequestSeconds < 3.0) return;
-        g_m82LastCatalogRequestSeconds = now;
-
-        std::string error;
-        if (!RefreshSymbolCatalog(error)) {
-            g_m82CatalogError = error.empty()
-                ? "종목 목록 요청을 시작하지 못했습니다."
-                : error;
-        }
-        else {
-            g_m82CatalogError.clear();
-        }
     }
 }
 
@@ -178,6 +284,10 @@ bool ImGui::M82InputText(
     ImGuiInputTextCallback callback,
     void* userData)
 {
+    EnsureSymbolMasterLoaded();
+    RequestSymbolMasterRefreshIfReady();
+    PersistSymbolMasterWhenStable();
+
     const bool changed = ImGui::InputText(
         label,
         buffer,
@@ -188,16 +298,6 @@ bool ImGui::M82InputText(
 
     if (label == nullptr || std::strcmp(label, "##symbol") != 0) {
         return changed;
-    }
-
-    EnsureCatalogRequested();
-
-    const std::size_t catalogSize = SymbolCatalogSnapshot().size();
-    if (catalogSize != g_m82ObservedCatalogSize) {
-        g_m82ObservedCatalogSize = catalogSize;
-        if (buffer[0] != '\0' || ImGui::IsItemActive()) {
-            RefreshToolbarMatches(buffer);
-        }
     }
 
     const bool inputActive = ImGui::IsItemActive();
@@ -249,12 +349,15 @@ bool ImGui::M82InputText(
         ImGui::TextUnformatted("6자리 코드 또는 6자리_AL을 직접 입력할 수 있습니다.");
         ImGui::TextUnformatted("한글 종목명 입력 시 후보를 선택하면 코드가 입력됩니다.");
         ImGui::TextUnformatted("빈 입력란을 클릭하면 최근 선택 종목을 표시합니다.");
-        ImGui::Text("종목명 목록: %zu종목", catalogSize);
-        if (!g_m82CatalogError.empty()) {
+        ImGui::Separator();
+        ImGui::Text("%s (%zu종목)",
+            g_m82MasterStatus.c_str(),
+            SymbolMasterSnapshot().size());
+        if (!g_m82MasterError.empty()) {
             ImGui::TextColored(
                 ImVec4(0.95f, 0.30f, 0.30f, 1.0f),
-                "종목명 목록 오류: %s",
-                g_m82CatalogError.c_str());
+                "%s",
+                g_m82MasterError.c_str());
         }
         ImGui::EndTooltip();
     }

@@ -20,6 +20,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    core\kiwoom_market_data.cpp ^
    core\kiwoom_index_realtime.cpp ^
    core\kiwoom_symbol_catalog.cpp ^
+   core\symbol_master_cache.cpp ^
    core\runtime_config.cpp ^
    core\kiwoom_session.cpp ^
    core\trading_state.cpp ^

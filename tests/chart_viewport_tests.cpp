@@ -29,7 +29,7 @@ namespace
         Check(viewport.initialized, "viewport reset must initialize");
         Check(Near(viewport.visibleStart, 750.0) &&
                   Near(viewport.visibleEnd, 899.0),
-              "viewport reset must open the latest preferred window");
+              "zero-padding reset must preserve the legacy latest window");
         Check(viewport.autoScroll,
               "viewport reset must enable auto-scroll");
 
@@ -57,6 +57,62 @@ namespace
               "pan must preserve the visible span");
         Check(viewport.visibleStart < start,
               "negative pan fraction must move toward older bars");
+    }
+
+    void TestLatestRightMarginAndManualFutureSpace()
+    {
+        constexpr double padding = 0.12;
+        constexpr double overscroll = 0.60;
+        trading::render::ChartViewport viewport;
+        trading::render::ResetViewport(
+            viewport,
+            0.0,
+            899.0,
+            149.0,
+            padding,
+            overscroll);
+        Check(viewport.visibleEnd > 899.0,
+              "latest reset must reserve visible space after the newest bar");
+        Check(Near(viewport.visibleStart, 750.0),
+              "right margin must not discard the requested historical window");
+        const double resetGap = viewport.visibleEnd - 899.0;
+        Check(resetGap > 10.0,
+              "default latest margin must be visually meaningful");
+
+        const double previousEnd = viewport.visibleEnd;
+        trading::render::PanViewport(
+            viewport,
+            0.0,
+            899.0,
+            0.20,
+            padding,
+            overscroll);
+        Check(viewport.visibleEnd > previousEnd,
+              "dragging the chart left must create additional future space");
+        Check(!viewport.autoScroll,
+              "manual future-space pan must suspend auto-follow");
+
+        const double manualStart = viewport.visibleStart;
+        trading::render::FollowLatest(
+            viewport,
+            0.0,
+            900.0,
+            padding,
+            overscroll);
+        Check(Near(viewport.visibleStart, manualStart),
+              "manual future-space viewport must survive live updates");
+
+        trading::render::ResetViewport(
+            viewport,
+            0.0,
+            900.0,
+            149.0,
+            padding,
+            overscroll);
+        Check(viewport.autoScroll,
+              "double-click equivalent reset must restore auto-follow");
+        Check(viewport.visibleEnd > 900.0,
+              "reset must restore the latest-bar right margin");
     }
 
     void TestClampAndMinimumSpan()
@@ -93,7 +149,7 @@ namespace
             100.0,
             100.0);
         Check(Near(viewport.visibleEnd, 100.0),
-              "pan must clamp to data end");
+              "zero-overscroll pan must clamp to data end");
         Check(viewport.autoScroll,
               "panning to the latest edge must restore auto-scroll");
     }
@@ -106,7 +162,7 @@ namespace
 
         trading::render::FollowLatest(viewport, 0.0, 101.0);
         Check(Near(viewport.visibleEnd, 101.0),
-              "auto-scroll must follow the new latest bar");
+              "zero-padding auto-scroll must follow the newest bar");
         Check(Near(viewport.Span(), span),
               "auto-scroll must retain zoom span");
 
@@ -137,6 +193,7 @@ namespace
 int main()
 {
     TestLatestWindowResetZoomAndPan();
+    TestLatestRightMarginAndManualFutureSpace();
     TestClampAndMinimumSpan();
     TestFollowLatestAndManualHold();
     TestInvalidDataRange();

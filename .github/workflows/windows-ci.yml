@@ -65,6 +65,7 @@ jobs:
           $renderer = Get-Content .\ui\render_document_renderer.cpp -Raw
           $contract = Get-Content .\render\render_document.h -Raw
           $comparison = Get-Content .\app\comparison_module.cpp -Raw
+          $comparisonAdapter = Get-Content .\app\comparison_render_adapter.cpp -Raw
           $comparisonUi = Get-Content .\ui\comparison_manager_ui.cpp -Raw
           $indicatorConfig = Get-Content .\app\indicator_configuration.cpp -Raw
           $runner = Get-Content .\platform\kiwoom_runtime_runner.cpp -Raw
@@ -95,11 +96,16 @@ jobs:
             if (-not $renderer.Contains($marker)) { throw "Missing dual-axis renderer marker: $marker" }
           }
           foreach ($marker in @(
-            'ComparisonPlacement::PriceSecondaryAxis',
             'ApplyIndexValueTick(',
             'ApplyStockTradeTick(',
             'comparison series limit is 32')) {
             if (-not $comparison.Contains($marker)) { throw "Missing comparison module marker: $marker" }
+          }
+          foreach ($marker in @(
+            'ComparisonPlacement::PriceSecondaryAxis',
+            'axis.side = render::ValueAxisSide::Left',
+            'line.axisId = axisId')) {
+            if (-not $comparisonAdapter.Contains($marker)) { throw "Missing comparison adapter marker: $marker" }
           }
           foreach ($marker in @(
             'KOSPI', 'KOSDAQ', '가격 패널 이중축', '별도 하단 패널')) {

@@ -2,86 +2,114 @@
 
 ## Goal and baseline
 
-Preserve verified real Kiwoom minute-bar, `0B`, account, and order paths while
+Preserve verified real Kiwoom minute, realtime, account, and order paths while
 building detachable feature modules joined to one generic renderer. Production
 remains fail-closed and synthetic-free. Windows MSVC build and the complete
 headless suite remain mandatory.
 
 ## Permanent rules
 
-- ordinal bar-order X axis and shared pane slot geometry;
-- renderer consumes generic documents/series/styles/references/pane metadata only;
-- indicator catalog, instance lifecycle, parameters, and presentation stay outside renderer/shell;
-- multiple same-type instances may share one pane with independent parameters/colors;
-- draggable pane separators preserve minimum height and live-update stability;
-- viewport, selection, and pane sizes survive live-tail replacement.
+- ordinal bar-order X axis and one shared pane slot geometry;
+- generic documents, series, axes, styles, references, and pane metadata only;
+- feature lifecycle, calculation, source selection, and configuration outside renderer/shell;
+- multiple indicator or comparison instances with independent parameters/styles;
+- drag-resizable panes and stable viewport/selection/layout during live updates;
+- independent failures must not corrupt the primary real market chart.
 
 ## M1-M6
 
-Complete and M6 accepted on the actual screen/GPU path. Delivered real-data gates,
+Complete. M6 actual-screen/GPU acceptance is closed. Delivered real-data gates,
 market/workspace/feature modules, execution levels, generic renderer, ordinal axis,
-shared history/live tail, value grids, crosshairs, pan/zoom/latest reset,
+shared completed history/live tail, value grids, crosshairs, pan/zoom/latest reset,
 boundaries/tooltips, and real `0B` viewport preservation.
 
 ## M7 — reusable and dynamically managed indicators
 
-Implementation and automated verification are complete. Focused actual-screen
-acceptance remains.
+Status: implemented, automated verification complete, and user reported the
+indicator-management path is highly stabilized.
 
-### Engine
+### Indicator engine and catalog
 
-One batch/incremental implementation per indicator, deterministic specs, eight
-output channels/readiness mask, same-timestamp replacement, fail-closed errors,
-explicit trading date/session VWAP, and SMA/JMA/VWAP/OBV/ADX implementations.
+One batch/incremental implementation per type, deterministic specs, fixed output
+channels/readiness mask, same-timestamp replacement, fail-closed errors, and
+explicit trading-date/session VWAP.
 
-### Dynamic instances
+Current catalog: 11 types.
 
-`IndicatorInstanceDefinition` combines one calculation spec with visibility,
-output bindings, pane placement, colors, widths, styles, and references.
+- SMA
+- EMA
+- JMA Value / Up / Down / Slope
+- Bollinger Bands Middle / Upper / Lower
+- RSI with 70/30 defaults
+- MACD / Signal / Histogram
+- DMI +DI / -DI / ADX
+- SuperTrend Up / Down
+- VWAP / ±1σ / ±2σ
+- OBV / Signal / Direction
+- Wilder ADX
 
-Implemented:
+### Dynamic instances and presentation
 
-- top selector and Add dialog;
+- selector and Add dialog;
 - default/price/new/existing pane targets;
-- duplicate with unique ID/color and preserved pane placement;
+- duplicate with unique ID/color and preserved/remappable pane placement;
 - independent same-type parameters and same-pane overlay;
-- output visibility/pane assignment;
-- hide/show and permanent delete;
-- market-only fallback when no indicators are visible;
-- complete candidate validation before module/plan replacement.
-
-### Presentation and panes
-
-- primary/secondary colors, width, solid/dashed/dotted style;
-- pane height, auto/fixed/symmetric scale, min/max, decimals;
+- hide/show/delete and market-only fallback;
+- per-output visibility, pane, colors, width, solid/dashed/dotted style;
+- pane height and auto/fixed/symmetric scale;
 - reference CRUD and overbought/oversold quick creation;
-- owner-based legends, selection, and highlighting;
-- draggable separators with resize cursor/highlight/minimum height;
-- persistent user resize state and deliberate configured-default synchronization;
-- stable ImGui scopes and copied state across vector replacement.
+- owner-based legends/selection and draggable pane separators;
+- complete candidate validation and safe same-frame vector replacement.
 
-### Verified baseline
+## M8 — real stock/index comparison
 
-- implementation: `dba98bb7bb4690aeee170b2c6e971f1fa5aa1bc1`
-- Windows CI: `30868440522` (`#922`)
-- artifact: `8877052838`
-- digest: `sha256:9f2e83f83f807b198a7a68c1d1743b4da857dfa69fccd9335e31f8a57c6976c7`
-- workflow: read-only
+Status: first production slice implemented and automated verification complete.
+Actual `ka20005 + 0I` visual/data acceptance remains.
 
-CI passed repository/real-data policy, architecture isolation, instance lifecycle/
-shared-pane/color tests, style/reference/pane-layout tests, MSVC x64 build, full
-legacy/M7 suite, clean-tree, and artifact publication.
+### Data and lifecycle
 
-### Actual-screen acceptance
+`ComparisonModule` supports up to 32 configured comparison instances and preserves
+source data across style/placement changes.
 
-Confirm add, duplicate, same-pane overlay with different parameter/color,
-hide/show/delete, output styling, reference CRUD/overbought/oversold, pane
-resize, and selection/viewport/pane-size preservation during actual `ka10080 + 0B`.
+- arbitrary stock code history through normalized stock-minute requests;
+- arbitrary index/industry code history through `ka20005` normalized index minutes;
+- stock live tail through multiple `0B` subscriptions;
+- index live tail through multiple `0I` subscriptions;
+- reconnect restoration and explicit unsubscribe;
+- KOSPI preset `001`, KOSDAQ preset `101`;
+- decimal (`2,845.67`) and x100 integer (`284567`) index values normalize identically;
+- one source failure is isolated from the primary chart and other comparisons.
 
-## M8
+### Placement and axes
 
-Not started: `ka20005`, `0I`, synchronized comparison axes, normalized return,
-relative strength, beta/correlation, multi-workspace shared data.
+- separate lower pane using its primary right axis;
+- main price pane close-line overlay using a dedicated left secondary axis;
+- multiple secondary-axis columns with independent ranges and precision;
+- comparison color, width, style, label, divisor, decimals, pane title/height;
+- hide/show/delete/reload from the docked `비교` editor;
+- document-wide maximum left-axis width reserved by every pane, preserving candle,
+  volume, indicator, crosshair, and time-axis alignment.
+
+### Remaining M8 work after focused acceptance
+
+- symbol/name search service instead of code-only entry;
+- synchronized timeframe reload policy across all comparison instances;
+- normalized return, relative strength, beta, and correlation modes;
+- measured subscription/series limits and multi-workspace sharing;
+- physical reconnect and intraday soak with multiple stocks and indices.
+
+## Verified implementation baseline
+
+- implementation HEAD: `1e0d0d7dcfd91de05435d69b954e75b573a93bad`
+- Windows CI: `30875659339` (`#1016`)
+- artifact: `8879511685`
+- digest: `sha256:70c9f9e8d36a212d33da3c591121844ff05748170748b48b69fd8112130bf599`
+- workflow permission: read-only
+
+CI passed repository/real-data policy, architecture isolation, all existing tests,
+new indicator parity/replacement tests, comparison lifecycle and render-cache tests,
+`ka20005/0I` index normalization, shared dual-axis geometry, MSVC x64 build,
+clean-tree, and artifact publication.
 
 ## M9
 

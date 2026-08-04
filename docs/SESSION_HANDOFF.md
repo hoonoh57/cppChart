@@ -24,8 +24,8 @@ Read these before changing code:
 The verified implementation passed repository policy, architecture gates, M6/M7
 and interactive-legend integration gates, MSVC x64 shell build, the complete
 headless suite, clean-tree verification, and executable artifact publication.
-Later branch commits may update documentation only; always read the live HEAD after
-pulling.
+Later branch commits update documentation only; always read the live branch HEAD
+after pulling.
 
 ## Exact next-session opening commands
 

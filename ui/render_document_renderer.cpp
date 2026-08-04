@@ -763,6 +763,7 @@ namespace trading::ui
             const AxisRange& dataRange,
             double defaultVisibleSpan,
             const render::Pane& pane,
+            const ValueRange& automaticValues,
             ValueRange& values,
             render::ValueViewport& valueViewport,
             bool legendHovered,
@@ -871,8 +872,8 @@ namespace trading::ui
                             : AutomaticBottomPaddingFraction;
                     render::ResetValueViewport(
                         valueViewport,
-                        values.minimum,
-                        values.maximum,
+                        automaticValues.minimum,
+                        automaticValues.maximum,
                         topPadding,
                         bottomPadding);
                     values = ValueRangeFromViewport(valueViewport);
@@ -886,7 +887,21 @@ namespace trading::ui
                         defaultVisibleSpan,
                         LatestRightPaddingFraction,
                         MaximumRightOverscrollFraction);
-                    valueViewport = {};
+                    const double topPadding =
+                        pane.valueScale == render::PaneValueScale::Fixed
+                            ? 0.0
+                            : AutomaticTopPaddingFraction;
+                    const double bottomPadding =
+                        pane.valueScale == render::PaneValueScale::Fixed
+                            ? 0.0
+                            : AutomaticBottomPaddingFraction;
+                    render::ResetValueViewport(
+                        valueViewport,
+                        automaticValues.minimum,
+                        automaticValues.maximum,
+                        topPadding,
+                        bottomPadding);
+                    values = ValueRangeFromViewport(valueViewport);
                     state.dirty = true;
                 }
             }
@@ -1085,6 +1100,7 @@ namespace trading::ui
                 dataRange,
                 defaultVisibleSpan,
                 pane,
+                automaticValues,
                 values,
                 valueViewport,
                 legendHovered,

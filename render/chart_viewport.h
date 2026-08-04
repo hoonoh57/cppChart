@@ -23,18 +23,23 @@ namespace trading::render
         ChartViewport& viewport,
         AxisCoordinate dataStart,
         AxisCoordinate dataEnd,
-        AxisCoordinate preferredSpan = 0.0) noexcept;
+        AxisCoordinate preferredDataSpan = 0.0,
+        double rightPaddingFraction = 0.0,
+        double maximumRightOverscrollFraction = 0.0) noexcept;
 
     void FollowLatest(
         ChartViewport& viewport,
         AxisCoordinate dataStart,
-        AxisCoordinate dataEnd) noexcept;
+        AxisCoordinate dataEnd,
+        double rightPaddingFraction = 0.0,
+        double maximumRightOverscrollFraction = 0.0) noexcept;
 
     void ClampViewport(
         ChartViewport& viewport,
         AxisCoordinate dataStart,
         AxisCoordinate dataEnd,
-        AxisCoordinate minimumSpan) noexcept;
+        AxisCoordinate minimumSpan,
+        double maximumRightOverscrollFraction = 0.0) noexcept;
 
     void ZoomViewport(
         ChartViewport& viewport,
@@ -42,11 +47,15 @@ namespace trading::render
         AxisCoordinate dataEnd,
         double anchorRatio,
         double wheelSteps,
-        AxisCoordinate minimumSpan) noexcept;
+        AxisCoordinate minimumSpan,
+        double rightPaddingFraction = 0.0,
+        double maximumRightOverscrollFraction = 0.0) noexcept;
 
     void PanViewport(
         ChartViewport& viewport,
         AxisCoordinate dataStart,
         AxisCoordinate dataEnd,
-        double visibleSpanFraction) noexcept;
+        double visibleSpanFraction,
+        double rightPaddingFraction = 0.0,
+        double maximumRightOverscrollFraction = 0.0) noexcept;
 }

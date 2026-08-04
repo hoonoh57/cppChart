@@ -32,7 +32,8 @@ namespace
     std::vector<trading::SymbolCatalogEntry> g_m82RecentSymbols;
     int g_m82ToolbarHighlight = -1;
     bool g_m82ToolbarPopupOpen = false;
-    bool g_m82CatalogRequested = false;
+    double g_m82LastCatalogRequestSeconds = -1000.0;
+    std::size_t g_m82ObservedCatalogSize = 0U;
     std::string g_m82CatalogError;
 
     bool IsSixDigitCode(const std::string& value) noexcept
@@ -80,13 +81,16 @@ namespace
         }
     }
 
+    std::vector<trading::SymbolCatalogEntry> SymbolCatalogSnapshot()
+    {
+        std::lock_guard<std::mutex> lock(g_symbolCatalogMutex);
+        return g_symbolCatalog;
+    }
+
     void RefreshToolbarMatches(const char* query)
     {
-        std::vector<trading::SymbolCatalogEntry> catalog;
-        {
-            std::lock_guard<std::mutex> lock(g_symbolCatalogMutex);
-            catalog = g_symbolCatalog;
-        }
+        const std::vector<trading::SymbolCatalogEntry> catalog =
+            SymbolCatalogSnapshot();
 
         if (query == nullptr || query[0] == '\0') {
             g_m82ToolbarMatches = g_m82RecentSymbols;
@@ -131,6 +135,39 @@ namespace
         entry.market = IsNxtCode(normalized) ? "NXT" : "최근 조회";
         AddRecent(entry);
     }
+
+    void EnsureCatalogRequested()
+    {
+        if (!g_runtimeRunner || !g_runtimeRunner->IsRunning()) return;
+
+        const std::size_t catalogSize = SymbolCatalogSnapshot().size();
+        if (catalogSize > 0U) {
+            g_m82CatalogError.clear();
+            return;
+        }
+
+        const trading::KiwoomRuntimeSnapshot runtime = RuntimeSnapshot();
+        const bool tokenUsable =
+            runtime.orderSubmissionAllowed ||
+            runtime.sessionState == trading::KiwoomSessionState::RegistrationPending ||
+            runtime.sessionState == trading::KiwoomSessionState::ReconciliationPending ||
+            runtime.sessionState == trading::KiwoomSessionState::Ready;
+        if (!tokenUsable) return;
+
+        const double now = NowSeconds();
+        if (now - g_m82LastCatalogRequestSeconds < 3.0) return;
+        g_m82LastCatalogRequestSeconds = now;
+
+        std::string error;
+        if (!RefreshSymbolCatalog(error)) {
+            g_m82CatalogError = error.empty()
+                ? "종목 목록 요청을 시작하지 못했습니다."
+                : error;
+        }
+        else {
+            g_m82CatalogError.clear();
+        }
+    }
 }
 
 bool ImGui::M82InputText(
@@ -153,17 +190,13 @@ bool ImGui::M82InputText(
         return changed;
     }
 
-    const trading::KiwoomRuntimeSnapshot runtime = RuntimeSnapshot();
-    if (!g_m82CatalogRequested &&
-        runtime.sessionState == trading::KiwoomSessionState::Ready)
-    {
-        g_m82CatalogRequested = true;
-        std::string error;
-        if (!RefreshSymbolCatalog(error)) {
-            g_m82CatalogError = error;
-        }
-        else {
-            g_m82CatalogError.clear();
+    EnsureCatalogRequested();
+
+    const std::size_t catalogSize = SymbolCatalogSnapshot().size();
+    if (catalogSize != g_m82ObservedCatalogSize) {
+        g_m82ObservedCatalogSize = catalogSize;
+        if (buffer[0] != '\0' || ImGui::IsItemActive()) {
+            RefreshToolbarMatches(buffer);
         }
     }
 
@@ -216,6 +249,7 @@ bool ImGui::M82InputText(
         ImGui::TextUnformatted("6자리 코드 또는 6자리_AL을 직접 입력할 수 있습니다.");
         ImGui::TextUnformatted("한글 종목명 입력 시 후보를 선택하면 코드가 입력됩니다.");
         ImGui::TextUnformatted("빈 입력란을 클릭하면 최근 선택 종목을 표시합니다.");
+        ImGui::Text("종목명 목록: %zu종목", catalogSize);
         if (!g_m82CatalogError.empty()) {
             ImGui::TextColored(
                 ImVec4(0.95f, 0.30f, 0.30f, 1.0f),

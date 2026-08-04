@@ -45,9 +45,9 @@ account objects. A new indicator must not add a branch to renderer source.
 The application owns the indicator catalog, insertion, duplication, hide/show,
 deletion, parameter validation, and render-plan construction. Multiple instances
 of the same type may share one pane while retaining independent parameters and
-presentation. A complete candidate configuration is validated before replacing the
-active calculation or render plan. Invalid or duplicate state never publishes
-partially.
+presentation. Hiding removes calculation and render contributions; deletion removes
+the definition. A complete candidate set validates before active calculation or
+render plans are replaced. Invalid or duplicate state never publishes partially.
 
 ### 2.5 Legend and selection boundary
 
@@ -86,7 +86,7 @@ the dependent capability and preserve the last valid state where appropriate.
 
 ### 2.10 Scoped UI state
 
-Paired UI stack operations must use one captured condition for both begin and end.
+Paired UI stack operations use one captured condition for both begin and end.
 Callbacks must not invalidate pointers or change the condition used by a later
 matching end operation in the same frame.
 

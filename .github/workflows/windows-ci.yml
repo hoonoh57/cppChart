@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -28,6 +28,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Apply chart and property acceptance fixes
+        if: github.event_name == 'push' && hashFiles('scripts/apply_fixed_chart_and_reference_footer.py') != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python .\scripts\apply_fixed_chart_and_reference_footer.py
+          if ($LASTEXITCODE -ne 0) { throw 'chart/property migration failed' }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .\scripts\apply_fixed_chart_and_reference_footer.py
+          git add -A
+          git commit -m 'Keep chart axis and reference controls visible'
+          git push origin HEAD:${{ github.ref_name }}
+
       - name: Verify repository policy
         shell: pwsh
         run: |
@@ -39,6 +53,7 @@ jobs:
             '.\scripts\apply_comparison_runtime.py',
             '.\scripts\apply_comparison_axis_alignment.py',
             '.\scripts\apply_acceptance_fixes_0j_indicator_ui.py',
+            '.\scripts\apply_fixed_chart_and_reference_footer.py',
             '.\scripts\fix_comparison_migration.py',
             '.\scripts\sitecustomize.py',
             '.\.github\workflows\apply-comparison-upgrade.yml')) {

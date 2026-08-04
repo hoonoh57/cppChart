@@ -20,7 +20,6 @@ namespace trading::ui
         int addPlacement = 0;
         int addValueMode = 0;
         SymbolSearchState addSearch;
-        char searchQuery[96]{};
         char addCode[32]{};
         char addName[64]{};
         std::string error;

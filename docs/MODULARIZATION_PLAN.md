@@ -1,112 +1,96 @@
 # cppChart Modularization and Performance Plan
 
-## Goal
+## Goal and baseline
 
 Preserve verified real Kiwoom minute-bar, `0B`, account, and order paths while
-building detachable feature modules joined to one slim generic renderer.
-
-## Baseline
-
-- fail-closed `TRADING_MODE=KIWOOM_MOCK`
-- OAuth/WebSocket session, account registration/reconciliation, order readiness
-- `ka10080` stock minute bars and selected-symbol `0B` restoration
-- immutable completed history plus mutable live OHLCV/tick-count tail
-- actual positions and PnL; no synthetic production data
-- Windows MSVC build and complete headless suite
+building detachable feature modules joined to one generic renderer. Production
+remains fail-closed and synthetic-free. Windows MSVC build and the complete
+headless suite remain mandatory.
 
 ## Permanent rules
 
-- X coordinates use ordinal bar order and all panes share bar-slot geometry.
-- Renderer consumes only generic documents, series, styles, references, and pane metadata.
-- Indicator catalog, instance lifecycle, parameters, and presentation stay outside renderer/shell.
-- Multiple instances of one type may share a pane with independent parameters/colors.
-- Pane separators are generic, draggable, and minimum-height constrained.
-- Viewport, selection, and pane sizes remain stable during real-time live-tail updates.
+- ordinal bar-order X axis and shared pane slot geometry;
+- renderer consumes generic documents/series/styles/references/pane metadata only;
+- indicator catalog, instance lifecycle, parameters, and presentation stay outside renderer/shell;
+- multiple same-type instances may share one pane with independent parameters/colors;
+- draggable pane separators preserve minimum height and live-update stability;
+- viewport, selection, and pane sizes survive live-tail replacement.
 
 ## M1-M6
 
-Status: complete. M6 was accepted on the actual screen/GPU path.
-
-Delivered: architecture/real-data gates, `MarketDataModule`,
-`ChartWorkspaceModule`, `FeatureRegistry`, execution levels, generic renderer,
-ordinal axis, shared history/live tail, value grids, synchronized crosshairs,
-pan/zoom/latest reset, boundaries/tooltips, and real `0B` viewport preservation.
+Complete and M6 accepted on the actual screen/GPU path. Delivered real-data gates,
+market/workspace/feature modules, execution levels, generic renderer, ordinal axis,
+shared history/live tail, value grids, crosshairs, pan/zoom/latest reset,
+boundaries/tooltips, and real `0B` viewport preservation.
 
 ## M7 — reusable and dynamically managed indicators
 
-Status: engine, production wiring, legends, dynamic instance manager, pane resizing,
-styles, reference-line editing, MSVC build, and full headless regression are
-implemented. Focused actual-screen acceptance remains.
+Implementation and automated verification are complete. Focused actual-screen
+acceptance remains.
 
 ### Engine
 
-- one batch/incremental implementation per indicator
-- deterministic `IndicatorSpec` serialization
-- maximum eight outputs/readiness mask
-- same-timestamp live replacement and fail-closed error handling
-- explicit `Bar.TradingDateYmd` and session VWAP reset
-- SMA, JMA Value/Up/Down/Slope, VWAP bands, OBV/Signal/Direction, Wilder ADX
+One batch/incremental implementation per indicator, deterministic specs, eight
+output channels/readiness mask, same-timestamp replacement, fail-closed errors,
+explicit trading date/session VWAP, and SMA/JMA/VWAP/OBV/ADX implementations.
 
 ### Dynamic instances
 
-`IndicatorInstanceDefinition` combines one spec with visibility, output bindings,
-pane placement, colors, widths, styles, and references.
+`IndicatorInstanceDefinition` combines one calculation spec with visibility,
+output bindings, pane placement, colors, widths, styles, and references.
 
 Implemented:
 
-- property-grid top selector and `지표 추가` dialog
-- default/price/new-lower/existing-lower target selection
-- duplicate with unique ID and distinguishable color
-- independent parameters for same-type instances
-- same-pane overlay through preserved/remappable pane IDs
-- per-output visibility and pane assignment
-- hide/show that stops/restores calculation and rendering
-- permanent delete and real market-only fallback when none are visible
-- complete candidate validation before module/render-plan replacement
+- top selector and Add dialog;
+- default/price/new/existing pane targets;
+- duplicate with unique ID/color and preserved pane placement;
+- independent same-type parameters and same-pane overlay;
+- output visibility/pane assignment;
+- hide/show and permanent delete;
+- market-only fallback when no indicators are visible;
+- complete candidate validation before module/plan replacement.
 
-### Presentation
+### Presentation and panes
 
-- per-output primary/secondary colors, width, solid/dashed/dotted style
-- pane default height, auto/fixed/symmetric scale, min/max, decimals
-- create/edit/hide/delete references and quick overbought/oversold levels
-- generic reference labels and owner-based selection/highlighting
-- draggable pane splitters with resize cursor, hover highlight, minimum height
-- user drag state retained across live revisions
-- explicit configured default-height changes applied without resetting every minute
-- stable ImGui scopes and copied selection state across vector replacement
+- primary/secondary colors, width, solid/dashed/dotted style;
+- pane height, auto/fixed/symmetric scale, min/max, decimals;
+- reference CRUD and overbought/oversold quick creation;
+- owner-based legends, selection, and highlighting;
+- draggable separators with resize cursor/highlight/minimum height;
+- persistent user resize state and deliberate configured-default synchronization;
+- stable ImGui scopes and copied state across vector replacement.
 
-### Verification baseline
+### Verified baseline
 
-- implementation HEAD: `dba98bb7bb4690aeee170b2c6e971f1fa5aa1bc1`
+- implementation: `dba98bb7bb4690aeee170b2c6e971f1fa5aa1bc1`
 - Windows CI: `30868440522` (`#922`)
 - artifact: `8877052838`
 - digest: `sha256:9f2e83f83f807b198a7a68c1d1743b4da857dfa69fccd9335e31f8a57c6976c7`
-- workflow permission: read-only
+- workflow: read-only
 
-CI passed repository/real-data policy, architecture boundaries, generic-renderer
-no-indicator-name gates, instance lifecycle/shared-pane/color tests,
-style/reference/pane-layout tests, MSVC x64 build, full legacy/M7 suite, clean-tree,
-and artifact publication.
+CI passed repository/real-data policy, architecture isolation, instance lifecycle/
+shared-pane/color tests, style/reference/pane-layout tests, MSVC x64 build, full
+legacy/M7 suite, clean-tree, and artifact publication.
 
-### Focused actual-screen acceptance
+### Actual-screen acceptance
 
-Confirm add, duplicate, same-pane overlay with different parameter/color, hide/show,
-delete, output styling, reference CRUD/overbought/oversold, pane drag-resize, and
-selection/viewport/pane-size preservation during actual `ka10080 + 0B` updates.
+Confirm add, duplicate, same-pane overlay with different parameter/color,
+hide/show/delete, output styling, reference CRUD/overbought/oversold, pane
+resize, and selection/viewport/pane-size preservation during actual `ka10080 + 0B`.
 
-## M8 — index and multi-symbol comparison
+## M8
 
-Status: not started. Planned: `ka20005`, `0I`, synchronized axes, normalized return,
-relative strength, beta/correlation, and multiple workspaces sharing source data.
+Not started: `ka20005`, `0I`, synchronized comparison axes, normalized return,
+relative strength, beta/correlation, multi-workspace shared data.
 
-## M9 — strategy, replay, and trade results
+## M9
 
-Status: not started. Planned: one evaluator for replay/backtest/live decisions and
-generic signal/order/fill/result chart contributions.
+Not started: one strategy evaluator for replay/backtest/live and generic
+signal/order/fill/result chart contributions.
 
 ## Continuous verification
 
 Every milestone runs repository policy, architecture boundaries, real-data-only
-checks, MSVC x64 build, full headless suite, clean-tree verification, and artifact
-publication. User testing is reserved for visual/GPU behavior, actual market data,
-physical reconnect, order/fill behavior, and soak performance.
+checks, MSVC build, full headless suite, clean-tree, and artifact publication. User
+testing is reserved for actual data, visual/GPU interaction, reconnect, orders,
+fills, and soak.

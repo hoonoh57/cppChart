@@ -57,6 +57,8 @@ namespace trading::app
                 static_cast<double>(bar.close);
         }
 
+        // FindFirstCommonAnchor contract: normalized comparison modes keep
+        // the first valid common timestamp fixed for the complete query range.
         result.points.reserve(comparisonBars.size());
         for (const Bar& bar : comparisonBars) {
             const double comparison = RawValue(bar, valueDivisor);

@@ -102,6 +102,35 @@ appropriate.
 Paired UI stack operations use one captured condition for begin/end. Callbacks must
 not leave pointers or references alive across same-frame vector replacement.
 
+### 2.11 Delivery-plan integrity and acceptance
+
+An implementation plan approved by the user is an execution contract. Its items
+must be tracked explicitly and may not be silently removed, reduced, reordered, or
+declared complete in aggregate while approved items remain unfinished.
+
+For user-facing work, the primary acceptance unit is the complete user path:
+
+```text
+input → candidates/state → selection → confirmation → action → visible result
+```
+
+A function, parser, cache, test, build, CI run, or artifact may prove an internal
+contract but does not prove the user path is complete. Status terms are constrained:
+
+- implementation in progress: the path is not connected;
+- code implementation complete: the path is connected but not visually accepted;
+- automated verification complete: focused/full tests and build passed;
+- actual-screen acceptance complete: the approved user path was observed working.
+
+The unqualified word `complete` is reserved for actual-screen acceptance when the
+milestone is user-visible.
+
+Full CI is a final integration gate, not the inner development loop. Focused source
+changes and focused tests precede it. Identical failures may not be retried with the
+same method more than twice; the third attempt must change the implementation or
+verification method. Workflow write-back and temporary migration scripts are not
+normal source-editing mechanisms.
+
 ## 3. Execution levels
 
 Every major feature supports `Off`, `Standby`, `Visible`, and `Active`.
@@ -141,6 +170,7 @@ may exist in feature-owned catalogs/factories but not in the renderer or shell.
 
 A change is complete only when boundaries are documented, success/failure paths are
 covered headlessly, Windows MSVC build succeeds, CI guards the invariant, temporary
-migration logic and elevated workflow permissions are removed, and the handoff
-records exact verified state. User testing is reserved for actual data, visual/GPU
-interaction, physical reconnect, orders/fills, and long-running soak.
+migration logic and elevated workflow permissions are removed, the handoff records
+exact verified state, and every approved user-visible path has actual-screen
+acceptance. User testing is reserved for actual data, visual/GPU interaction,
+physical reconnect, orders/fills, and long-running soak.

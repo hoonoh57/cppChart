@@ -28,7 +28,6 @@ namespace
         trading::PriceWon close)
     {
         trading::Bar bar;
-        bar.openTimestampMs = timestamp - 60000;
         bar.closeTimestampMs = timestamp;
         bar.open = close;
         bar.high = close;

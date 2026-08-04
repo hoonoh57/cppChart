@@ -15,17 +15,17 @@ Read these before changing code:
 - development branch: `p2/kiwoom-mock-gateway`
 - PR: `#1`, Draft
 - protected baseline: `main` at `f1a7d8db7a5d1b145781bfcb6ce11c2e24ef6683`
-- verified M7 implementation HEAD: `da0154fae1784709caf19eb5a10932832385174e`
-- production shell wiring commit: `b5c3b31c07ef790f68ec4c7ec56d66294c93607f`
-- successful Windows CI: `30855098423` (`Windows CI #829`)
-- successful CI artifact id: `8872240396`
-- artifact digest: `sha256:b0a730d28afea64d4db83c113eb43cda4a260ffcbe77af238f54952e7f82a830`
+- verified implementation HEAD: `8ed98e94abd32fdd4e5d1e93604da7708a2f9bc0`
+- successful Windows CI: `30864225906` (`Windows CI #857`)
+- successful CI artifact id: `8875539604`
+- artifact digest: `sha256:af4026373e47bc77f7b6f3420887a19156639378beb174cff8a56b98487ffc9d`
 - production policy: real Kiwoom mock data only; no synthetic fallback
 
 The verified implementation passed repository policy, architecture gates, M6/M7
-shell integration gates, MSVC x64 shell build, the complete headless suite,
-clean-tree verification, and executable artifact publication. Later branch commits
-may be documentation-only; always read the live HEAD after pulling.
+and interactive-legend integration gates, MSVC x64 shell build, the complete
+headless suite, clean-tree verification, and executable artifact publication.
+Always read the live branch HEAD after pulling in case a later documentation-only
+commit exists.
 
 ## Exact next-session opening commands
 
@@ -64,6 +64,8 @@ multi-symbol trading-result visualization without returning to a monolithic
 - Financial X coordinates use ordinal bar order rather than elapsed wall-clock
   milliseconds.
 - `Off / Standby / Visible / Active` must control real work and retained state.
+- Chart selection resolves to a feature-owned instance ID. Render child series do
+  not become independent editable indicator objects.
 
 ## Verified real-data and M1-M6 baseline
 
@@ -73,27 +75,15 @@ multi-symbol trading-result visualization without returning to a monolithic
 - selected-symbol `0B` subscription, unsubscribe, and reconnect restoration
 - same-minute live-tail OHLCV/tick-count replacement
 - actual account positions and PnL
-- `FeatureRegistry`, `MarketDataModule`, and `ChartWorkspaceModule`
 - generic `RenderDocument` and generic ImGui renderer
-- ordinal trading-time axis
-- common candle/histogram slot geometry
-- pane-aware `ValueGrid`
-- synchronized time crosshair and pane-local value crosshair
+- ordinal trading-time axis and common multi-pane slot geometry
+- synchronized timestamp crosshair and pane-local value crosshair
 - left/right drag pan, mouse-anchored wheel zoom, double-click latest reset
 - actual `0B` updates preserve a manually panned viewport
 
 M6 visual/GPU acceptance was completed successfully by the user. M6 is closed.
 
 ## M7 reusable indicator engine — implementation and CI complete
-
-### Core calculation contract
-
-- one `IndicatorInstance` implementation shared by batch and incremental paths
-- deterministic `IndicatorSpec` JSON serialization/deserialization
-- maximum eight fixed output channels with readiness mask
-- same-timestamp live-bar replacement with state restoration
-- descending timestamp and invalid-input fail-closed handling
-- failed batch calculation does not publish partial output
 
 ### Implemented indicators
 
@@ -103,79 +93,119 @@ M6 visual/GPU acceptance was completed successfully by the user. M6 is closed.
 - ADX: Wilder `ADX`
 - VWAP: `Value / Upper1 / Lower1 / Upper2 / Lower2`
 
-### Trading-date contract
+### Calculation and data contract
 
-`Bar` carries explicit `TradingDateYmd`. REST `cntr_tm` minute bars and new bars
-created from `0B` preserve the same KST trading date. VWAP resets by that explicit
-session key rather than inferring a date from display text or local wall time.
+- one `IndicatorInstance` implementation shared by batch and incremental paths
+- deterministic `IndicatorSpec` JSON serialization/deserialization
+- maximum eight fixed output channels with readiness mask
+- same-timestamp live-bar replacement with state restoration
+- invalid or descending input fails closed without partial batch publication
+- explicit `Bar.TradingDateYmd` from REST `cntr_tm` and `0B` new bars
+- VWAP resets by the explicit KST trading-date key
 
-### Module and generic rendering contract
+### Module and renderer contract
 
-- `IndicatorModule` owns execution levels, revisions, metrics, completed-history
+- `IndicatorModule` owns execution level, revisions, metrics, completed-history
   reuse, and live-tail incremental calculation.
-- `IndicatorRenderAdapter` converts outputs into generic `LineSeries`,
-  `HistogramSeries`, and `ReferenceLine` contributions.
-- `DefaultIndicatorRenderPlan` maps the five initial indicators without adding
-  indicator switches to the renderer.
-- ADX publishes 20/25 reference lines; JMA slope publishes a zero reference line.
-- `ChartWorkspaceModule` composes market and indicator revisions independently and
-  retains the last good immutable document when a contribution fails.
-- price and volume use stable pane IDs `price` and `volume`, so price overlays reuse
-  the existing price pane rather than creating a duplicate pane.
+- `IndicatorRenderAdapter` publishes only generic lines, histograms, and reference
+  lines.
+- `DefaultIndicatorRenderPlan` maps the initial indicators outside the renderer.
+- ADX publishes 20/25 references; JMA slope publishes a zero reference.
+- market and indicator revisions are composed independently into one immutable
+  chart document.
+- stable pane IDs `price` and `volume` prevent duplicate price panes.
+- renderer source contains no indicator-name or calculation branches.
 
 ### Production shell wiring
 
-- `indicators` is registered in `FeatureRegistry` with `market-data` dependency.
-- `InitialIndicatorSpecs()` and the default render plan are configured once at
-  startup.
-- the actual shared completed bars and live tail are passed to
-  `IndicatorMarketSource`.
-- indicator calculation runs only while the feature is `Visible` or `Active`.
-- the indicator-aware `ChartWorkspaceModule::UpdateMarketChart` overload publishes
-  one immutable market-plus-indicator document.
-- indicator processing time, retained bytes, event/merge counts, symbol count,
-  output-series count, readiness, and errors are published to diagnostics.
-- `Off` releases calculated state and render-adapter caches.
-- indicator initialization or calculation failure retains a usable market-only
-  chart and exposes the fault instead of adding synthetic values.
-- all M7 core and application sources are linked into `shell.exe` by `build.bat`.
-- `ui/render_document_renderer.cpp` remains feature-agnostic.
+- `indicators` is registered with `market-data` dependency.
+- initial specs and render plan are configured once during startup.
+- shared completed bars and the live tail feed `IndicatorMarketSource`.
+- calculation runs only while the feature is `Visible` or `Active`.
+- indicator timing, memory, events, symbols, output count, readiness, and faults are
+  published to diagnostics.
+- `Off` releases calculation state and render-adapter caches.
+- indicator failure retains the real market-only chart and reports the fault.
 
-### M7 verification
+The supplied real-screen screenshot confirmed that the price overlays, JMA Slope,
+OBV, ADX, and reference lines render on the actual chart. The missing identification
+and edit interaction reported from that screen is addressed below.
 
-Windows CI `30855098423` (`#829`) passed:
+## Interactive pane legends and indicator properties — implementation complete
 
-- repository and temporary-script policy
-- core and modular architecture boundaries
-- real-data-only production policy
-- M6 interaction contracts
-- M7 production shell integration markers and source links
-- generic renderer no-indicator-branch gate
+### Generic render contract
+
+- every pane can carry explicit `LegendEntry` metadata
+- every render series can carry a generic `ownerId`
+- selectable legends require a non-empty feature-owned owner ID
+- market price and volume legends are non-selectable
+- indicator output lines, histograms, and reference lines resolve to their parent
+  indicator instance rather than to an individual child output
+
+### Legend presentation and selection
+
+- legends render at the upper-left of each pane and wrap when space is limited
+- the price pane groups JMA outputs and VWAP bands by indicator instance
+- lower panes expose JMA Slope, OBV Signal, and ADX labels with current parameters
+- single click selects the indicator instance
+- double click selects it and focuses the docked `프로퍼티` window
+- selected indicator outputs are highlighted generically across all of their panes
+- legend hit-testing suppresses chart pan, zoom, and latest-reset interaction while
+  the pointer is over a legend
+
+Default labels include:
+
+- `SMA 20`
+- `JMA 20 P0 Pow2`
+- `JMA Slope 20`
+- `VWAP 1/2`
+- `OBV Signal 20`
+- `ADX 14`
+
+### Property-grid contract
+
+`app/indicator_properties.*` owns editable parameter metadata and validation:
+
+- SMA: `period`
+- JMA: `period`, `phase`, `power`
+- VWAP: `std_dev_1`, `std_dev_2`
+- OBV: `signal_period`
+- ADX: `period`
+
+The docked `프로퍼티` window provides Apply and Revert. Apply validates a complete
+candidate spec set, rebuilds the default render plan, reconfigures the indicator
+module, invalidates the chart contribution, and recalculates from the same shared
+real market history. Invalid values are rejected without publishing a partial
+configuration.
+
+### Verification
+
+Windows CI `30864225906` (`#857`) passed:
+
+- temporary implementation files removed and workflow permissions restored to read
+- architecture and real-data-only boundaries
+- generic legend contract and owner-ID validation
+- generic renderer selection and double-click markers
+- renderer no-indicator-name gate
+- indicator property metadata and range-validation tests
+- render-adapter grouped legend and owner tests
 - MSVC x64 `shell.exe` build
-- every indicator parity/live-tail/reset/error fixture
-- IndicatorModule cache and monotonic revision fixtures
-- generic render adapter and reference-line fixtures
-- default render-plan fixture
-- indicator-aware ChartWorkspace fixture
-- IndicatorWorkspaceCoordinator fixture
-- complete legacy headless suite
+- complete legacy and M7 headless suite
 - clean source-tree verification
 - executable artifact publication
 
-## Current boundary: focused M7 real-screen acceptance remains
+## Current boundary: focused visual interaction acceptance remains
 
-The code, production wiring, and automated verification are complete. M7 is not
-marked visually accepted until the actual Kiwoom screen confirms the following:
+Run the actual shell and confirm:
 
-1. a selected symbol loads from real `ka10080` and continues through `0B`;
-2. SMA, JMA, and VWAP appear in the existing price pane with no duplicate price
-   pane;
-3. JMA Slope, OBV, and ADX appear in separate lower panes;
-4. ADX 20/25 and JMA slope zero reference lines are visible;
-5. timestamp crosshair and ordinal bar alignment remain synchronized across panes;
-6. manual pan/zoom remains stable while the live tail is replaced;
-7. turning the Indicators feature Off removes indicator work/contributions, and
-   returning it to Visible or Active restores them.
+1. the upper-left of the price pane shows stock, SMA, JMA, and VWAP legends;
+2. JMA Slope, OBV, and ADX panes show their own legends;
+3. single click highlights the complete indicator instance;
+4. double click activates the docked `프로퍼티` tab/window;
+5. changing one parameter and pressing Apply updates both calculation and legend;
+6. Revert restores the current applied values before Apply;
+7. clicking a legend does not pan, zoom, or reset the chart;
+8. live `0B` replacement continues without losing selection or manual viewport.
 
 ## Exact local acceptance commands
 
@@ -185,13 +215,13 @@ Set-Location "E:\2026\gpt\cpp\shell"
 git fetch origin
 git switch p2/kiwoom-mock-gateway
 git pull --ff-only origin p2/kiwoom-mock-gateway
-call build.bat
+.\build.bat
 .\shell.exe
 ```
 
-When the focused screen test is normal, record M7 as closed and select the next
-milestone from M8 index/multi-symbol comparison or the next explicitly prioritized
-product requirement.
+If this focused interaction test is normal, record the interactive legend/property
+extension as accepted and close M7. The next product milestone is then M8 index and
+multi-symbol comparison unless the user explicitly reprioritizes another feature.
 
 ## PR policy
 

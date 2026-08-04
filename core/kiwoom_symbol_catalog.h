@@ -1,6 +1,7 @@
-#pragma once
+﻿#pragma once
 
 #include "kiwoom_protocol.h"
+#include "kiwoom_reconciliation.h"
 
 #include <string>
 #include <vector>

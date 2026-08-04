@@ -18,4 +18,8 @@ source = source.replace(
     "if (continuation.hasMore && g_runtimeRunner) {",
     "if (continuation.continueYn == \"Y\" && !continuation.nextKey.empty() && g_runtimeRunner) {")
 
-exec(compile(source, "apply_m8_search_normalized.py", "exec"), {"__name__": "__main__"})
+context = {
+    "__name__": "__main__",
+    "__file__": str(root / "scripts" / "apply_m8_search_normalized.py")
+}
+exec(compile(source, "apply_m8_search_normalized.py", "exec"), context)

@@ -30,52 +30,32 @@ git status
 git rev-parse HEAD
 ```
 
-## Accepted baseline
+M1-M6 remain complete. M7 dynamic indicator management is user-accepted as highly
+stabilized. Indicator catalog: SMA, EMA, JMA, Bollinger Bands, RSI, MACD, DMI,
+SuperTrend, VWAP, OBV, and Wilder ADX.
 
-M1-M6 remain complete. The user confirmed dynamic indicator management is highly
-stabilized, so M7 acceptance is closed unless a new defect is reported.
+The docked `비교` editor supports stock/index sources, arbitrary code/label,
+KOSPI `001` and KOSDAQ `101`, separate lower pane or price-pane secondary axis,
+style/divisor/precision/pane settings, and add/reload/hide/show/delete.
 
-## Indicator catalog
+Data and rendering contracts:
 
-SMA, EMA, JMA, Bollinger Bands, RSI, MACD, DMI, SuperTrend, VWAP, OBV, and Wilder
-ADX. All share batch/incremental calculation, same-timestamp replacement,
-fail-closed validation, dynamic instances, styles, references, and pane placement.
+- stock minutes plus multiple stock `0B` live tails;
+- `ka20005` index minutes plus multiple `0I` live tails;
+- reconnect restoration, explicit unsubscribe, isolated source errors;
+- decimal/x100 index-value normalization;
+- generic `axisId`, multiple left axes, and document-wide shared axis width;
+- completed comparison render-point reuse.
 
-## Comparison series
+Verified code: CI #1016 passed all policies, architecture gates, new indicator and
+comparison tests, index normalization, dual-axis geometry, MSVC x64 build, complete
+suite, clean-tree, and artifact publication.
 
-The docked `비교` editor supports stock or index/industry sources, arbitrary code
-and label, KOSPI `001`/KOSDAQ `101` presets, separate lower pane or price-pane
-secondary axis, style/divisor/precision/pane settings, and add/reload/hide/show/delete.
+Actual-screen acceptance: verify new indicators; KOSPI/KOSDAQ separate panes;
+stock/index price overlays; pane/crosshair alignment; comparison style controls;
+reload/hide/show/delete; `0B`/`0I` live state preservation; and failed-source
+isolation. Return screenshots and visible logs only for failures.
 
-- stock history and multiple stock `0B` live tails;
-- `ka20005` index history and multiple `0I` live tails;
-- reconnect restoration and explicit unsubscribe;
-- isolated source state/error/revision/cache;
-- decimal and x100 index values normalized identically;
-- separate pane primary right axis or price overlay left secondary axis;
-- multiple left-axis columns with document-wide shared width;
-- completed comparison point reuse on live-only updates.
-
-## Verification
-
-CI #1016 passed policies, architecture gates, new indicator tests, comparison
-lifecycle/live/render tests, index normalization, dual-axis geometry, MSVC x64
-build, complete legacy/new suite, clean-tree, and artifact publication.
-
-## Actual-screen acceptance
-
-```powershell
-.\build.bat
-.\shell.exe
-```
-
-Verify new indicators; KOSPI/KOSDAQ separate panes; stock/index price overlays;
-pane/crosshair alignment; comparison style editing; reload/hide/show/delete;
-`0B`/`0I` updates preserving viewport, selection, and pane sizes; and isolation of a
-failed comparison request.
-
-Return screenshots and the visible log line only for failed items. Next after
-acceptance: code/name search and normalized relative-strength modes.
-
-PR #1 remains Draft until actual order/account, physical and multi-source reconnect,
-and intraday soak acceptance are complete.
+Next after acceptance: code/name search and normalized relative-strength modes.
+PR #1 remains Draft until order/account, physical and multi-source reconnect, and
+intraday soak acceptance are complete.

@@ -2,70 +2,58 @@
 
 ## Goal
 
-Preserve the verified real Kiwoom minute-bar, `0B`, account, and order paths while
-converting the shell from a growing monolith into detachable major feature modules
-joined to one slim generic renderer contract.
-
-The plan deliberately avoids an object-per-value design and does not introduce a
-DLL plugin ABI before the internal contracts stabilize.
+Preserve verified real Kiwoom minute-bar, `0B`, account, and order paths while
+building detachable major feature modules joined to one slim generic renderer.
 
 ## Baseline to preserve
 
 - fail-closed `TRADING_MODE=KIWOOM_MOCK`
-- OAuth, WebSocket login, account-event registration, reconciliation, and order readiness
-- `ka10080` real stock minute bars
-- selected-symbol `0B` subscription with reconnect restoration
-- live current-bar OHLCV and tick-count replacement
-- actual account positions and PnL
-- no synthetic production data
-- broker-readiness-gated liquidation
+- OAuth/WebSocket session, account-event registration, reconciliation, and order readiness
+- `ka10080` stock minute bars and selected-symbol `0B` restoration
+- mutable live OHLCV/tick-count tail over immutable completed history
+- actual positions and PnL; no synthetic production data
 - Windows MSVC build and complete headless suite
 
 ## Permanent rendering and interaction rules
 
-- Financial X coordinates use actual bar order, not elapsed wall-clock time.
-- Every visible bar slot has one shared horizontal pitch across all panes.
-- Candle, volume, indicator histogram, marker, and trade-result series align to that geometry.
-- Pane-local Y interaction belongs to the pane; timestamp cursors may synchronize.
-- Value snapping is supplied through generic pane metadata such as `ValueGrid`.
-- The renderer contains no broker, symbol, indicator, strategy, or parameter-schema branches.
-- Drag, zoom, crosshair, and manual viewport state remain stable during real `0B` updates.
-- Legend presentation and hit-testing are generic renderer behavior.
-- Selection resolves through a generic `ownerId`; child outputs do not become separate editable objects.
-- Parameter metadata, validation, Apply/Revert, and recalculation belong to the feature/application layer.
+- horizontal coordinates use ordinal bar order;
+- every pane shares one bar-slot geometry;
+- renderer consumes only generic document metadata and standard series;
+- indicator catalog, parameters, instance lifecycle, and style editing stay outside the renderer;
+- viewport, crosshair, selection, and pane sizes remain stable during live-tail updates;
+- pane separators are generic, draggable, minimum-height constrained controls;
+- multiple indicator instances may share one pane with independent colors and parameters.
 
-## Milestones M1-M6
+## M1-M6
 
 Status: complete. M6 was accepted on the actual screen/GPU path.
 
-Delivered across M1-M6:
+Delivered:
 
-- architecture constitution and regression gates
-- `MarketDataModule`, `ChartWorkspaceModule`, and `FeatureRegistry`
+- architecture and real-data-only gates
+- `MarketDataModule`, `ChartWorkspaceModule`, `FeatureRegistry`
 - generic `RenderDocument` and ImGui renderer
 - `Off / Standby / Visible / Active`
-- ordinal trading-time axis and common multi-pane slot geometry
-- immutable completed history plus mutable live tail
-- value grids, crosshairs, pan/zoom, latest reset, boundaries, and tooltips
-- actual `0B` updates preserving a manually panned viewport
+- ordinal axis, shared history/live tail, pane value grids
+- synchronized crosshairs, pan/zoom, latest reset, boundaries/tooltips
+- actual `0B` updates preserving manually panned viewport state
 
-## Milestone M7 — reusable indicator engine
+## M7 — reusable and dynamically managed indicators
 
-Status: calculation engine, data contract, modules, generic render contribution,
-production shell wiring, interactive legends/properties, architecture gates, MSVC
-build, and complete headless regression are complete. Focused visual interaction
-acceptance remains.
+Status: engine, production wiring, legends, instance manager, pane resizing,
+styles, reference-line editing, MSVC build, and complete headless regression are
+implemented. Focused actual-screen acceptance remains.
 
-### Verified indicator core
+### Calculation engine
 
 - one batch/incremental implementation per indicator
 - deterministic `IndicatorSpec` serialization
-- maximum eight output channels and readiness mask
-- same-timestamp live-bar replacement
+- maximum eight outputs and readiness mask
+- same-timestamp live-tail replacement
 - reset, invalid-input, descending-time, and fail-closed contracts
-- no partial batch output after failure
+- explicit `Bar.TradingDateYmd` and session VWAP reset
 
-Initial indicators:
+Implemented indicators:
 
 - SMA: Value
 - JMA: Value / Up / Down / Slope
@@ -73,112 +61,95 @@ Initial indicators:
 - OBV: Value / Signal / Direction
 - ADX: Wilder ADX
 
-### Verified data and application contract
+### Dynamic instance configuration
 
-- explicit, validated `Bar.TradingDateYmd`
-- REST `cntr_tm` and `0B` new-bar trading-date preservation
-- VWAP session reset by `TradingDateYmd`
-- `IndicatorModule` owns execution level, cache, revisions, metrics, and calculation
-- completed output is shared across live-tail replacements
-- `IndicatorRenderAdapter` publishes generic lines, histograms, references, and legends
-- stable `price` and `volume` pane IDs prevent duplicate price panes
-- `ChartWorkspaceModule` composes market and indicator revisions independently
-- failure retains the last good or market-only real document
-- all indicator sources are linked into production `shell.exe`
+`IndicatorInstanceDefinition` owns one calculation spec plus presentation and
+lifecycle metadata. The active definition set supports:
 
-### Interactive legend and property extension
+- top-of-property-grid indicator selection;
+- Add dialog for SMA/JMA/VWAP/OBV/ADX;
+- duplicate with unique ID and distinguishable color variant;
+- visible/hidden state and permanent deletion;
+- independent parameter sets for multiple instances of one type;
+- per-output visibility and pane assignment;
+- insertion into default, price, new lower, or existing lower pane;
+- same-pane overlay of duplicated/differently parameterized instances;
+- complete candidate validation before module/plan replacement.
 
-Implemented:
+Hidden instances do not calculate or render. Removing the final visible instance
+falls back to the real market-only chart rather than introducing dummy values.
 
-- explicit pane `LegendEntry` collections
-- generic `ownerId` on render series and references
-- upper-left pane legends with wrapping and color swatches
-- grouped legends for multi-output JMA and VWAP instances
-- lower-pane JMA Slope, OBV, and ADX labels
-- single-click instance selection
-- double-click focus of the docked `프로퍼티` window
-- generic highlighting of all outputs owned by the selected instance
-- legend hit-test isolation from pan, zoom, and latest reset
-- feature-owned descriptors and range validation
-- Apply/Revert for SMA, JMA, VWAP, OBV, and ADX parameters
-- validated plan/module reconfiguration from the same shared real history
+### Presentation and property editing
 
-Windows CI `30864225906` (`#857`) passed:
+The feature-owned manager supports:
 
-- repository and temporary-file policy
-- architecture and real-data-only boundaries
-- M6/M7 and legend/property integration gates
+- output primary/secondary colors;
+- line width and solid/dashed/dotted style;
+- pane default height, auto/fixed/symmetric value scale, fixed min/max, decimals;
+- create/edit/hide/delete reference lines;
+- quick overbought and oversold reference creation;
+- Apply/Revert with stable ImGui begin/end scope;
+- safe vector replacement using copied selection state rather than invalid pointers.
+
+The generic renderer supports:
+
+- explicit pane legends and owner-based selection/highlighting;
+- grouped multi-output indicator legends;
+- styled lines/references without indicator-name branches;
+- reference labels;
+- drag-resizable pane separators with resize cursor and highlighted border;
+- preservation of user-resized weights across live revisions;
+- adoption of an explicitly changed configured pane default.
+
+### Verification
+
+Final code and read-only workflow baseline:
+
+- implementation HEAD: `dba98bb7bb4690aeee170b2c6e971f1fa5aa1bc1`
+- Windows CI: `30868440522` (`#922`)
+- artifact: `8877052838`
+- digest: `sha256:9f2e83f83f807b198a7a68c1d1743b4da857dfa69fccd9335e31f8a57c6976c7`
+
+CI passed:
+
+- repository/temporary-file and real-data-only policy
+- core/module/workspace/dynamic-indicator architecture gates
 - generic renderer no-indicator-name gate
-- grouped legend/owner adapter tests
-- property metadata/range tests
-- MSVC x64 shell build
-- complete headless suite
-- clean-tree verification and artifact publication
+- instance hide/duplicate/shared-pane/color tests
+- style/reference and pane-weight tests
+- MSVC x64 `shell.exe` build
+- complete legacy and M7 headless suite
+- clean-tree verification and executable publication
 
-### Remaining M7 acceptance
+### Focused M7 visual acceptance
 
-Run one actual `ka10080 + 0B` screen test and confirm:
+Confirm on actual `ka10080 + 0B` data:
 
-1. price and lower-pane legends are readable and grouped correctly;
-2. single click selects/highlights the complete indicator instance;
-3. double click focuses the property window;
-4. Apply updates calculation and parameterized legend label;
-5. Revert restores applied values before Apply;
-6. legend interaction does not alter viewport state;
-7. selection and viewport survive live-tail replacement.
+1. add a new indicator from the property-grid top button;
+2. duplicate one indicator and overlay both instances in the same pane;
+3. change parameters and assign distinguishable colors/styles/widths;
+4. hide/show and delete an instance;
+5. create/edit/delete a reference or overbought/oversold line;
+6. drag pane separators and verify the resize cursor, highlight, and minimum height;
+7. verify selection, viewport, and pane sizes remain stable during `0B` updates.
 
-After this focused acceptance, M7 can be marked complete.
-
-## Milestone M8 — index and multi-symbol comparison
+## M8 — index and multi-symbol comparison
 
 Status: not started.
 
-Planned:
+Planned: `ka20005`, `0I`, synchronized symbol/index axes, normalized return,
+relative strength, beta/correlation, and multiple workspaces sharing source data.
 
-- `ka20005` index minute bars
-- `0I` real-time index values
-- synchronized symbol/index axes
-- normalized return, relative strength, beta, and correlation
-- multiple workspaces sharing source data
-
-Acceptance:
-
-- missing index data does not corrupt stock data
-- comparison may be Off without changing the main chart
-- measured and enforced multi-symbol limits
-
-## Milestone M9 — strategy, replay, and trade results
+## M9 — strategy, replay, and trade results
 
 Status: not started.
 
-Planned:
-
-- one strategy evaluator for replay, backtest, monitoring, and live decisions
-- signal, order, fill, average-price, stop, target, and result contributions
-- per-symbol and portfolio result visualization
-
-Acceptance:
-
-- deterministic replay equals batch backtest for the same normalized event stream
-- live events use the same evaluator
-- results remain generic renderer contributions
+Planned: one evaluator for replay/backtest/live decisions and generic signal/order/
+fill/result chart contributions.
 
 ## Continuous verification
 
-Every implementation milestone runs:
-
-- repository and secret-file policy
-- core dependency boundary
-- real-data-only production checks
-- modular architecture checks
-- MSVC x64 shell build
-- complete headless suite
-- clean working-tree verification
-- executable artifact publication
-
-## User test policy
-
-Do not request a local pull merely because files changed. Request user testing only
-when acceptance depends on visual interaction, actual Kiwoom payloads, physical
-reconnection, order/fill behavior, or soak performance. The request must be narrow,
-state the expected result, and require evidence only on failure.
+Every milestone runs repository policy, architecture boundaries, real-data-only
+checks, MSVC x64 build, full headless suite, clean-tree verification, and artifact
+publication. User testing is requested only for visual/GPU behavior, actual market
+payloads, physical reconnect, orders/fills, or soak performance.

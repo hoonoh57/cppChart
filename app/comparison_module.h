@@ -1,7 +1,8 @@
-﻿#pragma once
+#pragma once
 
 #include "../core/kiwoom_market_data.h"
 #include "../core/kiwoom_index_realtime.h"
+#include "comparison_transform.h"
 #include "feature_registry.h"
 #include "../render/render_document.h"
 
@@ -42,6 +43,7 @@ namespace trading::app
         std::string displayName;
         bool visible = true;
         ComparisonPlacement placement = ComparisonPlacement::SeparatePane;
+        ComparisonValueMode valueMode = ComparisonValueMode::RawClose;
         std::string paneId;
         std::string paneTitle;
         double valueDivisor = 1.0;

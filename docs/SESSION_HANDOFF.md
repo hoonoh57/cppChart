@@ -20,8 +20,8 @@
 - workflow permission: `contents: read`
 - production: real Kiwoom mock data only; no synthetic fallback
 
-Documentation commits follow the verified code baseline. Pull and use the live
-branch HEAD; do not reset to the implementation SHA.
+The verified code baseline is followed by documentation-only commits. Pull and use
+the live branch HEAD; never reset the branch to the implementation SHA.
 
 ## Opening commands
 
@@ -41,7 +41,7 @@ keys, tokens, or account-sensitive payloads.
 
 - real normalized data only; dependent capabilities fail closed;
 - renderer consumes generic `RenderDocument` only;
-- indicator calculations and type switches never enter renderer or shell;
+- indicator calculations/type switches never enter renderer or shell;
 - batch/incremental/replay/backtest share one calculation implementation;
 - completed history is immutable/shared; only the live tail is replaced;
 - legend selection resolves to one feature-owned instance ID;
@@ -58,10 +58,10 @@ reconciliation, actual positions/PnL, generic renderer, ordinal axis, synchroniz
 crosshair, pan/zoom/latest reset, and manual viewport preservation. M6 real-screen
 acceptance is closed.
 
-M7 calculation engine is complete for SMA, JMA Value/Up/Down/Slope, VWAP bands,
-OBV/Signal/Direction, and Wilder ADX. Trading-date propagation and session VWAP,
-batch/incremental parity, live-tail cache reuse, execution levels, metrics, and
-generic render contributions are verified.
+M7 calculation is complete for SMA, JMA Value/Up/Down/Slope, VWAP bands,
+OBV/Signal/Direction, and Wilder ADX. Trading-date/session VWAP, batch/incremental
+parity, live-tail cache reuse, execution levels, metrics, and generic render
+contributions are verified.
 
 ## Dynamic indicator management — implemented
 
@@ -70,11 +70,11 @@ generic render contributions are verified.
 - property-grid top combo selects any configured instance;
 - `지표 추가` dialog inserts SMA/JMA/VWAP/OBV/ADX;
 - insertion target: default, price, new lower, or existing lower pane;
-- duplicate creates a unique ID and distinguishable color while preserving pane placement;
-- same-type instances retain independent parameters and may overlay in one pane;
+- duplicate creates a unique ID/color while preserving pane placement;
+- same-type instances keep independent parameters and may overlay in one pane;
 - hide/show stops/restores calculation and rendering;
-- delete permanently removes the instance and presentation settings;
-- zero visible indicators produces the real market-only chart.
+- delete removes the instance and presentation settings;
+- zero visible indicators uses the real market-only chart.
 
 ### Parameter and presentation operations
 
@@ -82,7 +82,7 @@ generic render contributions are verified.
 - per-output visibility and pane assignment;
 - primary/secondary colors;
 - line width and solid/dashed/dotted style;
-- pane default height and auto/fixed/symmetric value scale;
+- pane default height and auto/fixed/symmetric scale;
 - fixed min/max and decimal precision;
 - create/edit/hide/delete arbitrary reference lines;
 - quick overbought/oversold reference creation;
@@ -93,14 +93,14 @@ generic render contributions are verified.
 - separator hit area between adjacent panes;
 - vertical resize cursor and hover/drag highlight;
 - adjacent weight adjustment with minimum pane height;
-- user resize state retained across live updates;
-- explicit configured default-height changes adopted without minute-by-minute reset;
+- user resize retained across live updates;
+- explicit configured default-height changes adopted without periodic reset;
 - generic styled lines/references and reference labels.
 
 ### Runtime hardening
 
 - JMA Apply no longer triggers the ImGui `EndDisabled` assertion;
-- selected instance state is copied before duplicate/hide/delete replaces the vector;
+- selected state is copied before duplicate/hide/delete replaces the vector;
 - no same-frame dangling selection pointer remains;
 - temporary migration scripts are absent and CI is read-only.
 
@@ -109,8 +109,7 @@ generic render contributions are verified.
 Windows CI `30868440522` (`#922`) passed repository/real-data policy,
 core/module/workspace/dynamic-instance gates, generic renderer isolation,
 instance hide/duplicate/shared-pane/color tests, style/reference/pane-layout tests,
-MSVC x64 build, full legacy and M7 headless suite, clean-tree, and artifact
-publication.
+MSVC x64 build, full legacy/M7 suite, clean-tree, and artifact publication.
 
 ## Focused actual-screen acceptance
 
@@ -127,16 +126,16 @@ Using actual `ka10080 + 0B` data, confirm:
 
 1. top `지표` combo lists configured instances;
 2. `지표 추가` creates an instance in the selected pane;
-3. `복제` creates a second instance, which can use different parameters/colors in the same lower pane;
+3. `복제` creates a second instance with different parameters/colors in the same lower pane;
 4. hide/show and delete work;
 5. output color, width, style, and pane assignment apply;
-6. reference/overbought/oversold lines can be added, edited, hidden, and deleted;
+6. reference/overbought/oversold lines can be added, edited, hidden, deleted;
 7. separator hover shows resize cursor/highlight and drag changes adjacent heights without collapse;
-8. live `0B` preserves viewport, selected instance, and dragged pane sizes;
-9. no assertion dialog occurs during any management action.
+8. live `0B` preserves viewport, selection, and dragged pane sizes;
+9. no assertion occurs during management actions.
 
-Return a screenshot only if a visible result is wrong. If all are normal, close M7
-dynamic indicator management and select the next product priority.
+Return a screenshot only when a visible result is wrong. If all are normal, close
+M7 dynamic indicator management and select the next product priority.
 
 ## PR policy
 

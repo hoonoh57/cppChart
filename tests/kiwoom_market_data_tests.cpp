@@ -149,11 +149,15 @@ namespace
                 "001",
                 1,
                 "{\"return_code\":0,\"inds_min_pole_qry\":["
-                "{\"cur_prc\":\"320000\",\"trde_qty\":\"10\","
-                "\"cntr_tm\":\"20260803090100\",\"open_pric\":\"319900\","
-                "\"high_pric\":\"320100\",\"low_pric\":\"319800\"}]}"
+                "{\"cur_prc\":\"3,200.00\",\"trde_qty\":\"10\","
+                "\"cntr_tm\":\"20260803090100\",\"open_pric\":\"3,199.00\","
+                "\"high_pric\":\"3,201.00\",\"low_pric\":\"3,198.00\"}]}"
             );
         Check(indexPage.result.ok, "valid index minute response must parse");
+        Check(indexPage.bars.size() == 1U,
+              "index minute bar count mismatch");
+        Check(indexPage.bars.front().close == 320000,
+              "decimal index close must normalize to x100 integer");
 
         const trading::MinuteBarsPage missing =
             trading::ParseStockMinuteBarsResponse(

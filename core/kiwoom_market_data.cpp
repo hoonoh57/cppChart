@@ -108,6 +108,48 @@ namespace trading
             return true;
         }
 
+        bool TryReadAbsoluteIndexValue(
+            const json_lite::Value* value,
+            PriceWon& out)
+        {
+            std::string text;
+            if (!ScalarToString(value, text)) return false;
+            text = Trim(text);
+            if (text.empty()) return false;
+
+            std::string normalized;
+            normalized.reserve(text.size());
+            for (char ch : text) {
+                if (ch != ',') normalized.push_back(ch);
+            }
+            if (normalized.find('.') == std::string::npos) {
+                return TryReadAbsolutePrice(value, out);
+            }
+
+            try {
+                std::size_t consumed = 0;
+                const double parsed =
+                    std::stod(normalized, &consumed);
+                if (consumed != normalized.size() ||
+                    !std::isfinite(parsed))
+                {
+                    return false;
+                }
+                const double scaled = std::fabs(parsed) * 100.0;
+                if (scaled <= 0.0 ||
+                    scaled > static_cast<double>(
+                        (std::numeric_limits<PriceWon>::max)()))
+                {
+                    return false;
+                }
+                out = static_cast<PriceWon>(std::llround(scaled));
+                return true;
+            }
+            catch (...) {
+                return false;
+            }
+        }
+
         bool TryReadAbsoluteVolume(
             const json_lite::Value* value,
             Volume& out)
@@ -446,6 +488,14 @@ namespace trading
                 return response;
             }
 
+            const auto readPrice = [instrument](
+                const json_lite::Value* value,
+                PriceWon& output) {
+                return instrument == MinuteBarInstrument::Index
+                    ? TryReadAbsoluteIndexValue(value, output)
+                    : TryReadAbsolutePrice(value, output);
+            };
+
             response.bars.reserve(rows->AsArray().size());
             for (
                 std::size_t index = 0;
@@ -464,25 +514,25 @@ namespace trading
                 }
 
                 Bar bar;
-                if (!TryReadAbsolutePrice(row.Find("open_pric"), bar.open)) {
+                if (!readPrice(row.Find("open_pric"), bar.open)) {
                     response.result.ok = false;
                     response.result.error =
                         "invalid open_pric at row " +
                         std::to_string(index);
                 }
-                else if (!TryReadAbsolutePrice(row.Find("high_pric"), bar.high)) {
+                else if (!readPrice(row.Find("high_pric"), bar.high)) {
                     response.result.ok = false;
                     response.result.error =
                         "invalid high_pric at row " +
                         std::to_string(index);
                 }
-                else if (!TryReadAbsolutePrice(row.Find("low_pric"), bar.low)) {
+                else if (!readPrice(row.Find("low_pric"), bar.low)) {
                     response.result.ok = false;
                     response.result.error =
                         "invalid low_pric at row " +
                         std::to_string(index);
                 }
-                else if (!TryReadAbsolutePrice(row.Find("cur_prc"), bar.close)) {
+                else if (!readPrice(row.Find("cur_prc"), bar.close)) {
                     response.result.ok = false;
                     response.result.error =
                         "invalid cur_prc at row " +

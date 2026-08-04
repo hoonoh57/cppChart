@@ -873,6 +873,7 @@ namespace trading::ui
             const AxisRange& visibleRange,
             double defaultVisibleSpan,
             bool drawTimeAxis,
+            std::size_t sharedLeftAxisColumns,
             ImVec2 size,
             RenderSurfaceState& state,
             std::vector<PaneGeometry>& paneGeometries)
@@ -895,7 +896,8 @@ namespace trading::ui
                 secondaryRanges.emplace(metadata.id, range);
             }
             const float leftAxisWidth =
-                static_cast<float>(leftAxes.size()) * ValueAxisWidth;
+                static_cast<float>(sharedLeftAxisColumns) *
+                ValueAxisWidth;
             const float plotWidth = (std::max)(
                 40.0f,
                 size.x - ValueAxisWidth - leftAxisWidth);
@@ -1415,6 +1417,21 @@ namespace trading::ui
                 documentWeight;
         }
 
+        std::size_t sharedLeftAxisColumns = 0U;
+        for (const render::Pane& pane : document.panes) {
+            std::size_t paneColumns = 0U;
+            for (const render::ValueAxis& axis : pane.valueAxes) {
+                if (axis.visible &&
+                    axis.side == render::ValueAxisSide::Left)
+                {
+                    ++paneColumns;
+                }
+            }
+            sharedLeftAxisColumns = (std::max)(
+                sharedLeftAxisColumns,
+                paneColumns);
+        }
+
         float totalWeight = 0.0f;
         for (const render::Pane& pane : document.panes) {
             totalWeight += surfaceState.paneHeightWeights[pane.id];
@@ -1442,6 +1459,7 @@ namespace trading::ui
                 visibleRange,
                 surfaceState.defaultVisibleSpan,
                 index + 1 == document.panes.size(),
+                sharedLeftAxisColumns,
                 ImVec2(size.x, paneHeight),
                 surfaceState,
                 paneGeometries);

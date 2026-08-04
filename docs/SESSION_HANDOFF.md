@@ -45,23 +45,15 @@ fail-closed validation, dynamic instances, styles, references, and pane placemen
 
 The docked `비교` editor supports stock or index/industry sources, arbitrary code
 and label, KOSPI `001`/KOSDAQ `101` presets, separate lower pane or price-pane
-secondary axis, style/divisor/precision/pane settings, and
-add/reload/hide/show/delete.
-
-Data:
+secondary axis, style/divisor/precision/pane settings, and add/reload/hide/show/delete.
 
 - stock history and multiple stock `0B` live tails;
 - `ka20005` index history and multiple `0I` live tails;
 - reconnect restoration and explicit unsubscribe;
 - isolated source state/error/revision/cache;
-- decimal and x100 index values normalized identically.
-
-Rendering:
-
-- separate pane primary right axis;
-- price overlay independent left secondary axis through generic `axisId`;
-- multiple left-axis columns;
-- document-wide shared left-axis width preserving all pane/crosshair/time geometry;
+- decimal and x100 index values normalized identically;
+- separate pane primary right axis or price overlay left secondary axis;
+- multiple left-axis columns with document-wide shared width;
 - completed comparison point reuse on live-only updates.
 
 ## Verification
@@ -77,10 +69,10 @@ build, complete legacy/new suite, clean-tree, and artifact publication.
 .\shell.exe
 ```
 
-Using actual data, verify new indicators; KOSPI/KOSDAQ separate panes; stock/index
-price overlays with left axes; pane/crosshair alignment; comparison style editing;
-reload/hide/show/delete; `0B`/`0I` updates preserving viewport, selection, and pane
-sizes; and isolation of a failed comparison request.
+Verify new indicators; KOSPI/KOSDAQ separate panes; stock/index price overlays;
+pane/crosshair alignment; comparison style editing; reload/hide/show/delete;
+`0B`/`0I` updates preserving viewport, selection, and pane sizes; and isolation of a
+failed comparison request.
 
 Return screenshots and the visible log line only for failed items. Next after
 acceptance: code/name search and normalized relative-strength modes.

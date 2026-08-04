@@ -29,23 +29,33 @@ int main()
 
     trading::IndexValueDecodeResult decimal =
         trading::DecodeIndexValueRecord(record);
-    Check(!decimal.result.ok,
-          "decimal index payload must fail until normalized integer contract is supplied");
+    Check(decimal.result.ok,
+          "decimal 0I index value must decode");
+    Check(decimal.tick.code == "001",
+          "decimal index code mismatch");
+    Check(decimal.tick.value == 284567,
+          "decimal index value must normalize to x100 integer");
+    Check(decimal.tick.tradeTimeHhmmss == 101530,
+          "decimal index trade time mismatch");
+    Check(decimal.tick.tradeVolume == 15,
+          "decimal index trade volume mismatch");
+    Check(decimal.tick.cumulativeVolume == 124500,
+          "decimal index cumulative volume mismatch");
 
     record.values["10"] = "+284567";
-    trading::IndexValueDecodeResult decoded =
+    trading::IndexValueDecodeResult scaled =
         trading::DecodeIndexValueRecord(record);
-    Check(decoded.result.ok, "valid 0I index record must decode");
-    Check(decoded.tick.code == "001", "index code mismatch");
-    Check(decoded.tick.value == 284567, "index value mismatch");
-    Check(decoded.tick.tradeTimeHhmmss == 101530,
-          "index trade time mismatch");
-    Check(decoded.tick.tradeVolume == 15,
-          "index trade volume mismatch");
-    Check(decoded.tick.cumulativeVolume == 124500,
-          "index cumulative volume mismatch");
+    Check(scaled.result.ok,
+          "pre-scaled 0I index value must decode");
+    Check(scaled.tick.value == decimal.tick.value,
+          "decimal and pre-scaled index values must normalize identically");
+
+    record.values["10"] = "+2,845.xx";
+    Check(!trading::DecodeIndexValueRecord(record).result.ok,
+          "malformed decimal index value must fail closed");
 
     record.type = "0B";
+    record.values["10"] = "+284567";
     Check(!trading::DecodeIndexValueRecord(record).result.ok,
           "non-0I record must fail closed");
 

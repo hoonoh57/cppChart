@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -27,24 +27,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Apply 0J and indicator UI acceptance fixes
-        if: hashFiles('scripts/apply_acceptance_fixes_0j_indicator_ui.py') != ''
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          git fetch origin p2/kiwoom-mock-gateway
-          git switch -C p2/kiwoom-mock-gateway origin/p2/kiwoom-mock-gateway
-          python .\scripts\apply_acceptance_fixes_0j_indicator_ui.py
-          if ($LASTEXITCODE -ne 0) { throw 'acceptance fix migration failed' }
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git rm .\scripts\apply_acceptance_fixes_0j_indicator_ui.py
-          git commit -m 'Fix 0J index realtime and indicator manager UX'
-          git push origin HEAD:p2/kiwoom-mock-gateway
 
       - name: Verify repository policy
         shell: pwsh
@@ -85,11 +67,14 @@ jobs:
           $renderer = Get-Content .\ui\render_document_renderer.cpp -Raw
           $contract = Get-Content .\render\render_document.h -Raw
           $marketData = Get-Content .\core\kiwoom_market_data.cpp -Raw
+          $indexRealtime = Get-Content .\core\kiwoom_index_realtime.cpp -Raw
           $comparison = Get-Content .\app\comparison_module.cpp -Raw
           $comparisonAdapter = Get-Content .\app\comparison_render_adapter.cpp -Raw
           $comparisonUi = Get-Content .\ui\comparison_manager_ui.cpp -Raw
           $indicatorConfig = Get-Content .\app\indicator_configuration.cpp -Raw
+          $indicatorUi = Get-Content .\ui\indicator_manager_ui.cpp -Raw
           $runner = Get-Content .\platform\kiwoom_runtime_runner.cpp -Raw
+          $runnerTest = Get-Content .\tests\kiwoom_runtime_runner_tests.cpp -Raw
           $build = Get-Content .\build.bat -Raw
           $runAll = Get-Content .\tests\run_all.bat -Raw
 
@@ -124,6 +109,14 @@ jobs:
             if (-not $marketData.Contains($marker)) { throw "Missing index normalization marker: $marker" }
           }
           foreach ($marker in @(
+            'record.type != "0J"',
+            'index type 0J')) {
+            if (-not $indexRealtime.Contains($marker)) { throw "Missing 0J index decoder marker: $marker" }
+          }
+          if ($indexRealtime.Contains('record.type != "0I"')) {
+            throw 'Index decoder still accepts incorrect 0I realtime type'
+          }
+          foreach ($marker in @(
             'ApplyIndexValueTick(',
             'ApplyStockTradeTick(',
             'comparison series limit is 32')) {
@@ -144,9 +137,26 @@ jobs:
             if (-not $indicatorConfig.Contains($marker)) { throw "Missing indicator type: $marker" }
           }
           foreach ($marker in @(
+            'BeginCombo("적용 지표"',
+            'app::IndicatorCatalog()',
+            '"+ " + catalog[index].displayName',
+            '##indicator_editor_scroll',
+            'ImGuiTableFlags_ScrollY')) {
+            if (-not $indicatorUi.Contains($marker)) { throw "Missing indicator UX marker: $marker" }
+          }
+          foreach ($marker in @(
             'stockTradeCodes_', 'indexValueCodes_',
-            'SubscribeIndexValues(', 'DecodeIndexValueRecord(')) {
+            'SubscribeIndexValues(', 'DecodeIndexValueRecord(',
+            '{ "0J" }')) {
             if (-not $runner.Contains($marker)) { throw "Missing realtime comparison marker: $marker" }
+          }
+          foreach ($marker in @(
+            'IndexValueRegistrationCount(',
+            'IndexValueRemovalCount(',
+            'PushIndexValue(',
+            '0J index value registration',
+            'restore 0J subscription after reconnect')) {
+            if (-not $runnerTest.Contains($marker)) { throw "Missing 0J lifecycle test marker: $marker" }
           }
           foreach ($marker in @(
             'core\standard_indicators.cpp',

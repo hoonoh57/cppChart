@@ -60,7 +60,7 @@ namespace trading
         request.apiId = "ka10099";
         request.headers.emplace("authorization", "Bearer " + bearerToken);
         request.headers.emplace("content-type", "application/json;charset=UTF-8");
-        if (continuation.hasMore) {
+        if (continuation.continueYn == "Y" && !continuation.nextKey.empty()) {
             request.headers.emplace("cont-yn", "Y");
             request.headers.emplace("next-key", continuation.nextKey);
         }

@@ -74,7 +74,6 @@ namespace trading::app
                 cache.completedIdentity != identity ||
                 cache.primaryIdentity != primaryIdentity ||
                 cache.completedRevision != source.completedRevision ||
-                cache.primaryStructureRevision != document.structureRevision ||
                 cache.valueMode != source.definition.valueMode ||
                 std::fabs(
                     cache.valueDivisor -
@@ -91,7 +90,6 @@ namespace trading::app
                 cache.completedIdentity = identity;
                 cache.primaryIdentity = primaryIdentity;
                 cache.completedRevision = source.completedRevision;
-                cache.primaryStructureRevision = document.structureRevision;
                 cache.valueDivisor = source.definition.valueDivisor;
                 cache.valueMode = source.definition.valueMode;
             }

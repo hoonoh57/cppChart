@@ -70,9 +70,13 @@ namespace trading::app
 
             Cache& cache = caches_[source.definition.id];
             const void* identity = source.completedBars.get();
+            const bool primaryAffectsCompletedPoints =
+                source.definition.valueMode ==
+                    ComparisonValueMode::RelativeStrength100;
             if (!cache.completedPoints ||
                 cache.completedIdentity != identity ||
-                cache.primaryIdentity != primaryIdentity ||
+                (primaryAffectsCompletedPoints &&
+                 cache.primaryIdentity != primaryIdentity) ||
                 cache.completedRevision != source.completedRevision ||
                 cache.valueMode != source.definition.valueMode ||
                 std::fabs(
@@ -88,7 +92,9 @@ namespace trading::app
                     std::make_shared<const std::vector<render::LinePoint>>(
                         cache.transformed.points);
                 cache.completedIdentity = identity;
-                cache.primaryIdentity = primaryIdentity;
+                cache.primaryIdentity = primaryAffectsCompletedPoints
+                    ? primaryIdentity
+                    : nullptr;
                 cache.completedRevision = source.completedRevision;
                 cache.valueDivisor = source.definition.valueDivisor;
                 cache.valueMode = source.definition.valueMode;

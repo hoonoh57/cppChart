@@ -1,6 +1,7 @@
 #pragma once
 
 #include "comparison_module.h"
+#include "comparison_transform.h"
 #include "../render/render_document.h"
 
 #include <cstddef>
@@ -28,8 +29,12 @@ namespace trading::app
         struct Cache final
         {
             const void* completedIdentity = nullptr;
+            const void* primaryIdentity = nullptr;
             std::uint64_t completedRevision = 0;
+            std::uint64_t primaryStructureRevision = 0;
             double valueDivisor = 1.0;
+            ComparisonValueMode valueMode = ComparisonValueMode::RawClose;
+            ComparisonTransformResult transformed;
             std::shared_ptr<const std::vector<render::LinePoint>> completedPoints;
         };
 
@@ -37,10 +42,10 @@ namespace trading::app
             render::RenderDocument& document,
             const std::string& paneId) noexcept;
 
-        static std::shared_ptr<const std::vector<render::LinePoint>>
-        BuildCompletedPoints(
-            const std::shared_ptr<const std::vector<Bar>>& bars,
-            double divisor);
+        static bool CopyPrimaryBars(
+            const render::RenderDocument& document,
+            std::vector<Bar>& bars,
+            const void*& identity);
 
         std::map<std::string, Cache> caches_;
         std::uint64_t revision_ = 0;

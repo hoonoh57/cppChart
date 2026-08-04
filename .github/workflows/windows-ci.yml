@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -28,30 +28,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Apply chart observation viewport
-        if: hashFiles('scripts/apply_chart_observation_viewport.py') != ''
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          git fetch origin p2/kiwoom-mock-gateway
-          git switch -C p2/kiwoom-mock-gateway origin/p2/kiwoom-mock-gateway
-          python .\scripts\apply_chart_observation_viewport.py
-          if ($LASTEXITCODE -ne 0) { throw 'chart observation viewport migration failed' }
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git rm .\scripts\apply_chart_observation_viewport.py
-          git commit -m 'Add latest-bar margins and manual value navigation'
-          git push origin HEAD:p2/kiwoom-mock-gateway
-
       - name: Verify repository policy
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           git diff --check
           if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
-          if (Test-Path .\scripts\apply_chart_observation_viewport.py) {
-            throw 'temporary viewport migration remains'
+          foreach ($temporary in @(
+            '.\scripts\apply_chart_observation_viewport.py',
+            '.\scripts\apply_indicator_pack_and_dual_axis.py',
+            '.\scripts\apply_comparison_runtime.py',
+            '.\scripts\apply_comparison_axis_alignment.py',
+            '.\scripts\apply_acceptance_fixes_0j_indicator_ui.py',
+            '.\scripts\apply_fixed_chart_and_reference_footer.py')) {
+            if (Test-Path $temporary) {
+              throw "temporary implementation file remains: $temporary"
+            }
           }
           $trackedSecrets = @(git ls-files | Where-Object {
             $_ -match '(^|/)\.env($|\.)' -and
@@ -67,6 +59,124 @@ jobs:
           .\scripts\verify_core_boundary.ps1
           .\scripts\verify_real_data_only.ps1
           .\scripts\verify_modular_architecture.ps1
+
+      - name: Verify chart observation contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $renderer = Get-Content .\ui\render_document_renderer.cpp -Raw
+          $rendererHeader = Get-Content .\ui\render_document_renderer.h -Raw
+          $chartViewport = Get-Content .\render\chart_viewport.cpp -Raw
+          $valueViewport = Get-Content .\render\value_viewport.cpp -Raw
+          $chartTests = Get-Content .\tests\chart_viewport_tests.cpp -Raw
+          $valueTests = Get-Content .\tests\value_viewport_tests.cpp -Raw
+          $build = Get-Content .\build.bat -Raw
+          $runAll = Get-Content .\tests\run_all.bat -Raw
+
+          foreach ($marker in @(
+            'LatestRightPaddingFraction = 0.12',
+            'MaximumRightOverscrollFraction = 0.60',
+            'AutomaticTopPaddingFraction = 0.10',
+            'paneValueViewports',
+            'activeValueAxisPaneId',
+            'PanValueViewport(',
+            'ZoomValueViewport(',
+            'ImGuiMouseCursor_ResizeNS',
+            'crosshairCoordinate > axis.Maximum()',
+            'coordinate > axis.Maximum()')) {
+            if (-not $renderer.Contains($marker) -and
+                -not $rendererHeader.Contains($marker)) {
+              throw "Missing observation viewport marker: $marker"
+            }
+          }
+          foreach ($marker in @(
+            'LatestPadding(',
+            'MaximumViewportSpan(',
+            'maximumRightOverscrollFraction',
+            'viewport.autoScroll = false')) {
+            if (-not $chartViewport.Contains($marker)) {
+              throw "Missing horizontal viewport contract: $marker"
+            }
+          }
+          foreach ($marker in @(
+            'ResetValueViewport(',
+            'FollowValueRange(',
+            'PanValueViewport(',
+            'ZoomValueViewport(',
+            'viewport.autoScale = false')) {
+            if (-not $valueViewport.Contains($marker)) {
+              throw "Missing vertical viewport contract: $marker"
+            }
+          }
+          foreach ($marker in @(
+            'latest reset must reserve visible space after the newest bar',
+            'manual future-space viewport must survive live updates')) {
+            if (-not $chartTests.Contains($marker)) {
+              throw "Missing horizontal viewport regression: $marker"
+            }
+          }
+          foreach ($marker in @(
+            'dragging the value axis upward must magnify candles',
+            'manual value range must survive live data updates',
+            'reset must restore top observation margin')) {
+            if (-not $valueTests.Contains($marker)) {
+              throw "Missing value viewport regression: $marker"
+            }
+          }
+          if (-not $build.Contains('render\value_viewport.cpp')) {
+            throw 'value viewport is not linked into shell.exe'
+          }
+          foreach ($marker in @(
+            'chart_viewport_tests.exe',
+            'value_viewport_tests.exe')) {
+            if (-not $runAll.Contains($marker)) {
+              throw "viewport test is not in the complete suite: $marker"
+            }
+          }
+
+      - name: Verify indicator and comparison contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $renderer = Get-Content .\ui\render_document_renderer.cpp -Raw
+          $indicatorConfig = Get-Content .\app\indicator_configuration.cpp -Raw
+          $comparisonAdapter = Get-Content .\app\comparison_render_adapter.cpp -Raw
+          $indexRealtime = Get-Content .\core\kiwoom_index_realtime.cpp -Raw
+          $runner = Get-Content .\platform\kiwoom_runtime_runner.cpp -Raw
+
+          foreach ($marker in @(
+            '"EMA"', '"BOLLINGER"', '"RSI"',
+            '"MACD"', '"DMI"', '"SUPERTREND"')) {
+            if (-not $indicatorConfig.Contains($marker)) {
+              throw "Missing indicator catalog type: $marker"
+            }
+          }
+          foreach ($marker in @(
+            'ComparisonPlacement::PriceSecondaryAxis',
+            'axis.side = render::ValueAxisSide::Left',
+            'line.axisId = axisId')) {
+            if (-not $comparisonAdapter.Contains($marker)) {
+              throw "Missing comparison render contract: $marker"
+            }
+          }
+          if (-not $indexRealtime.Contains('record.type != "0J"')) {
+            throw 'Index realtime decoder is not using official 0J type'
+          }
+          foreach ($marker in @(
+            'SubscribeIndexValues(',
+            'DecodeIndexValueRecord(',
+            '{ "0J" }')) {
+            if (-not $runner.Contains($marker)) {
+              throw "Missing index realtime lifecycle marker: $marker"
+            }
+          }
+          foreach ($forbidden in @(
+            'KOSPI', 'KOSDAQ', 'ka20005', '0J',
+            'EMA', 'MACD', 'SUPERTREND')) {
+            if ($renderer.Contains($forbidden)) {
+              throw "Generic renderer contains a feature-specific marker: $forbidden"
+            }
+          }
 
       - name: Locate MSVC toolchain
         id: msvc

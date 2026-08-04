@@ -14,7 +14,9 @@ mandatory.
 - feature lifecycle, calculation, source selection, and configuration outside renderer/shell;
 - multiple indicator/comparison instances with independent parameters/styles;
 - drag-resizable panes and stable viewport/selection/layout during live updates;
-- isolated failures never corrupt the primary real chart.
+- isolated failures never corrupt the primary real chart;
+- manual chart observation state belongs to the render surface and is never inferred
+  from or written into calculation data.
 
 ## M1-M6
 
@@ -22,6 +24,34 @@ Complete and visually accepted. Includes real-data gates, market/workspace/featu
 modules, execution levels, generic renderer, ordinal axis, shared history/live tail,
 value grids, crosshairs, pan/zoom/latest reset, boundaries/tooltips, and real `0B`
 viewport preservation.
+
+### Chart observation viewport extension
+
+Implementation and automated verification are complete. Actual-screen acceptance
+remains.
+
+Implemented:
+
+- configurable future bar slots to the right of the latest candle;
+- right-side space retained by initial view, live auto-follow, and reset;
+- horizontal manual pan beyond the latest data index without clipping the future
+  observation area;
+- pane-local vertical range pan by dragging inside the chart body;
+- right Y-axis drag scaling anchored around the mouse value;
+- minimum/finite range guards;
+- pane-local manual Y state retained across live-tail updates;
+- double-click reset to latest X position plus automatic Y range with top/bottom
+  padding;
+- independent hit regions for viewport pan, Y scaling, wheel zoom, legends,
+  crosshair, and pane splitters.
+
+Verified viewport implementation:
+
+- branch HEAD: `80542a44cfcaea570703b46d4a84ad36025837b3`
+- pull-request verification SHA: `96204f598925a302707b8d37f4351233e551e46b`
+- Windows CI: `30898400950`
+- artifact: `8888150112`
+- digest: `sha256:1396a02c41e52434ba3ff828e775aa05fb8380a6d454d335762a245088caa226`
 
 ## M7 — indicators
 
@@ -62,19 +92,6 @@ First production slice implemented and automatically verified. Actual
 - normalized return, relative strength, beta, and correlation;
 - measured subscription/series limits and multi-workspace sharing;
 - physical multi-source reconnect and intraday soak.
-
-## Verified implementation
-
-- HEAD: `1e0d0d7dcfd91de05435d69b954e75b573a93bad`
-- Windows CI #1016: `30875659339`
-- artifact: `8879511685`
-- digest: `sha256:70c9f9e8d36a212d33da3c591121844ff05748170748b48b69fd8112130bf599`
-- workflow: read-only
-
-CI passed repository/real-data policy, architecture isolation, existing tests, new
-indicator parity/replacement tests, comparison lifecycle/render tests, index
-normalization, shared dual-axis geometry, MSVC x64 build, clean-tree, and artifact
-publication.
 
 ## M9
 

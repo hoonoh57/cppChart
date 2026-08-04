@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 setlocal
 cd /d %~dp0
 if not exist obj mkdir obj
@@ -37,6 +37,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    app\default_indicator_render_plan.cpp ^
    app\indicator_properties.cpp ^
    app\indicator_workspace_coordinator.cpp ^
+   app\comparison_transform.cpp ^
    app\comparison_module.cpp ^
    app\comparison_render_adapter.cpp ^
    render\chart_viewport.cpp ^

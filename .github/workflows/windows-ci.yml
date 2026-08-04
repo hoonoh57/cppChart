@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -20,25 +20,29 @@ concurrency:
 
 jobs:
   build-and-test:
+    name: MSVC build and headless tests
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Apply focused M8 build fixes
+      - name: Verify repository policy
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          git fetch origin p2/kiwoom-mock-gateway
-          git switch -C p2/kiwoom-mock-gateway origin/p2/kiwoom-mock-gateway
-          python .\scripts\fix_m8_build.py
-          if ($LASTEXITCODE -ne 0) { throw 'M8 build fix failed' }
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add core/kiwoom_symbol_catalog.h shell_main.cpp
-          git rm .\scripts\fix_m8_build.py
-          git commit -m 'Fix M8 symbol catalog and callback wiring'
-          git push origin HEAD:p2/kiwoom-mock-gateway
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
+          if (Test-Path .\scripts\fix_m8_build.py) {
+            throw 'temporary M8 build script remains'
+          }
+          $trackedSecrets = @(git ls-files | Where-Object {
+            $_ -match '(^|/)\.env($|\.)' -and
+            $_ -notmatch '(\.example|\.sample|\.template)$'
+          })
+          if ($trackedSecrets.Count -gt 0) {
+            throw "Tracked secret files:`n$($trackedSecrets -join "`n")"
+          }
 
       - name: Verify architecture boundaries
         shell: pwsh
@@ -47,10 +51,44 @@ jobs:
           .\scripts\verify_real_data_only.ps1
           .\scripts\verify_modular_architecture.ps1
 
+      - name: Verify M8 contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $transform = Get-Content .\app\comparison_transform.cpp -Raw
+          $catalog = Get-Content .\core\kiwoom_symbol_catalog.cpp -Raw
+          $ui = Get-Content .\ui\comparison_manager_ui.cpp -Raw
+          $shell = Get-Content .\shell_main.cpp -Raw
+          foreach ($marker in @(
+            'ComparisonValueMode::Indexed100',
+            'ComparisonValueMode::ReturnPercent',
+            'ComparisonValueMode::RelativeStrength100',
+            'FindFirstCommonAnchor')) {
+            if (-not $transform.Contains($marker)) {
+              throw "Missing normalized comparison contract: $marker"
+            }
+          }
+          foreach ($marker in @('ka10099','SearchSymbolCatalog(','stk_cd','stk_nm')) {
+            if (-not $catalog.Contains($marker)) {
+              throw "Missing symbol catalog contract: $marker"
+            }
+          }
+          foreach ($marker in @('종목 검색','기준값 100','누적 수익률 %','주 종목 대비 상대강도')) {
+            if (-not $ui.Contains($marker)) {
+              throw "Missing comparison UI contract: $marker"
+            }
+          }
+          foreach ($marker in @('callbacks.symbolCatalog = [](','RequestSymbolCatalog(','callbacks.indexValue = [](')) {
+            if (-not $shell.Contains($marker)) {
+              throw "Missing shell M8 wiring: $marker"
+            }
+          }
+
       - name: Locate MSVC
         id: msvc
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
           $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if (-not $installation) { throw 'MSVC not found' }
@@ -59,13 +97,32 @@ jobs:
       - name: Build shell
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $devCmd = '${{ steps.msvc.outputs.devcmd }}'
           & cmd.exe /d /s /c "`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && call build.bat"
           if ($LASTEXITCODE -ne 0) { throw 'build failed' }
+          if (-not (Test-Path .\shell.exe)) { throw 'shell.exe was not produced' }
 
       - name: Run full suite
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $devCmd = '${{ steps.msvc.outputs.devcmd }}'
           & cmd.exe /d /s /c "`"$devCmd`" -no_logo -arch=x64 -host_arch=x64 && call tests\run_all.bat"
           if ($LASTEXITCODE -ne 0) { throw 'tests failed' }
+
+      - name: Verify clean tree
+        shell: pwsh
+        run: |
+          $changes = @(git status --porcelain)
+          if ($changes.Count -gt 0) {
+            throw "Build/tests modified tracked files:`n$($changes -join "`n")"
+          }
+
+      - name: Publish verified executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: cppChart-${{ github.sha }}
+          path: shell.exe
+          if-no-files-found: error
+          retention-days: 7

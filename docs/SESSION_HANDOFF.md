@@ -8,9 +8,9 @@ Local: `E:\2026\gpt\cpp\shell`
 PR #1: Draft
 Viewport/footer implementation: `2b87b40097cd36be46de4f956664302ef74a6558`
 Read-only verification contract: `63827a6c88469911e3eab784c1d427bdd0bfdc0f`
-Windows CI #1074: `30894598030`
-Artifact: `8886617161`
-Digest: `sha256:edb5fb92aa9b9d8c77ac82753ca92fb42b4c6a58742ad04dd50c2ee9adadfbf2`
+Windows CI #1078: `30895139617`
+Artifact: `8886840070`
+Digest: `sha256:40727e1612a3d4b64022890170cd62205f67a3ea9b4ce432bd21e397a2cae9da`
 Workflow: read-only
 
 Pull and use live branch HEAD.
@@ -64,7 +64,7 @@ Corrections:
 - CI guards the fixed quick actions, enlarged footer, no-scroll chart flags, and
   zero pane/splitter spacing.
 
-CI #1074 passed repository/real-data policy, architecture boundaries, comparison
+CI #1078 passed repository/real-data policy, architecture boundaries, comparison
 and indicator contracts, the viewport/footer guards, MSVC x64 build, the full
 headless suite, clean-tree verification, and artifact publication.
 

@@ -863,7 +863,11 @@ static void DrawToolbar()
 
 static void DrawMarketDataPanel()
 {
-    ImGui::Begin("실제 시세");
+    ImGui::Begin(
+        "실제 시세",
+        nullptr,
+        ImGuiWindowFlags_NoScrollbar |
+            ImGuiWindowFlags_NoScrollWithMouse);
     const trading::app::MarketDataSnapshot snapshot =
         g_marketDataModule.Snapshot();
 

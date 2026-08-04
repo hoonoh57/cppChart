@@ -765,7 +765,21 @@ namespace trading::ui
                 state.dirty = true;
             }
 
-            if (ImGui::Button("기준선 추가")) {
+        }
+
+        void DrawReferenceQuickActions(
+            IndicatorManagerUiState& state)
+        {
+            const float spacing = ImGui::GetStyle().ItemSpacing.x;
+            const float available = ImGui::GetContentRegionAvail().x;
+            const float width = (std::max)(
+                1.0f,
+                (available - spacing * 2.0f) / 3.0f);
+
+            if (ImGui::Button(
+                    "기준선 추가",
+                    ImVec2(width, 0.0f)))
+            {
                 AddReference(
                     state.draft,
                     "기준선",
@@ -774,7 +788,10 @@ namespace trading::ui
                 state.dirty = true;
             }
             ImGui::SameLine();
-            if (ImGui::Button("과매수 추가")) {
+            if (ImGui::Button(
+                    "과매수 추가",
+                    ImVec2(width, 0.0f)))
+            {
                 AddReference(
                     state.draft,
                     "과매수",
@@ -783,7 +800,10 @@ namespace trading::ui
                 state.dirty = true;
             }
             ImGui::SameLine();
-            if (ImGui::Button("과매도 추가")) {
+            if (ImGui::Button(
+                    "과매도 추가",
+                    ImVec2(width, 0.0f)))
+            {
                 AddReference(
                     state.draft,
                     "과매도",
@@ -1171,8 +1191,8 @@ namespace trading::ui
         }
 
         const float editorFooterHeight =
-            ImGui::GetFrameHeightWithSpacing() * 2.0f +
-            ImGui::GetStyle().ItemSpacing.y;
+            ImGui::GetFrameHeightWithSpacing() * 3.0f +
+            ImGui::GetStyle().ItemSpacing.y * 2.0f;
         ImGui::BeginChild(
             "##indicator_editor_scroll",
             ImVec2(0.0f, -editorFooterHeight),
@@ -1270,6 +1290,8 @@ namespace trading::ui
         DrawReferences(definitions, state);
 
         ImGui::EndChild();
+        ImGui::Separator();
+        DrawReferenceQuickActions(state);
         ImGui::Separator();
         const bool applyDisabled = !state.dirty;
         if (applyDisabled) ImGui::BeginDisabled();

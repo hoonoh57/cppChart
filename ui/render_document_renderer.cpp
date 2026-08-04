@@ -821,10 +821,15 @@ namespace trading::ui
             RenderSurfaceState& state)
         {
             ImGui::PushID(("splitter." + upperPane.id + "." + lowerPane.id).c_str());
+            const ImVec2 itemSpacing = ImGui::GetStyle().ItemSpacing;
+            ImGui::PushStyleVar(
+                ImGuiStyleVar_ItemSpacing,
+                ImVec2(itemSpacing.x, 0.0f));
             ImGui::InvisibleButton(
                 "##pane_splitter",
                 ImVec2(width, PaneSplitterHeight),
                 ImGuiButtonFlags_MouseButtonLeft);
+            ImGui::PopStyleVar();
             const bool hovered = ImGui::IsItemHovered();
             const bool active = ImGui::IsItemActive();
             if (hovered || active) {
@@ -905,11 +910,16 @@ namespace trading::ui
             const ValueRange values = PaneValueRange(pane, axis, visibleRange);
 
             ImGui::PushID(pane.id.c_str());
+            const ImVec2 itemSpacing = ImGui::GetStyle().ItemSpacing;
+            ImGui::PushStyleVar(
+                ImGuiStyleVar_ItemSpacing,
+                ImVec2(itemSpacing.x, 0.0f));
             ImGui::InvisibleButton(
                 "##surface",
                 size,
                 ImGuiButtonFlags_MouseButtonLeft |
                     ImGuiButtonFlags_MouseButtonRight);
+            ImGui::PopStyleVar();
             const ImVec2 surfaceOrigin = ImGui::GetItemRectMin();
             const ImVec2 plotOrigin(
                 surfaceOrigin.x + leftAxisWidth,

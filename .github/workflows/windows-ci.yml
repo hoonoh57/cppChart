@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -27,24 +27,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Apply shared comparison axis geometry
-        if: hashFiles('scripts/apply_comparison_axis_alignment.py') != ''
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          git fetch origin p2/kiwoom-mock-gateway
-          git switch -C p2/kiwoom-mock-gateway origin/p2/kiwoom-mock-gateway
-          python .\scripts\apply_comparison_axis_alignment.py
-          if ($LASTEXITCODE -ne 0) { throw 'comparison axis alignment migration failed' }
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git rm .\scripts\apply_comparison_axis_alignment.py
-          git commit -m 'Align dual-axis comparison geometry across panes'
-          git push origin HEAD:p2/kiwoom-mock-gateway
 
       - name: Verify repository policy
         shell: pwsh

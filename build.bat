@@ -4,7 +4,7 @@ cd /d %~dp0
 if not exist obj mkdir obj
 cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0602 ^
    /I"imgui" /I"imgui\backends" ^
-   shell_main.cpp ^
+   shell_main_m82.cpp ^
    core\command_bus.cpp ^
    core\fault_policy.cpp ^
    core\json_lite.cpp ^

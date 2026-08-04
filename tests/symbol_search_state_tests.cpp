@@ -1,4 +1,4 @@
-#include "../ui/symbol_search_state.h"
+﻿#include "../ui/symbol_search_state.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -58,6 +58,8 @@ int main()
     Check(state.HasValidSelection(), "confirmed selection must be valid");
     Check(state.selection.code == "005935", "confirmed code mismatch");
     Check(state.selection.name == "삼성전자우", "confirmed name mismatch");
+    Check(std::string(state.query) == "005935",
+          "confirmed selection must place code in input");
     Check(!state.popupOpen, "popup must close after confirmation");
 
     std::snprintf(state.query, sizeof(state.query), "%s", "arbitrary");
@@ -73,17 +75,32 @@ int main()
 
     std::snprintf(state.query, sizeof(state.query), "%s", "123456");
     ClearSymbolSelection(state);
-    Check(!ConfirmExactSymbolCode(state, catalog),
-          "unknown exact code must be rejected");
-    Check(!state.HasValidSelection(),
-          "unknown exact code must not create a selection");
+    Check(ConfirmExactSymbolCode(state, catalog),
+          "direct six-digit code must work without catalog membership");
+    Check(state.selection.code == "123456",
+          "direct six-digit code mismatch");
+
+    std::snprintf(state.query, sizeof(state.query), "%s", "000660_al");
+    ClearSymbolSelection(state);
+    Check(ConfirmDirectSymbolCode(state),
+          "NXT _AL direct code confirmation failed");
+    Check(state.selection.code == "000660_AL",
+          "NXT code must be normalized");
+
+    state.query[0] = '\0';
+    RefreshSymbolMatches(state, catalog);
+    Check(state.popupOpen, "recent popup must open on empty input");
+    Check(!state.matches.empty(), "recent selection list must not be empty");
+    Check(state.matches.front().code == "000660_AL",
+          "latest direct code must be first recent selection");
 
     SetSymbolCatalogFailed(state, "ka10099 timeout");
     Check(state.catalogState == SymbolCatalogLoadState::Failed,
           "failed state mismatch");
     Check(state.catalogError == "ka10099 timeout",
           "exact catalog error must be retained");
-    Check(state.matches.empty(), "failed catalog must clear matches");
+    Check(!state.recent.empty(),
+          "catalog failure must not erase recent direct selections");
 
     std::puts("[PASS] symbol_search_state_tests");
     return 0;

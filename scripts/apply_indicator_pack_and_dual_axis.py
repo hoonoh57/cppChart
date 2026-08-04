@@ -5,7 +5,10 @@ import subprocess
 root = Path(__file__).resolve().parents[1]
 scripts = root / "scripts"
 source = subprocess.check_output(
-    ["git", "show", "HEAD^:scripts/apply_indicator_pack_and_dual_axis.py"],
+    [
+        "git", "show",
+        "4ec58b01349e33f88fa27319cbacdc452dbd0a2d:scripts/apply_indicator_pack_and_dual_axis.py"
+    ],
     cwd=root,
     text=True,
     encoding="utf-8-sig")
@@ -27,7 +30,7 @@ text = text.replace(
     "                if (!series.visible || !series.axisId.empty()) continue;\\n",
     1)'''
 if old not in source:
-    raise RuntimeError("dual-axis migration block was not found in prior source")
+    raise RuntimeError("dual-axis migration block was not found")
 implementation = scripts / "_indicator_axis_impl.py"
 implementation.write_text(
     source.replace(old, new, 1),

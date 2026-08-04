@@ -1007,21 +1007,30 @@ namespace trading::ui
         ImGui::SameLine();
 
         const bool noSelection = selected == nullptr;
+        const std::string selectedType = selected != nullptr
+            ? selected->spec.type
+            : std::string{};
+        const bool selectedVisible =
+            selected != nullptr && selected->visible;
+        const app::IndicatorInstanceDefinition selectedCopy =
+            selected != nullptr
+                ? *selected
+                : app::IndicatorInstanceDefinition{};
         if (noSelection) ImGui::BeginDisabled();
         if (ImGui::Button("복제")) {
             const std::string newId = app::NextIndicatorInstanceId(
-                selected->spec.type,
+                selectedType,
                 definitions);
             std::size_t sameTypeCount = 0;
             for (const auto& definition : definitions) {
-                if (definition.spec.type == selected->spec.type) {
+                if (definition.spec.type == selectedType) {
                     ++sameTypeCount;
                 }
             }
             app::IndicatorInstanceDefinition duplicate;
             std::string error;
             if (app::DuplicateIndicatorDefinition(
-                    *selected,
+                    selectedCopy,
                     newId,
                     sameTypeCount,
                     duplicate,
@@ -1046,7 +1055,7 @@ namespace trading::ui
         }
         ImGui::SameLine();
         if (ImGui::Button(
-                selected != nullptr && selected->visible
+                selectedVisible
                     ? "감추기"
                     : "표시"))
         {

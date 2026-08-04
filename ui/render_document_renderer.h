@@ -33,6 +33,7 @@ namespace trading::ui
         bool selectionChanged = false;
         bool selectionDoubleClicked = false;
         std::map<std::string, float> paneHeightWeights;
+        std::map<std::string, float> paneDefaultHeightWeights;
     };
 
     void DrawRenderDocument(

@@ -413,7 +413,9 @@ foreach ($marker in @(
     '과매도 추가',
     'ColorEdit4(',
     'EditLineStyle(',
-    'EditPaneSelection(')) {
+    'EditPaneSelection(',
+    'const app::IndicatorInstanceDefinition selectedCopy',
+    'const bool selectedVisible')) {
     if (-not $indicatorManagerUi.Contains($marker)) {
         throw "Indicator management UI contract is missing: $marker"
     }
@@ -423,6 +425,8 @@ foreach ($marker in @(
     'DrawPaneSplitter(',
     'ImGuiMouseCursor_ResizeNS',
     'paneHeightWeights',
+    'paneDefaultHeightWeights',
+    'configuredWeightChanged',
     'DrawStyledLine(')) {
     if (-not $renderer.Contains($marker)) {
         throw "Resizable/styled pane renderer contract is missing: $marker"

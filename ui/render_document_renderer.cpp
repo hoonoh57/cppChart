@@ -1243,13 +1243,31 @@ namespace trading::ui
         surfaceState.crosshairVisible = false;
 
         for (const render::Pane& pane : document.panes) {
-            auto found = surfaceState.paneHeightWeights.find(pane.id);
-            if (found == surfaceState.paneHeightWeights.end() ||
-                !std::isfinite(found->second) || found->second <= 0.0f)
-            {
+            const float documentWeight =
+                (std::max)(0.01f, pane.heightWeight);
+            const auto current =
+                surfaceState.paneHeightWeights.find(pane.id);
+            const auto previousDefault =
+                surfaceState.paneDefaultHeightWeights.find(pane.id);
+            const bool missing =
+                current == surfaceState.paneHeightWeights.end() ||
+                previousDefault ==
+                    surfaceState.paneDefaultHeightWeights.end();
+            const bool invalid =
+                !missing &&
+                (!std::isfinite(current->second) ||
+                 current->second <= 0.0f);
+            const bool configuredWeightChanged =
+                !missing &&
+                std::fabs(
+                    previousDefault->second -
+                    documentWeight) > 0.0001f;
+            if (missing || invalid || configuredWeightChanged) {
                 surfaceState.paneHeightWeights[pane.id] =
-                    (std::max)(0.01f, pane.heightWeight);
+                    documentWeight;
             }
+            surfaceState.paneDefaultHeightWeights[pane.id] =
+                documentWeight;
         }
 
         float totalWeight = 0.0f;

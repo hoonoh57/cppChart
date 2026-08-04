@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -27,20 +27,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Apply chart and property acceptance fixes
-        if: github.event_name == 'push' && hashFiles('scripts/apply_fixed_chart_and_reference_footer.py') != ''
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          python .\scripts\apply_fixed_chart_and_reference_footer.py
-          if ($LASTEXITCODE -ne 0) { throw 'chart/property migration failed' }
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm .\scripts\apply_fixed_chart_and_reference_footer.py
-          git add -A
-          git commit -m 'Keep chart axis and reference controls visible'
-          git push origin HEAD:${{ github.ref_name }}
 
       - name: Verify repository policy
         shell: pwsh
@@ -99,7 +85,9 @@ jobs:
             'DrawComparisonManagerWindow(',
             'RequestComparisonData(',
             'ApplyComparisonDefinitions(',
-            'callbacks.indexValue')) {
+            'callbacks.indexValue',
+            'ImGuiWindowFlags_NoScrollbar',
+            'ImGuiWindowFlags_NoScrollWithMouse')) {
             if (-not $source.Contains($marker)) { throw "Missing shell marker: $marker" }
           }
           foreach ($marker in @(
@@ -114,8 +102,10 @@ jobs:
             'DrawSecondaryValueAxis(',
             'sharedLeftAxisColumns',
             'leftAxisWidth',
-            'series.axisId')) {
-            if (-not $renderer.Contains($marker)) { throw "Missing dual-axis renderer marker: $marker" }
+            'series.axisId',
+            'ImGuiStyleVar_ItemSpacing',
+            'ImVec2(itemSpacing.x, 0.0f)')) {
+            if (-not $renderer.Contains($marker)) { throw "Missing renderer marker: $marker" }
           }
           foreach ($marker in @(
             'TryReadAbsoluteIndexValue(',
@@ -156,7 +146,9 @@ jobs:
             'app::IndicatorCatalog()',
             '"+ " + catalog[index].displayName',
             '##indicator_editor_scroll',
-            'ImGuiTableFlags_ScrollY')) {
+            'ImGuiTableFlags_ScrollY',
+            'DrawReferenceQuickActions(state)',
+            'GetFrameHeightWithSpacing() * 3.0f')) {
             if (-not $indicatorUi.Contains($marker)) { throw "Missing indicator UX marker: $marker" }
           }
           foreach ($marker in @(

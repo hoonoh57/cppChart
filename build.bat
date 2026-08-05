@@ -33,6 +33,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    app\market_data_module.cpp ^
    app\chart_workspace_module.cpp ^
    app\chart_workspace_persistence.cpp ^
+   app\chart_workspace_bootstrap.cpp ^
    app\indicator_module.cpp ^
    app\indicator_render_adapter.cpp ^
    app\indicator_configuration.cpp ^

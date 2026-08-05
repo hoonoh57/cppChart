@@ -481,7 +481,9 @@ namespace trading::platform
 
             receiverRunning_.store(false, std::memory_order_release);
             Enqueue(engine_.OnWebSocketClosed(reason));
-            Log("WS", reason);
+            if (reason != "Bye") {
+                Log("FAULT", reason);
+            }
             WakeUi();
             break;
         }
@@ -539,7 +541,6 @@ namespace trading::platform
 
             StartReceiver();
             Enqueue(engine_.OnWebSocketConnected());
-            Log("WS", "WebSocket connected");
             WakeUi();
             break;
         }
@@ -549,11 +550,6 @@ namespace trading::platform
             if (!transport_->SendWebSocketText(action.text, error)) {
                 Enqueue(engine_.OnWebSocketClosed(error));
                 Log("FAULT", "WebSocket send failed: " + error);
-            }
-            else {
-                Log("WS", action.sensitive
-                    ? "sensitive WebSocket command sent"
-                    : "WebSocket command sent");
             }
             WakeUi();
             break;
@@ -656,7 +652,6 @@ namespace trading::platform
 
         case KiwoomRuntimeActionType::ScheduleReconnect:
             ScheduleReconnect(action.delayMilliseconds);
-            Log("WS", "reconnect scheduled");
             WakeUi();
             break;
 
@@ -702,8 +697,6 @@ namespace trading::platform
             action.text = BuildWebSocketRegistrationMessage(
                 "2", true, stocks, { "0B" });
             Enqueue({ std::move(action) });
-            Log("WS", "stock trade 0B subscriptions queued: " +
-                std::to_string(stocks.size()));
         }
         if (!indices.empty()) {
             KiwoomRuntimeAction action;
@@ -711,8 +704,6 @@ namespace trading::platform
             action.text = BuildWebSocketRegistrationMessage(
                 "3", true, indices, { "0J" });
             Enqueue({ std::move(action) });
-            Log("WS", "index value 0J subscriptions queued: " +
-                std::to_string(indices.size()));
         }
     }
 

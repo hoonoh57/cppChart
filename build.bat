@@ -1,7 +1,22 @@
 ﻿@echo off
 setlocal
 cd /d %~dp0
+
+rem A failed build must never leave an older shell.exe available to launch.
+tasklist /FI "IMAGENAME eq shell.exe" 2>NUL | find /I "shell.exe" >NUL
+if not errorlevel 1 (
+    echo *** BUILD BLOCKED: shell.exe is still running ***
+    echo Stop the running Trading Shell and build again.
+    exit /b 2
+)
+if exist shell.exe del /F /Q shell.exe
+if exist shell.exe (
+    echo *** BUILD BLOCKED: old shell.exe could not be removed ***
+    exit /b 2
+)
+
 if not exist obj mkdir obj
+echo *** BUILD ENTRYPOINT: shell_main_m92.cpp ***
 cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0602 ^
    /I"imgui" /I"imgui\backends" ^
    shell_main_m92.cpp ^
@@ -65,5 +80,16 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    imgui\backends\imgui_impl_win32.cpp imgui\backends\imgui_impl_dx11.cpp ^
    /Foobj\ /Fe:shell.exe ^
    /link d3d11.lib dxgi.lib d3dcompiler.lib winhttp.lib user32.lib gdi32.lib dwmapi.lib
-if errorlevel 1 ( echo. & echo *** BUILD FAILED *** & exit /b 1 )
-echo. & echo *** BUILD OK -^> shell.exe ***
+if errorlevel 1 (
+    if exist shell.exe del /F /Q shell.exe
+    echo.
+    echo *** BUILD FAILED - NO shell.exe WAS LEFT TO RUN ***
+    exit /b 1
+)
+if not exist shell.exe (
+    echo.
+    echo *** BUILD FAILED: linker reported success but shell.exe is missing ***
+    exit /b 1
+)
+echo.
+echo *** BUILD OK -^> shell.exe [workspace restore m92] ***

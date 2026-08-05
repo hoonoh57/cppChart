@@ -47,6 +47,16 @@ int main()
     Check(state.matches.size() == 2U, "Korean candidate count mismatch");
     Check(state.highlightedIndex == 0, "initial highlight mismatch");
 
+    SymbolSearchState mouseState;
+    std::snprintf(mouseState.query, sizeof(mouseState.query), "%s", "삼성");
+    RefreshSymbolMatches(mouseState, catalog);
+    Check(ConfirmSymbolMatch(mouseState, 1),
+          "mouse row confirmation failed");
+    Check(mouseState.selection.code == "005935",
+          "mouse confirmation must keep clicked row code");
+    Check(mouseState.selection.name == "삼성전자우",
+          "mouse confirmation must keep clicked row name");
+
     MoveSymbolHighlight(state, 1);
     Check(state.highlightedIndex == 1, "down navigation mismatch");
     MoveSymbolHighlight(state, 1);

@@ -6,7 +6,6 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
-#include <iterator>
 #include <string>
 #include <vector>
 
@@ -41,15 +40,27 @@ namespace
 {
     using M91Clock = std::chrono::steady_clock;
 
-    trading::app::ChartWorkspacePersistenceState g_m91LoadedState;
-    bool g_m91LoadAttempted = false;
-    bool g_m91Loaded = false;
-    bool g_m91PaneHeightsApplied = false;
-    bool g_m91Dirty = false;
-    bool g_m91ExitHandlerRegistered = false;
-    std::string g_m91LastObservedJson;
-    std::string g_m91LastSavedJson;
-    M91Clock::time_point g_m91ChangedAt{};
+    struct M91PersistenceRuntime final
+    {
+        trading::app::ChartWorkspacePersistenceState loadedState;
+        bool loadAttempted = false;
+        bool loaded = false;
+        bool loadedIndicatorsApplied = false;
+        bool paneHeightsApplied = false;
+        bool dirty = false;
+        bool exitHandlerRegistered = false;
+        bool pendingRestoreLog = false;
+        std::string loadError;
+        std::string lastObservedJson;
+        std::string lastSavedJson;
+        M91Clock::time_point changedAt{};
+    };
+
+    M91PersistenceRuntime& M91Runtime()
+    {
+        static M91PersistenceRuntime runtime;
+        return runtime;
+    }
 
     const std::string& M91WorkspacePath()
     {
@@ -80,7 +91,9 @@ namespace
 
     void M91SaveNow(const char* reason)
     {
-        if (!g_m91LoadAttempted) return;
+        M91PersistenceRuntime& runtime = M91Runtime();
+        if (!runtime.loadAttempted) return;
+        if (runtime.loaded && !runtime.loadedIndicatorsApplied) return;
 
         const trading::app::ChartWorkspacePersistenceState state =
             M91CurrentState();
@@ -97,9 +110,9 @@ namespace
                 error.c_str());
             return;
         }
-        if (json == g_m91LastSavedJson) {
-            g_m91LastObservedJson = json;
-            g_m91Dirty = false;
+        if (json == runtime.lastSavedJson) {
+            runtime.lastObservedJson = json;
+            runtime.dirty = false;
             return;
         }
         if (!trading::app::SaveChartWorkspaceState(
@@ -113,9 +126,9 @@ namespace
                 error.c_str());
             return;
         }
-        g_m91LastSavedJson = json;
-        g_m91LastObservedJson = json;
-        g_m91Dirty = false;
+        runtime.lastSavedJson = json;
+        runtime.lastObservedJson = json;
+        runtime.dirty = false;
         g_log.Add(
             "SYS",
             "차트 작업공간 저장(%s): 지표 %zu개, 패널 높이 %zu개",
@@ -131,77 +144,137 @@ namespace
 
     void M91RegisterExitHandler()
     {
-        if (g_m91ExitHandlerRegistered) return;
+        M91PersistenceRuntime& runtime = M91Runtime();
+        if (runtime.exitHandlerRegistered) return;
         std::atexit(M91SaveAtExit);
-        g_m91ExitHandlerRegistered = true;
+        runtime.exitHandlerRegistered = true;
     }
 
     void M91LoadStateIfNeeded()
     {
-        if (g_m91LoadAttempted) return;
-        g_m91LoadAttempted = true;
+        M91PersistenceRuntime& runtime = M91Runtime();
+        if (runtime.loadAttempted) return;
+        runtime.loadAttempted = true;
         M91RegisterExitHandler();
 
         bool found = false;
         std::string error;
         if (!trading::app::LoadChartWorkspaceState(
                 M91WorkspacePath(),
-                g_m91LoadedState,
+                runtime.loadedState,
                 found,
                 error))
         {
-            g_log.Add(
-                "FAULT",
-                "차트 작업공간 복원 실패, 기본 지표 사용: %s",
-                error.c_str());
+            runtime.loadError = error;
+            runtime.pendingRestoreLog = true;
             return;
         }
         if (!found) {
-            g_log.Add(
-                "SYS",
-                "차트 작업공간 파일 없음: 기본 지표 사용");
+            runtime.pendingRestoreLog = true;
             return;
         }
 
         std::string json;
         if (!trading::app::SerializeChartWorkspaceState(
-                g_m91LoadedState,
+                runtime.loadedState,
                 json,
+                error))
+        {
+            runtime.loadError = error;
+            runtime.pendingRestoreLog = true;
+            return;
+        }
+
+        runtime.lastObservedJson = json;
+        runtime.lastSavedJson = json;
+        runtime.loaded = true;
+        runtime.pendingRestoreLog = true;
+    }
+
+    void M91FlushRestoreLog()
+    {
+        M91PersistenceRuntime& runtime = M91Runtime();
+        if (!runtime.pendingRestoreLog) return;
+        runtime.pendingRestoreLog = false;
+
+        if (!runtime.loadError.empty()) {
+            g_log.Add(
+                "FAULT",
+                "차트 작업공간 복원 실패, 기본 지표 사용: %s",
+                runtime.loadError.c_str());
+            return;
+        }
+        if (!runtime.loaded) {
+            g_log.Add(
+                "SYS",
+                "차트 작업공간 파일 없음: 기본 지표 사용 (%s)",
+                M91WorkspacePath().c_str());
+            return;
+        }
+        g_log.Add(
+            "SYS",
+            "차트 작업공간 파일 읽음: 지표 %zu개, 패널 높이 %zu개 (%s)",
+            runtime.loadedState.indicators.size(),
+            runtime.loadedState.paneHeightWeights.size(),
+            M91WorkspacePath().c_str());
+    }
+
+    bool M91ApplyLoadedIndicatorsIfNeeded(bool& appliedNow)
+    {
+        appliedNow = false;
+        M91LoadStateIfNeeded();
+        M91FlushRestoreLog();
+
+        M91PersistenceRuntime& runtime = M91Runtime();
+        if (runtime.loadedIndicatorsApplied) return true;
+        if (!runtime.loaded) {
+            runtime.loadedIndicatorsApplied = true;
+            return true;
+        }
+
+        std::string error;
+        if (!ApplyIndicatorConfiguration(
+                runtime.loadedState.indicators,
                 error))
         {
             g_log.Add(
                 "FAULT",
-                "복원된 차트 작업공간 검증 실패: %s",
+                "저장된 지표 구성을 런타임에 적용하지 못했습니다: %s",
                 error.c_str());
-            return;
+            return false;
         }
 
-        g_m91LastObservedJson = json;
-        g_m91LastSavedJson = json;
-        g_m91Loaded = true;
+        g_indicatorDefinitions = runtime.loadedState.indicators;
+        g_indicatorManagerUi = {};
+        g_mainRenderSurface.paneHeightWeights.clear();
+        g_mainRenderSurface.paneDefaultHeightWeights.clear();
+        runtime.loadedIndicatorsApplied = true;
+        runtime.paneHeightsApplied = false;
+        appliedNow = true;
+        WakeFrames(8);
         g_log.Add(
             "SYS",
-            "차트 작업공간 복원: 지표 %zu개, 패널 높이 %zu개",
-            g_m91LoadedState.indicators.size(),
-            g_m91LoadedState.paneHeightWeights.size());
+            "차트 지표 구성 적용: 지표 %zu개",
+            g_indicatorDefinitions.size());
+        return true;
     }
 
     void M91ApplyLoadedPaneHeights(
         const trading::render::RenderDocument& document,
         trading::ui::RenderSurfaceState& surfaceState)
     {
-        if (g_m91PaneHeightsApplied) return;
-        M91LoadStateIfNeeded();
-        if (!g_m91Loaded) {
-            g_m91PaneHeightsApplied = true;
+        M91PersistenceRuntime& runtime = M91Runtime();
+        if (runtime.paneHeightsApplied) return;
+        if (!runtime.loaded || !runtime.loadedIndicatorsApplied) {
+            runtime.paneHeightsApplied = true;
             return;
         }
 
         std::size_t appliedCount = 0U;
         for (const trading::render::Pane& pane : document.panes) {
             const auto found =
-                g_m91LoadedState.paneHeightWeights.find(pane.id);
-            if (found == g_m91LoadedState.paneHeightWeights.end()) continue;
+                runtime.loadedState.paneHeightWeights.find(pane.id);
+            if (found == runtime.loadedState.paneHeightWeights.end()) continue;
             if (!std::isfinite(found->second) || found->second <= 0.0f) {
                 continue;
             }
@@ -211,7 +284,7 @@ namespace
             ++appliedCount;
         }
         surfaceState.dirty = true;
-        g_m91PaneHeightsApplied = true;
+        runtime.paneHeightsApplied = true;
         g_log.Add(
             "SYS",
             "차트 패널 높이 적용: %zu개",
@@ -221,6 +294,8 @@ namespace
     void M91PersistencePump(const char* source)
     {
         M91LoadStateIfNeeded();
+        M91PersistenceRuntime& runtime = M91Runtime();
+        if (runtime.loaded && !runtime.loadedIndicatorsApplied) return;
 
         const trading::app::ChartWorkspacePersistenceState state =
             M91CurrentState();
@@ -231,28 +306,24 @@ namespace
                 json,
                 error))
         {
-            g_log.Add(
-                "FAULT",
-                "차트 작업공간 상태 검증 실패: %s",
-                error.c_str());
             return;
         }
 
         const M91Clock::time_point now = M91Clock::now();
-        if (json != g_m91LastObservedJson) {
-            g_m91LastObservedJson = json;
-            g_m91ChangedAt = now;
-            g_m91Dirty = true;
+        if (json != runtime.lastObservedJson) {
+            runtime.lastObservedJson = json;
+            runtime.changedAt = now;
+            runtime.dirty = true;
         }
 
-        if (!g_m91Dirty) return;
+        if (!runtime.dirty) return;
 
         const bool interactionFinished =
             !ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
             !ImGui::IsMouseDown(ImGuiMouseButton_Right) &&
             !ImGui::IsAnyItemActive();
         const bool debounceExpired =
-            now - g_m91ChangedAt >= std::chrono::milliseconds(350);
+            now - runtime.changedAt >= std::chrono::milliseconds(350);
         if (interactionFinished || debounceExpired) {
             M91SaveNow(source);
         }
@@ -266,8 +337,9 @@ std::vector<trading::app::IndicatorInstanceDefinition>
 trading::app::M91InitialIndicatorDefinitions()
 {
     M91LoadStateIfNeeded();
-    if (g_m91Loaded) {
-        return g_m91LoadedState.indicators;
+    M91PersistenceRuntime& runtime = M91Runtime();
+    if (runtime.loaded) {
+        return runtime.loadedState.indicators;
     }
     return trading::app::InitialIndicatorDefinitions();
 }
@@ -277,6 +349,15 @@ void trading::ui::M91DrawRenderDocument(
     ImVec2 size,
     RenderSurfaceState& surfaceState)
 {
+    bool appliedNow = false;
+    if (!M91ApplyLoadedIndicatorsIfNeeded(appliedNow)) {
+        trading::ui::DrawRenderDocument(document, size, surfaceState);
+        return;
+    }
+    if (appliedNow) {
+        return;
+    }
+
     M91ApplyLoadedPaneHeights(document, surfaceState);
     trading::ui::DrawRenderDocument(document, size, surfaceState);
     M91PersistencePump("패널");
@@ -287,6 +368,8 @@ void trading::ui::M91DrawIndicatorManagerWindow(
     IndicatorManagerUiState& state,
     ApplyIndicatorDefinitions applyDefinitions)
 {
+    bool ignored = false;
+    M91ApplyLoadedIndicatorsIfNeeded(ignored);
     trading::ui::DrawIndicatorManagerWindow(
         definitions,
         state,

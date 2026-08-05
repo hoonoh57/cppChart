@@ -3,7 +3,9 @@
 #include "ui/render_document_renderer.h"
 
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -37,8 +39,6 @@ namespace trading::ui
 namespace
 {
     using M91Clock = std::chrono::steady_clock;
-    constexpr const char* M91WorkspacePath =
-        "data/chart_workspace.json";
 
     trading::app::ChartWorkspacePersistenceState g_m91LoadedState;
     bool g_m91LoadAttempted = false;
@@ -50,6 +50,25 @@ namespace
     std::string g_m91LastSavedJson;
     M91Clock::time_point g_m91ChangedAt{};
 
+    const std::string& M91WorkspacePath()
+    {
+        static const std::string path = [] {
+            wchar_t modulePath[32768]{};
+            const DWORD length = GetModuleFileNameW(
+                nullptr,
+                modulePath,
+                static_cast<DWORD>(std::size(modulePath)));
+            if (length == 0U || length >= std::size(modulePath)) {
+                return std::string("data/chart_workspace.json");
+            }
+            const std::filesystem::path executable(modulePath);
+            return (executable.parent_path() /
+                    L"data" /
+                    L"chart_workspace.json").string();
+        }();
+        return path;
+    }
+
     trading::app::ChartWorkspacePersistenceState M91CurrentState()
     {
         trading::app::ChartWorkspacePersistenceState state;
@@ -58,9 +77,9 @@ namespace
         return state;
     }
 
-    void M91SaveNow()
+    void M91SaveNow(const char* reason)
     {
-        if (g_indicatorDefinitions.empty()) return;
+        if (!g_m91LoadAttempted) return;
 
         const trading::app::ChartWorkspacePersistenceState state =
             M91CurrentState();
@@ -78,11 +97,12 @@ namespace
             return;
         }
         if (json == g_m91LastSavedJson) {
+            g_m91LastObservedJson = json;
             g_m91Dirty = false;
             return;
         }
         if (!trading::app::SaveChartWorkspaceState(
-                M91WorkspacePath,
+                M91WorkspacePath(),
                 state,
                 error))
         {
@@ -92,14 +112,20 @@ namespace
                 error.c_str());
             return;
         }
-        g_m91LastSavedJson = std::move(json);
-        g_m91LastObservedJson = g_m91LastSavedJson;
+        g_m91LastSavedJson = json;
+        g_m91LastObservedJson = json;
         g_m91Dirty = false;
+        g_log.Add(
+            "SYS",
+            "차트 작업공간 저장(%s): 지표 %zu개, 패널 높이 %zu개",
+            reason != nullptr ? reason : "변경",
+            state.indicators.size(),
+            state.paneHeightWeights.size());
     }
 
     void M91SaveAtExit()
     {
-        M91SaveNow();
+        M91SaveNow("종료");
     }
 
     void M91RegisterExitHandler()
@@ -118,7 +144,7 @@ namespace
         bool found = false;
         std::string error;
         if (!trading::app::LoadChartWorkspaceState(
-                M91WorkspacePath,
+                M91WorkspacePath(),
                 g_m91LoadedState,
                 found,
                 error))
@@ -129,17 +155,28 @@ namespace
                 error.c_str());
             return;
         }
-        if (!found || g_m91LoadedState.indicators.empty()) return;
+        if (!found) {
+            g_log.Add(
+                "SYS",
+                "차트 작업공간 파일 없음: 기본 지표 사용");
+            return;
+        }
 
         std::string json;
-        if (trading::app::SerializeChartWorkspaceState(
+        if (!trading::app::SerializeChartWorkspaceState(
                 g_m91LoadedState,
                 json,
                 error))
         {
-            g_m91LastObservedJson = json;
-            g_m91LastSavedJson = json;
+            g_log.Add(
+                "FAULT",
+                "복원된 차트 작업공간 검증 실패: %s",
+                error.c_str());
+            return;
         }
+
+        g_m91LastObservedJson = json;
+        g_m91LastSavedJson = json;
         g_m91Loaded = true;
         g_log.Add(
             "SYS",
@@ -159,6 +196,7 @@ namespace
             return;
         }
 
+        std::size_t appliedCount = 0U;
         for (const trading::render::Pane& pane : document.panes) {
             const auto found =
                 g_m91LoadedState.paneHeightWeights.find(pane.id);
@@ -169,15 +207,19 @@ namespace
             surfaceState.paneHeightWeights[pane.id] = found->second;
             surfaceState.paneDefaultHeightWeights[pane.id] =
                 (std::max)(0.01f, pane.heightWeight);
+            ++appliedCount;
         }
         surfaceState.dirty = true;
         g_m91PaneHeightsApplied = true;
+        g_log.Add(
+            "SYS",
+            "차트 패널 높이 적용: %zu개",
+            appliedCount);
     }
 
-    void M91PersistencePump()
+    void M91PersistencePump(const char* source)
     {
         M91LoadStateIfNeeded();
-        if (g_indicatorDefinitions.empty()) return;
 
         const trading::app::ChartWorkspacePersistenceState state =
             M91CurrentState();
@@ -188,21 +230,33 @@ namespace
                 json,
                 error))
         {
+            g_log.Add(
+                "FAULT",
+                "차트 작업공간 상태 검증 실패: %s",
+                error.c_str());
             return;
         }
 
         const M91Clock::time_point now = M91Clock::now();
         if (json != g_m91LastObservedJson) {
-            g_m91LastObservedJson = std::move(json);
+            g_m91LastObservedJson = json;
             g_m91ChangedAt = now;
             g_m91Dirty = true;
-            return;
         }
 
-        if (g_m91Dirty &&
-            now - g_m91ChangedAt >= std::chrono::milliseconds(700))
-        {
-            M91SaveNow();
+        if (!g_m91Dirty) return;
+
+        const bool interactionFinished =
+            !ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+            !ImGui::IsMouseDown(ImGuiMouseButton_Right) &&
+            !ImGui::IsAnyItemActive();
+        const bool debounceExpired =
+            now - g_m91ChangedAt >= std::chrono::milliseconds(350);
+        if (interactionFinished || debounceExpired) {
+            M91SaveNow(source);
+        }
+        else {
+            WakeFrames(4);
         }
     }
 }
@@ -211,7 +265,7 @@ std::vector<trading::app::IndicatorInstanceDefinition>
 trading::app::M91InitialIndicatorDefinitions()
 {
     M91LoadStateIfNeeded();
-    if (g_m91Loaded && !g_m91LoadedState.indicators.empty()) {
+    if (g_m91Loaded) {
         return g_m91LoadedState.indicators;
     }
     return trading::app::InitialIndicatorDefinitions();
@@ -224,7 +278,7 @@ void trading::ui::M91DrawRenderDocument(
 {
     M91ApplyLoadedPaneHeights(document, surfaceState);
     trading::ui::DrawRenderDocument(document, size, surfaceState);
-    M91PersistencePump();
+    M91PersistencePump("패널");
 }
 
 void trading::ui::M91DrawIndicatorManagerWindow(
@@ -236,5 +290,5 @@ void trading::ui::M91DrawIndicatorManagerWindow(
         definitions,
         state,
         applyDefinitions);
-    M91PersistencePump();
+    M91PersistencePump("지표");
 }

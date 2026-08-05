@@ -1,12 +1,13 @@
-﻿#include "app/chart_workspace_persistence.h"
+﻿#include "app/chart_workspace_bootstrap.h"
+#include "app/chart_workspace_persistence.h"
 #include "ui/indicator_manager_ui.h"
 #include "ui/render_document_renderer.h"
 
 #include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace trading::app
@@ -48,8 +49,8 @@ namespace
         bool loadedIndicatorsApplied = false;
         bool paneHeightsApplied = false;
         bool dirty = false;
-        bool exitHandlerRegistered = false;
         bool pendingRestoreLog = false;
+        bool loadedFromBootstrap = false;
         std::string loadError;
         std::string lastObservedJson;
         std::string lastSavedJson;
@@ -62,22 +63,34 @@ namespace
         return runtime;
     }
 
-    const std::string& M91WorkspacePath()
+    const std::filesystem::path& M91WorkspaceDirectory()
     {
-        static const std::string path = [] {
+        static const std::filesystem::path directory = [] {
             wchar_t modulePath[32768]{};
             const DWORD length = GetModuleFileNameW(
                 nullptr,
                 modulePath,
-                static_cast<DWORD>(std::size(modulePath)));
-            if (length == 0U || length >= std::size(modulePath)) {
-                return std::string("data/chart_workspace.json");
+                32768U);
+            if (length == 0U || length >= 32768U) {
+                return std::filesystem::path("data");
             }
-            const std::filesystem::path executable(modulePath);
-            return (executable.parent_path() /
-                    L"data" /
-                    L"chart_workspace.json").string();
+            return std::filesystem::path(modulePath).parent_path() / L"data";
         }();
+        return directory;
+    }
+
+    const std::string& M91WorkspacePath()
+    {
+        static const std::string path =
+            (M91WorkspaceDirectory() / L"chart_workspace.json").string();
+        return path;
+    }
+
+    const std::string& M91BootstrapPath()
+    {
+        static const std::string path =
+            (M91WorkspaceDirectory() /
+             L"chart_workspace_bootstrap.json").string();
         return path;
     }
 
@@ -87,6 +100,54 @@ namespace
         state.indicators = g_indicatorDefinitions;
         state.paneHeightWeights = g_mainRenderSurface.paneHeightWeights;
         return state;
+    }
+
+    const trading::app::IndicatorInstanceDefinition*
+    M91FindDefinition(
+        const std::vector<trading::app::IndicatorInstanceDefinition>& values,
+        const std::string& id,
+        const std::string& type)
+    {
+        for (const auto& value : values) {
+            if (value.spec.id == id && value.spec.type == type) {
+                return &value;
+            }
+        }
+        return nullptr;
+    }
+
+    trading::app::ChartWorkspacePersistenceState M91ComposeLoadedState(
+        const trading::app::ChartWorkspacePersistenceState& primary,
+        bool primaryFound,
+        const trading::app::ChartWorkspacePersistenceState& bootstrap,
+        bool bootstrapFound)
+    {
+        if (!bootstrapFound) return primary;
+
+        trading::app::ChartWorkspacePersistenceState composed;
+        composed.indicators.reserve(bootstrap.indicators.size());
+        for (const auto& bootstrapDefinition : bootstrap.indicators) {
+            const auto* detailed = primaryFound
+                ? M91FindDefinition(
+                    primary.indicators,
+                    bootstrapDefinition.spec.id,
+                    bootstrapDefinition.spec.type)
+                : nullptr;
+            trading::app::IndicatorInstanceDefinition restored =
+                detailed != nullptr
+                    ? *detailed
+                    : bootstrapDefinition;
+            restored.spec.parameters =
+                bootstrapDefinition.spec.parameters;
+            restored.visible = bootstrapDefinition.visible;
+            composed.indicators.push_back(std::move(restored));
+        }
+
+        composed.paneHeightWeights = primary.paneHeightWeights;
+        for (const auto& pane : bootstrap.paneHeightWeights) {
+            composed.paneHeightWeights[pane.first] = pane.second;
+        }
+        return composed;
     }
 
     void M91SaveNow(const char* reason)
@@ -115,39 +176,44 @@ namespace
             runtime.dirty = false;
             return;
         }
-        if (!trading::app::SaveChartWorkspaceState(
+
+        std::string primaryError;
+        const bool primarySaved =
+            trading::app::SaveChartWorkspaceState(
                 M91WorkspacePath(),
                 state,
-                error))
-        {
+                primaryError);
+        std::string bootstrapError;
+        const bool bootstrapSaved =
+            trading::app::SaveChartWorkspaceBootstrap(
+                M91BootstrapPath(),
+                state,
+                bootstrapError);
+
+        if (!primarySaved) {
             g_log.Add(
                 "FAULT",
-                "차트 작업공간 저장 실패: %s",
-                error.c_str());
-            return;
+                "차트 작업공간 전체 저장 실패: %s",
+                primaryError.c_str());
         }
+        if (!bootstrapSaved) {
+            g_log.Add(
+                "FAULT",
+                "차트 작업공간 복원본 저장 실패: %s",
+                bootstrapError.c_str());
+        }
+        if (!primarySaved && !bootstrapSaved) return;
+
         runtime.lastSavedJson = json;
         runtime.lastObservedJson = json;
         runtime.dirty = false;
         g_log.Add(
             "SYS",
-            "차트 작업공간 저장(%s): 지표 %zu개, 패널 높이 %zu개",
+            "차트 작업공간 저장(%s): 지표 %zu개, 패널 높이 %zu개, 복원본 %s",
             reason != nullptr ? reason : "변경",
             state.indicators.size(),
-            state.paneHeightWeights.size());
-    }
-
-    void M91SaveAtExit()
-    {
-        M91SaveNow("종료");
-    }
-
-    void M91RegisterExitHandler()
-    {
-        M91PersistenceRuntime& runtime = M91Runtime();
-        if (runtime.exitHandlerRegistered) return;
-        std::atexit(M91SaveAtExit);
-        runtime.exitHandlerRegistered = true;
+            state.paneHeightWeights.size(),
+            bootstrapSaved ? "완료" : "실패");
     }
 
     void M91LoadStateIfNeeded()
@@ -155,32 +221,54 @@ namespace
         M91PersistenceRuntime& runtime = M91Runtime();
         if (runtime.loadAttempted) return;
         runtime.loadAttempted = true;
-        M91RegisterExitHandler();
 
-        bool found = false;
-        std::string error;
-        if (!trading::app::LoadChartWorkspaceState(
-                M91WorkspacePath(),
-                runtime.loadedState,
-                found,
-                error))
+        trading::app::ChartWorkspacePersistenceState primary;
+        bool primaryFound = false;
+        std::string primaryError;
+        const bool primaryOk = trading::app::LoadChartWorkspaceState(
+            M91WorkspacePath(),
+            primary,
+            primaryFound,
+            primaryError);
+
+        trading::app::ChartWorkspacePersistenceState bootstrap;
+        bool bootstrapFound = false;
+        std::string bootstrapError;
+        const bool bootstrapOk = trading::app::LoadChartWorkspaceBootstrap(
+            M91BootstrapPath(),
+            bootstrap,
+            bootstrapFound,
+            bootstrapError);
+
+        if ((!primaryOk || !primaryFound) &&
+            (!bootstrapOk || !bootstrapFound))
         {
-            runtime.loadError = error;
+            if (!primaryOk || !bootstrapOk) {
+                runtime.loadError =
+                    "전체=" +
+                    (primaryError.empty() ? std::string("없음") : primaryError) +
+                    " / 복원본=" +
+                    (bootstrapError.empty() ? std::string("없음") : bootstrapError);
+            }
             runtime.pendingRestoreLog = true;
             return;
         }
-        if (!found) {
-            runtime.pendingRestoreLog = true;
-            return;
-        }
+
+        runtime.loadedState = M91ComposeLoadedState(
+            primary,
+            primaryOk && primaryFound,
+            bootstrap,
+            bootstrapOk && bootstrapFound);
+        runtime.loadedFromBootstrap = bootstrapOk && bootstrapFound;
 
         std::string json;
+        std::string validationError;
         if (!trading::app::SerializeChartWorkspaceState(
                 runtime.loadedState,
                 json,
-                error))
+                validationError))
         {
-            runtime.loadError = error;
+            runtime.loadError = validationError;
             runtime.pendingRestoreLog = true;
             return;
         }
@@ -213,10 +301,10 @@ namespace
         }
         g_log.Add(
             "SYS",
-            "차트 작업공간 파일 읽음: 지표 %zu개, 패널 높이 %zu개 (%s)",
+            "차트 작업공간 복원: 지표 %zu개, 패널 높이 %zu개, 복원본 %s",
             runtime.loadedState.indicators.size(),
             runtime.loadedState.paneHeightWeights.size(),
-            M91WorkspacePath().c_str());
+            runtime.loadedFromBootstrap ? "적용" : "미사용");
     }
 
     bool M91ApplyLoadedIndicatorsIfNeeded(bool& appliedNow)
@@ -315,7 +403,6 @@ namespace
             runtime.changedAt = now;
             runtime.dirty = true;
         }
-
         if (!runtime.dirty) return;
 
         const bool interactionFinished =
@@ -339,6 +426,7 @@ trading::app::M91InitialIndicatorDefinitions()
     M91LoadStateIfNeeded();
     M91PersistenceRuntime& runtime = M91Runtime();
     if (runtime.loaded) {
+        runtime.loadedIndicatorsApplied = true;
         return runtime.loadedState.indicators;
     }
     return trading::app::InitialIndicatorDefinitions();
@@ -354,9 +442,7 @@ void trading::ui::M91DrawRenderDocument(
         trading::ui::DrawRenderDocument(document, size, surfaceState);
         return;
     }
-    if (appliedNow) {
-        return;
-    }
+    if (appliedNow) return;
 
     M91ApplyLoadedPaneHeights(document, surfaceState);
     trading::ui::DrawRenderDocument(document, size, surfaceState);

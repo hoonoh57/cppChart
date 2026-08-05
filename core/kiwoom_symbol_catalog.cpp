@@ -20,17 +20,39 @@ namespace trading
             return value;
         }
 
+        const json_lite::Value* FindFirst(
+            const json_lite::Value& object,
+            const char* primary,
+            const char* legacy) noexcept
+        {
+            const json_lite::Value* value = object.Find(primary);
+            if (value == nullptr && legacy != nullptr) {
+                value = object.Find(legacy);
+            }
+            return value;
+        }
+
         const json_lite::Value::Array* FindEntryArray(
             const json_lite::Value& root) noexcept
         {
             if (!root.IsObject()) return nullptr;
+
+            const json_lite::Value* list = root.Find("list");
+            if (list != nullptr && list->IsArray()) {
+                return &list->AsArray();
+            }
+
             for (const auto& pair : root.AsObject()) {
                 if (!pair.second.IsArray()) continue;
                 for (const json_lite::Value& item : pair.second.AsArray()) {
                     if (!item.IsObject()) continue;
-                    if (item.Find("stk_cd") != nullptr &&
-                        item.Find("stk_nm") != nullptr)
-                    {
+                    const bool currentSchema =
+                        item.Find("code") != nullptr &&
+                        item.Find("name") != nullptr;
+                    const bool legacySchema =
+                        item.Find("stk_cd") != nullptr &&
+                        item.Find("stk_nm") != nullptr;
+                    if (currentSchema || legacySchema) {
                         return &pair.second.AsArray();
                     }
                 }
@@ -61,10 +83,8 @@ namespace trading
         request.headers.emplace("authorization", "Bearer " + bearerToken);
         request.headers.emplace("api-id", request.apiId);
         request.headers.emplace("content-type", "application/json;charset=UTF-8");
-        if (continuation.continueYn == "Y" && !continuation.nextKey.empty()) {
-            request.headers.emplace("cont-yn", "Y");
-            request.headers.emplace("next-key", continuation.nextKey);
-        }
+        request.headers.emplace("cont-yn", continuation.continueYn == "Y" ? "Y" : "N");
+        request.headers.emplace("next-key", continuation.nextKey);
         request.body =
             "{\"mrkt_tp\":" + json_lite::EscapeString(marketType) + "}";
         error.clear();
@@ -110,9 +130,12 @@ namespace trading
         std::set<std::string> seen;
         for (const json_lite::Value& item : *entries) {
             if (!item.IsObject()) continue;
-            const json_lite::Value* codeValue = item.Find("stk_cd");
-            const json_lite::Value* nameValue = item.Find("stk_nm");
+            const json_lite::Value* codeValue =
+                FindFirst(item, "code", "stk_cd");
+            const json_lite::Value* nameValue =
+                FindFirst(item, "name", "stk_nm");
             if (codeValue == nullptr || nameValue == nullptr) continue;
+
             SymbolCatalogEntry entry;
             entry.code = codeValue->StringOr();
             entry.name = nameValue->StringOr();

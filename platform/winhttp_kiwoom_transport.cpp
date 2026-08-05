@@ -1,5 +1,7 @@
 #include "winhttp_kiwoom_transport.h"
 
+#include <algorithm>
+#include <sstream>
 #include <utility>
 
 namespace trading::platform
@@ -21,6 +23,27 @@ namespace trading::platform
         result.headers = response.headers;
         result.body = response.body;
         result.error = response.error;
+
+        if (
+            request.apiId == "ka10099" &&
+            response.transportOk &&
+            (response.statusCode < 200 || response.statusCode >= 300))
+        {
+            std::ostringstream error;
+            error << "ka10099 HTTP " << response.statusCode;
+            if (!response.body.empty()) {
+                constexpr std::size_t kMaxLoggedBody = 512U;
+                const std::size_t bodyLength =
+                    std::min(response.body.size(), kMaxLoggedBody);
+                error << ": " << response.body.substr(0U, bodyLength);
+                if (response.body.size() > bodyLength) {
+                    error << "...";
+                }
+            }
+            result.transportOk = false;
+            result.error = error.str();
+        }
+
         return result;
     }
 

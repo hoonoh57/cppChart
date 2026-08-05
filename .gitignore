@@ -49,6 +49,9 @@ patch*_shell.ps1
 
 # Local UI state
 /shell_layout.ini
+/data/chart_workspace.json
+/data/chart_workspace.json.tmp
+/data/chart_workspace.json.bak
 
 # Temporary patches, snapshots and backups
 /patch*.ps1

@@ -256,7 +256,27 @@ namespace
         g_m82ToolbarHighlight = g_m82ToolbarPopupOpen ? 0 : -1;
     }
 
-    void SelectToolbarMatch(
+    bool ApplyToolbarEntry(
+        char* buffer,
+        std::size_t bufferSize,
+        const trading::SymbolCatalogEntry& source)
+    {
+        if (buffer == nullptr || bufferSize == 0U) return false;
+
+        trading::SymbolCatalogEntry entry = source;
+        entry.code = NormalizeCode(entry.code);
+        if (!IsSixDigitCode(entry.code) && !IsNxtCode(entry.code)) {
+            return false;
+        }
+
+        ImGui::ClearActiveID();
+        std::snprintf(buffer, bufferSize, "%s", entry.code.c_str());
+        AddRecent(entry);
+        g_m82ToolbarPopupOpen = false;
+        return true;
+    }
+
+    bool SelectToolbarMatch(
         char* buffer,
         std::size_t bufferSize,
         int index)
@@ -264,15 +284,13 @@ namespace
         if (index < 0 ||
             index >= static_cast<int>(g_m82ToolbarMatches.size()))
         {
-            return;
+            return false;
         }
 
-        trading::SymbolCatalogEntry entry =
-            g_m82ToolbarMatches[static_cast<std::size_t>(index)];
-        entry.code = NormalizeCode(entry.code);
-        std::snprintf(buffer, bufferSize, "%s", entry.code.c_str());
-        AddRecent(entry);
-        g_m82ToolbarPopupOpen = false;
+        return ApplyToolbarEntry(
+            buffer,
+            bufferSize,
+            g_m82ToolbarMatches[static_cast<std::size_t>(index)]);
     }
 
     void RecordDirectCode(const char* buffer)
@@ -323,6 +341,7 @@ bool ImGui::M82InputText(
         return changed;
     }
 
+    bool selectionChanged = false;
     const bool inputActive = ImGui::IsItemActive();
     if (ImGui::IsItemActivated() && buffer[0] == '\0') {
         RefreshToolbarMatches(buffer);
@@ -353,7 +372,7 @@ bool ImGui::M82InputText(
     }
     if (inputActive && ImGui::IsKeyPressed(ImGuiKey_Enter)) {
         if (g_m82ToolbarPopupOpen && !g_m82ToolbarMatches.empty()) {
-            SelectToolbarMatch(
+            selectionChanged = SelectToolbarMatch(
                 buffer,
                 bufferSize,
                 g_m82ToolbarHighlight);
@@ -361,7 +380,9 @@ bool ImGui::M82InputText(
         else {
             const std::string normalized = NormalizeCode(buffer);
             if (normalized != buffer) {
+                ImGui::ClearActiveID();
                 std::snprintf(buffer, bufferSize, "%s", normalized.c_str());
+                selectionChanged = true;
             }
             RecordDirectCode(buffer);
         }
@@ -385,6 +406,8 @@ bool ImGui::M82InputText(
         ImGui::EndTooltip();
     }
 
+    bool mouseSelectionPending = false;
+    trading::SymbolCatalogEntry mouseSelectedEntry;
     if (g_m82ToolbarPopupOpen && !g_m82ToolbarMatches.empty()) {
         if (ImGui::BeginListBox(
                 "##m82_toolbar_symbol_matches",
@@ -404,15 +427,25 @@ bool ImGui::M82InputText(
                     text += "  [" + entry.market + "]";
                 }
 
+                ImGui::PushID(index);
                 const bool selected = index == g_m82ToolbarHighlight;
                 if (ImGui::Selectable(text.c_str(), selected)) {
-                    SelectToolbarMatch(buffer, bufferSize, index);
+                    mouseSelectedEntry = entry;
+                    mouseSelectionPending = true;
                 }
                 if (selected) ImGui::SetItemDefaultFocus();
+                ImGui::PopID();
             }
             ImGui::EndListBox();
         }
     }
 
-    return changed;
+    if (mouseSelectionPending) {
+        selectionChanged = ApplyToolbarEntry(
+            buffer,
+            bufferSize,
+            mouseSelectedEntry) || selectionChanged;
+    }
+
+    return changed || selectionChanged;
 }

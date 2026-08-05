@@ -1,16 +1,47 @@
 #include "winhttp_kiwoom_transport.h"
 
 #include <algorithm>
+#include <chrono>
+#include <mutex>
 #include <sstream>
+#include <thread>
 #include <utility>
 
 namespace trading::platform
 {
+    namespace
+    {
+        void ThrottleSymbolCatalogRequest()
+        {
+            using Clock = std::chrono::steady_clock;
+            constexpr auto kMinimumInterval =
+                std::chrono::milliseconds(1200);
+
+            static std::mutex mutex;
+            static Clock::time_point lastRequestAt{};
+
+            std::lock_guard<std::mutex> lock(mutex);
+            const Clock::time_point now = Clock::now();
+            if (lastRequestAt != Clock::time_point{}) {
+                const Clock::time_point allowedAt =
+                    lastRequestAt + kMinimumInterval;
+                if (now < allowedAt) {
+                    std::this_thread::sleep_until(allowedAt);
+                }
+            }
+            lastRequestAt = Clock::now();
+        }
+    }
+
     RuntimeTransportResponse WinHttpKiwoomTransport::SendRest(
         const std::string& baseUrl,
         const RestRequest& request,
         int timeoutMilliseconds)
     {
+        if (request.apiId == "ka10099") {
+            ThrottleSymbolCatalogRequest();
+        }
+
         const HttpResponse response =
             restClient_.Send(
                 baseUrl,

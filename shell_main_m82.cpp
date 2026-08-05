@@ -38,10 +38,11 @@ namespace
     int g_m82ToolbarHighlight = -1;
     bool g_m82ToolbarPopupOpen = false;
     bool g_m82MasterInitialized = false;
-    bool g_m82RefreshRequested = false;
+    bool g_m82RefreshInFlight = false;
     std::size_t g_m82ObservedMasterCount = 0U;
     std::size_t g_m82SavedMasterCount = 0U;
     double g_m82MasterChangedAt = 0.0;
+    double g_m82LastRefreshAttemptAt = -1000.0;
     std::string g_m82MasterStatus;
     std::string g_m82MasterError;
 
@@ -99,6 +100,18 @@ namespace
         return g_symbolCatalog;
     }
 
+    std::size_t CountMarket(
+        const std::vector<trading::SymbolCatalogEntry>& entries,
+        const char* market)
+    {
+        return static_cast<std::size_t>(std::count_if(
+            entries.begin(),
+            entries.end(),
+            [&](const trading::SymbolCatalogEntry& entry) {
+                return entry.market == market;
+            }));
+    }
+
     void EnsureSymbolMasterLoaded()
     {
         if (g_m82MasterInitialized) return;
@@ -110,12 +123,16 @@ namespace
             MergeSymbolMaster(cached.entries);
             g_m82ObservedMasterCount = cached.entries.size();
             g_m82SavedMasterCount = cached.entries.size();
+            const std::size_t kospi = CountMarket(cached.entries, "0");
+            const std::size_t kosdaq = CountMarket(cached.entries, "10");
             g_m82MasterStatus = cached.fresh
                 ? "종목 마스터 캐시 준비"
                 : "종목 마스터 캐시 준비(갱신 필요)";
+            g_log.Add("DATA", "KOSPI 종목 마스터 캐시 로드: %zu종목", kospi);
+            g_log.Add("DATA", "KOSDAQ 종목 마스터 캐시 로드: %zu종목", kosdaq);
             g_log.Add(
                 "DATA",
-                "종목 마스터 캐시 로드: %zu종목%s",
+                "종목 마스터 캐시 로드 합계: %zu종목%s",
                 cached.entries.size(),
                 cached.fresh ? "" : " (stale)");
         }
@@ -129,16 +146,17 @@ namespace
         }
     }
 
-    void RequestSymbolMasterRefreshIfReady()
+    void RequestSymbolMasterRefresh()
     {
-        if (g_m82RefreshRequested || !g_runtimeRunner ||
+        if (g_m82RefreshInFlight || !g_runtimeRunner ||
             !g_runtimeRunner->IsRunning())
         {
             return;
         }
 
-        const trading::KiwoomRuntimeSnapshot runtime = RuntimeSnapshot();
-        if (runtime.sessionState != trading::KiwoomSessionState::Ready) return;
+        const double now = NowSeconds();
+        if (now - g_m82LastRefreshAttemptAt < 3.0) return;
+        g_m82LastRefreshAttemptAt = now;
 
         trading::Continuation empty;
         std::string kospiError;
@@ -147,21 +165,18 @@ namespace
             "0", empty, kospiError);
         const bool kosdaq = g_runtimeRunner->RequestSymbolCatalog(
             "10", empty, kosdaqError);
-        g_m82RefreshRequested = true;
 
         if (!kospi || !kosdaq) {
             g_m82MasterError = !kospiError.empty() ? kospiError : kosdaqError;
-            g_m82MasterStatus = "종목 마스터 REST 갱신 실패, 캐시 사용";
-            g_log.Add(
-                "FAULT",
-                "종목 마스터 REST 갱신 시작 실패: %s",
-                g_m82MasterError.c_str());
+            g_m82MasterStatus = "종목 마스터 REST 요청 재시도 대기";
             return;
         }
 
+        g_m82RefreshInFlight = true;
+        g_m82MasterChangedAt = now;
         g_m82MasterError.clear();
-        g_m82MasterStatus = "KOSPI/KOSDAQ 종목 마스터 갱신 중";
-        g_log.Add("DATA", "KOSPI/KOSDAQ 종목 마스터 REST 갱신 시작");
+        g_m82MasterStatus = "KOSPI/KOSDAQ 종목 마스터 다운로드 중";
+        g_log.Add("DATA", "KOSPI/KOSDAQ 종목 마스터 REST 다운로드 시작");
     }
 
     void PersistSymbolMasterWhenStable()
@@ -174,9 +189,13 @@ namespace
             g_m82MasterChangedAt = NowSeconds();
             return;
         }
-        if (count == 0U || count == g_m82SavedMasterCount ||
+
+        const std::size_t kospi = CountMarket(snapshot, "0");
+        const std::size_t kosdaq = CountMarket(snapshot, "10");
+        if (!g_m82RefreshInFlight || kospi == 0U || kosdaq == 0U ||
+            count == g_m82SavedMasterCount ||
             g_m82MasterChangedAt <= 0.0 ||
-            NowSeconds() - g_m82MasterChangedAt < 1.0)
+            NowSeconds() - g_m82MasterChangedAt < 2.0)
         {
             return;
         }
@@ -190,15 +209,19 @@ namespace
             g_m82MasterError = error;
             g_m82MasterStatus = "종목 마스터 캐시 저장 실패";
             g_log.Add("FAULT", "%s", error.c_str());
-            g_m82MasterChangedAt = NowSeconds();
+            g_m82RefreshInFlight = false;
+            g_m82LastRefreshAttemptAt = NowSeconds();
             return;
         }
 
         g_m82SavedMasterCount = count;
         g_m82MasterChangedAt = 0.0;
+        g_m82RefreshInFlight = false;
         g_m82MasterError.clear();
         g_m82MasterStatus = "종목 마스터 준비";
-        g_log.Add("DATA", "종목 마스터 캐시 저장: %zu종목", count);
+        g_log.Add("DATA", "KOSPI 종목 마스터 수신: %zu종목", kospi);
+        g_log.Add("DATA", "KOSDAQ 종목 마스터 수신: %zu종목", kosdaq);
+        g_log.Add("DATA", "종목 마스터 캐시 저장 합계: %zu종목", count);
     }
 
     void AddRecent(const trading::SymbolCatalogEntry& entry)
@@ -285,7 +308,7 @@ bool ImGui::M82InputText(
     void* userData)
 {
     EnsureSymbolMasterLoaded();
-    RequestSymbolMasterRefreshIfReady();
+    RequestSymbolMasterRefresh();
     PersistSymbolMasterWhenStable();
 
     const bool changed = ImGui::InputText(

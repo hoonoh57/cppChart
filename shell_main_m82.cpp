@@ -329,6 +329,13 @@ bool ImGui::M82InputText(
     RequestSymbolMasterRefresh();
     PersistSymbolMasterWhenStable();
 
+    const bool isSymbolInput =
+        label != nullptr && std::strcmp(label, "##symbol") == 0;
+    const bool inputWasActive =
+        isSymbolInput && ImGui::GetActiveID() == ImGui::GetID(label);
+    const bool enterPressedBeforeInput =
+        inputWasActive && ImGui::IsKeyPressed(ImGuiKey_Enter, false);
+
     const bool changed = ImGui::InputText(
         label,
         buffer,
@@ -337,7 +344,7 @@ bool ImGui::M82InputText(
         callback,
         userData);
 
-    if (label == nullptr || std::strcmp(label, "##symbol") != 0) {
+    if (!isSymbolInput) {
         return changed;
     }
 
@@ -370,7 +377,7 @@ bool ImGui::M82InputText(
     if (inputActive && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
         g_m82ToolbarPopupOpen = false;
     }
-    if (inputActive && ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+    if (enterPressedBeforeInput) {
         if (g_m82ToolbarPopupOpen && !g_m82ToolbarMatches.empty()) {
             selectionChanged = SelectToolbarMatch(
                 buffer,

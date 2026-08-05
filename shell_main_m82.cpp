@@ -16,9 +16,21 @@ namespace ImGui
         void* userData = nullptr);
 }
 
+static void DrawTradingToolbar();
+
+#define M83_JOIN_INNER(left, right) left##right
+#define M83_JOIN(left, right) M83_JOIN_INNER(left, right)
+#define M83_DRAW_TOOLBAR_743() DrawToolbarOriginal()
+#define M83_DRAW_TOOLBAR_2381() DrawTradingToolbar()
+#define DrawToolbar() M83_JOIN(M83_DRAW_TOOLBAR_, __LINE__)()
 #define InputText M82InputText
 #include "shell_main.cpp"
 #undef InputText
+#undef DrawToolbar
+#undef M83_DRAW_TOOLBAR_2381
+#undef M83_DRAW_TOOLBAR_743
+#undef M83_JOIN
+#undef M83_JOIN_INNER
 
 #include "core/symbol_master_cache.h"
 
@@ -315,6 +327,55 @@ namespace
         if (found != master.end()) entry = *found;
         AddRecent(entry);
     }
+
+    bool TryResolveSymbolEntry(
+        const std::string& selectedCode,
+        trading::SymbolCatalogEntry& result)
+    {
+        if (selectedCode.empty()) return false;
+        const std::string baseCode = IsNxtCode(selectedCode)
+            ? selectedCode.substr(0U, 6U)
+            : selectedCode;
+        const std::vector<trading::SymbolCatalogEntry> master =
+            SymbolMasterSnapshot();
+        const auto found = std::find_if(
+            master.begin(),
+            master.end(),
+            [&](const trading::SymbolCatalogEntry& entry) {
+                return entry.code == selectedCode || entry.code == baseCode;
+            });
+        if (found == master.end()) return false;
+        result = *found;
+        return true;
+    }
+
+    const char* MarketDisplayName(const std::string& market) noexcept
+    {
+        if (market == "0" || market == "KOSPI") return "KOSPI";
+        if (market == "10" || market == "KOSDAQ") return "KOSDAQ";
+        if (market == "NXT") return "NXT";
+        return market.empty() ? "" : market.c_str();
+    }
+
+    std::string FormatInteger(long long value)
+    {
+        std::string text = std::to_string(value);
+        const std::size_t firstDigit =
+            !text.empty() && text.front() == '-' ? 1U : 0U;
+        std::size_t position = text.size();
+        while (position > firstDigit + 3U) {
+            position -= 3U;
+            text.insert(position, ",");
+        }
+        return text;
+    }
+
+    ImVec4 PriceDirectionColor(long long change) noexcept
+    {
+        if (change > 0) return ImVec4(0.95f, 0.24f, 0.24f, 1.0f);
+        if (change < 0) return ImVec4(0.28f, 0.55f, 1.0f, 1.0f);
+        return ImVec4(0.88f, 0.88f, 0.88f, 1.0f);
+    }
 }
 
 bool ImGui::M82InputText(
@@ -455,4 +516,300 @@ bool ImGui::M82InputText(
     }
 
     return changed || selectionChanged;
+}
+
+static void DrawTradingToolbar()
+{
+    ImGui::PushID("practical_trading_toolbar");
+    ImGui::PushStyleVar(
+        ImGuiStyleVar_FramePadding,
+        ImVec2(6.0f, 4.0f));
+
+    const trading::app::MarketDataSnapshot market =
+        g_marketDataModule.Snapshot();
+    const trading::KiwoomRuntimeSnapshot runtime = RuntimeSnapshot();
+    const bool socketUp =
+        runtime.sessionState == trading::KiwoomSessionState::LoginPending ||
+        runtime.sessionState == trading::KiwoomSessionState::RegistrationPending ||
+        runtime.sessionState == trading::KiwoomSessionState::ReconciliationPending ||
+        runtime.sessionState == trading::KiwoomSessionState::Ready;
+
+    const std::string selectedCode = NormalizeCode(g_symbolInput);
+    trading::SymbolCatalogEntry selectedEntry;
+    const bool hasSelectedEntry =
+        TryResolveSymbolEntry(selectedCode, selectedEntry);
+    const bool quoteReady =
+        market.state == trading::app::MarketDataState::Ready &&
+        market.hasLatestBar &&
+        !selectedCode.empty() &&
+        market.code == selectedCode;
+
+    ImGui::SetNextItemWidth(120.0f);
+    ImGui::M82InputText(
+        "##symbol",
+        g_symbolInput,
+        sizeof(g_symbolInput));
+    ImGui::SameLine();
+
+    if (hasSelectedEntry) {
+        ImGui::TextUnformatted(selectedEntry.name.c_str());
+        ImGui::SameLine();
+        ImGui::TextDisabled(
+            "[%s]",
+            MarketDisplayName(selectedEntry.market));
+    }
+    else if (!selectedCode.empty()) {
+        ImGui::TextDisabled("종목명 확인 중");
+    }
+    else {
+        ImGui::TextDisabled("종목 선택");
+    }
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+
+    if (quoteReady) {
+        const long long current = market.latestBar.close;
+        const long long change = current - market.latestBar.open;
+        const double changeRate = market.latestBar.open != 0
+            ? static_cast<double>(change) /
+                static_cast<double>(market.latestBar.open) * 100.0
+            : 0.0;
+        const ImVec4 directionColor = PriceDirectionColor(change);
+        const std::string currentText = FormatInteger(current);
+        const std::string changeText = FormatInteger(change);
+        ImGui::TextColored(
+            directionColor,
+            "%s원",
+            currentText.c_str());
+        ImGui::SameLine();
+        ImGui::TextColored(
+            directionColor,
+            "시가대비 %s%s원 (%+.2f%%)",
+            change > 0 ? "+" : "",
+            changeText.c_str(),
+            changeRate);
+        ImGui::SameLine();
+        ImGui::TextDisabled(
+            "O %s  H %s  L %s  현재봉 V %s",
+            FormatInteger(market.latestBar.open).c_str(),
+            FormatInteger(market.latestBar.high).c_str(),
+            FormatInteger(market.latestBar.low).c_str(),
+            FormatInteger(static_cast<long long>(market.latestBar.volume)).c_str());
+    }
+    else {
+        ImGui::TextDisabled(
+            market.state == trading::app::MarketDataState::Loading
+                ? "실제 시세 조회 중"
+                : "선택 종목 실제 시세 없음");
+    }
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("| 수량");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("-")) {
+        g_orderQuantity = (std::max)(1, g_orderQuantity - 1);
+    }
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(55.0f);
+    if (ImGui::InputInt(
+            "##toolbar_order_quantity",
+            &g_orderQuantity,
+            0,
+            0))
+    {
+        g_orderQuantity = (std::max)(1, g_orderQuantity);
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("+")) {
+        ++g_orderQuantity;
+    }
+
+    ImGui::SameLine();
+    const bool canBuy = CanSubmitEntryOrders() && quoteReady;
+    ImGui::PushStyleColor(
+        ImGuiCol_Button,
+        ImVec4(0.68f, 0.12f, 0.12f, 1.0f));
+    ImGui::PushStyleColor(
+        ImGuiCol_ButtonHovered,
+        ImVec4(0.86f, 0.18f, 0.18f, 1.0f));
+    if (!canBuy) ImGui::BeginDisabled();
+    if (ImGui::Button("즉시매수")) {
+        g_commandBus.Push(
+            Cmd::MockBuy,
+            market.code,
+            g_orderQuantity);
+    }
+    if (!canBuy) ImGui::EndDisabled();
+    ImGui::PopStyleColor(2);
+
+    trading::PositionSnapshot selectedPosition;
+    const bool hasSelectedPosition =
+        !selectedCode.empty() &&
+        FindPosition(selectedCode, selectedPosition);
+    ImGui::SameLine();
+    ImGui::PushStyleColor(
+        ImGuiCol_Button,
+        ImVec4(0.12f, 0.28f, 0.68f, 1.0f));
+    ImGui::PushStyleColor(
+        ImGuiCol_ButtonHovered,
+        ImVec4(0.18f, 0.40f, 0.88f, 1.0f));
+    const bool canLiquidatePosition =
+        CanSubmitLiquidationOrders() && hasSelectedPosition;
+    if (!canLiquidatePosition) ImGui::BeginDisabled();
+    if (ImGui::Button("보유청산")) {
+        g_commandBus.Push(Cmd::LiquidatePosition, selectedCode);
+    }
+    if (!canLiquidatePosition) ImGui::EndDisabled();
+    ImGui::PopStyleColor(2);
+    if (ImGui::IsItemHovered() && hasSelectedPosition) {
+        ImGui::SetTooltip(
+            "%s %d주 전량 시장가 청산",
+            selectedPosition.name.c_str(),
+            selectedPosition.quantity);
+    }
+
+    ImGui::SameLine();
+    if (g_observeMode.load(std::memory_order_acquire)) {
+        const bool canActivate = CanActivateEntries();
+        if (!canActivate) ImGui::BeginDisabled();
+        if (ImGui::Button("진입 허용")) {
+            g_commandBus.Push(Cmd::ArmStrategy);
+        }
+        if (!canActivate) ImGui::EndDisabled();
+    }
+    else if (ImGui::Button("관망 전환")) {
+        g_commandBus.Push(Cmd::DisarmStrategy);
+    }
+
+    ImGui::NewLine();
+
+    static const char* timeFrames[] = {
+        "1분", "3분", "5분", "10분", "15분", "30분", "60분"};
+    for (int index = 0; index < IM_ARRAYSIZE(timeFrames); ++index) {
+        if (index > 0) ImGui::SameLine();
+        const bool active = index == g_timeFrameIndex;
+        if (active) {
+            ImGui::PushStyleColor(
+                ImGuiCol_Button,
+                ImVec4(0.18f, 0.38f, 0.68f, 1.0f));
+            ImGui::PushStyleColor(
+                ImGuiCol_ButtonHovered,
+                ImVec4(0.24f, 0.48f, 0.82f, 1.0f));
+        }
+        if (ImGui::Button(timeFrames[index])) {
+            g_timeFrameIndex = index;
+        }
+        if (active) ImGui::PopStyleColor(2);
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("조회")) {
+        g_commandBus.Push(
+            Cmd::LoadSymbol,
+            selectedCode,
+            g_timeFrameIndex);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("새로고침")) {
+        g_commandBus.Push(Cmd::ResetFeed);
+    }
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+    ImGui::TextColored(
+        ImVec4(0.95f, 0.72f, 0.25f, 1.0f),
+        "[MOCK]");
+    ImGui::SameLine();
+    ImGui::TextColored(
+        socketUp
+            ? ImVec4(0.30f, 0.90f, 0.40f, 1.0f)
+            : ImVec4(0.95f, 0.30f, 0.30f, 1.0f),
+        socketUp ? "WS●" : "WS○");
+    ImGui::SameLine();
+    ImGui::TextColored(
+        runtime.orderSubmissionAllowed
+            ? ImVec4(0.35f, 0.95f, 0.45f, 1.0f)
+            : ImVec4(0.95f, 0.72f, 0.25f, 1.0f),
+        runtime.orderSubmissionAllowed ? "주문가능" : "주문잠금");
+    ImGui::SameLine();
+    ImGui::TextColored(
+        g_observeMode.load(std::memory_order_acquire)
+            ? ImVec4(1.0f, 0.75f, 0.20f, 1.0f)
+            : ImVec4(0.35f, 0.95f, 0.45f, 1.0f),
+        g_observeMode.load(std::memory_order_acquire)
+            ? "[관망]"
+            : "[진입허용]");
+
+    if (ImGui::IsItemHovered()) {
+        const trading::EpochMillis tradeAgeMs =
+            market.lastStockTradeTimestampMs > 0
+            ? (std::max)(
+                static_cast<trading::EpochMillis>(0),
+                SystemNowEpochMillis() - market.lastStockTradeTimestampMs)
+            : 0;
+        ImGui::BeginTooltip();
+        ImGui::Text("세션: %s", KiwoomSessionStateLabel(runtime.sessionState));
+        ImGui::Text(
+            "시장데이터: %s",
+            trading::app::MarketDataModule::StateName(market.state));
+        ImGui::Text(
+            "부팅 %.0fms / 렌더 %.1fHz",
+            g_bootMilliseconds,
+            g_renderRateHz);
+        if (market.lastStockTradeTimestampMs > 0) {
+            ImGui::Text(
+                "0B %llu건 / 최근 %lldms",
+                static_cast<unsigned long long>(market.stockTradeTickCount),
+                static_cast<long long>(tradeAgeMs));
+        }
+        else {
+            ImGui::Text(
+                "0B %s",
+                market.stockTradeSubscriptionRequested
+                    ? "수신대기"
+                    : "미등록");
+        }
+        ImGui::EndTooltip();
+    }
+
+    ImGui::SameLine();
+    ImGui::PushStyleColor(
+        ImGuiCol_Button,
+        ImVec4(0.72f, 0.12f, 0.12f, 1.0f));
+    ImGui::PushStyleColor(
+        ImGuiCol_ButtonHovered,
+        ImVec4(0.88f, 0.18f, 0.18f, 1.0f));
+    const bool canLiquidateAll = CanSubmitLiquidationOrders();
+    if (!canLiquidateAll) ImGui::BeginDisabled();
+    const bool liquidateAll = ImGui::Button("전량청산");
+    if (!canLiquidateAll) ImGui::EndDisabled();
+    ImGui::PopStyleColor(2);
+
+    ImGui::PopStyleVar();
+    ImGui::PopID();
+
+    if (liquidateAll) {
+        ImGui::OpenPopup("confirm_liquidate_all");
+    }
+    if (ImGui::BeginPopupModal(
+            "confirm_liquidate_all",
+            nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::Text(
+            "키움 모의계좌의 보유 전 종목을 시장가로 청산합니다.");
+        ImGui::Separator();
+        if (ImGui::Button("청산 실행", ImVec2(120.0f, 0.0f))) {
+            g_commandBus.Push(Cmd::LiquidateAll);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("취소", ImVec2(120.0f, 0.0f))) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
 }

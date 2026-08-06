@@ -93,7 +93,9 @@ namespace
 
     void M89SetTargetBars(std::size_t value)
     {
-        value = (std::max)(100U, (std::min)(20000U, value));
+        value = (std::max)(
+            std::size_t{100U},
+            (std::min)(std::size_t{20000U}, value));
         std::lock_guard<std::mutex> lock(g_m89History.mutex);
         g_m89History.targetBars = value;
     }
@@ -608,8 +610,12 @@ namespace
                 return;
             }
             oldTarget = g_m89History.targetBars;
-            pageSize = (std::max)(1U, g_m89History.pageSizeBars);
-            g_m89History.targetBars = (std::min)(20000U, oldTarget + pageSize);
+            pageSize = (std::max)(
+                std::size_t{1U},
+                g_m89History.pageSizeBars);
+            g_m89History.targetBars = (std::min)(
+                std::size_t{20000U},
+                oldTarget + pageSize);
             g_m89History.active = true;
             g_m89History.onePageOnly = true;
             g_m89History.requestInFlight = true;
@@ -637,7 +643,7 @@ namespace
             "DATA",
             "첫 캔들 이전 1페이지 요청: 조회 %zu -> %zu봉",
             oldTarget,
-            (std::min)(20000U, oldTarget + pageSize));
+            (std::min)(std::size_t{20000U}, oldTarget + pageSize));
     }
 
     void M89SyncVisibleCountFromViewport(int* value, const char* label)

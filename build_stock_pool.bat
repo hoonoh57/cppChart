@@ -15,23 +15,24 @@ if exist stock_pool_workbench.exe del /F /Q stock_pool_workbench.exe
 if exist stock_pool_workbench_tests.exe del /F /Q stock_pool_workbench_tests.exe
 if not exist obj_stock_pool mkdir obj_stock_pool
 
-echo *** VERIFYING STOCK-POOL CAUSAL RANKING ENGINE ***
+echo *** VERIFYING STOCK-POOL CAUSAL ENGINE AND 1516 IMPORTER ***
 cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc /MD ^
    /I"." ^
    tests\stock_pool_engine_tests.cpp ^
    core\stock_pool_engine.cpp ^
    app\stock_pool_evaluator.cpp ^
    app\stock_pool_fixture.cpp ^
+   app\stock_pool_1516_import.cpp ^
    /Foobj_stock_pool\ /Fe:stock_pool_workbench_tests.exe
 if errorlevel 1 (
-    echo *** BUILD FAILED: stock-pool engine tests did not compile ***
+    echo *** BUILD FAILED: stock-pool tests did not compile ***
     exit /b 1
 )
 
 stock_pool_workbench_tests.exe
 if errorlevel 1 (
     del /F /Q stock_pool_workbench_tests.exe 2>NUL
-    echo *** BUILD FAILED: stock-pool causal engine tests failed ***
+    echo *** BUILD FAILED: stock-pool tests failed ***
     exit /b 1
 )
 del /F /Q stock_pool_workbench_tests.exe 2>NUL
@@ -43,6 +44,8 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    core\stock_pool_engine.cpp ^
    app\stock_pool_evaluator.cpp ^
    app\stock_pool_fixture.cpp ^
+   app\stock_pool_1516_import.cpp ^
+   platform\stock_pool_mysql_symbol_master.cpp ^
    imgui\imgui.cpp imgui\imgui_draw.cpp imgui\imgui_tables.cpp imgui\imgui_widgets.cpp ^
    imgui\backends\imgui_impl_win32.cpp imgui\backends\imgui_impl_dx11.cpp ^
    /Foobj_stock_pool\ /Fe:stock_pool_workbench.exe ^
@@ -59,6 +62,6 @@ if not exist stock_pool_workbench.exe (
 )
 
 echo.
-echo *** BUILD OK -^> stock_pool_workbench.exe [fixture vertical slice] ***
+echo *** BUILD OK -^> stock_pool_workbench.exe [1516 clipboard import] ***
 echo Existing shell.exe was not modified.
 exit /b 0

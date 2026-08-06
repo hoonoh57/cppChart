@@ -1,31 +1,60 @@
 #include "stock_pool_mysql_symbol_master.h"
 
-#include <windows.h>
+#include <mysql.h>
 
 #include <algorithm>
-#include <filesystem>
+#include <cerrno>
+#include <cstdlib>
 #include <fstream>
-#include <sstream>
+#include <limits>
+#include <mutex>
+#include <string>
 #include <unordered_map>
 
 namespace trading::stock_pool::platform
 {
     namespace
     {
-        struct TemporaryFiles final
+        class MysqlHandle final
         {
-            std::filesystem::path option;
-            std::filesystem::path output;
-            std::filesystem::path error;
+        public:
+            MysqlHandle() : value_(mysql_init(nullptr)) {}
 
-            ~TemporaryFiles()
+            ~MysqlHandle()
             {
-                std::error_code ignored;
-                if (!option.empty()) std::filesystem::remove(option, ignored);
-                if (!output.empty()) std::filesystem::remove(output, ignored);
-                if (!error.empty()) std::filesystem::remove(error, ignored);
+                if (value_ != nullptr) mysql_close(value_);
             }
+
+            MysqlHandle(const MysqlHandle&) = delete;
+            MysqlHandle& operator=(const MysqlHandle&) = delete;
+
+            MYSQL* get() const noexcept { return value_; }
+
+        private:
+            MYSQL* value_ = nullptr;
         };
+
+        class MysqlResult final
+        {
+        public:
+            explicit MysqlResult(MYSQL_RES* value) : value_(value) {}
+
+            ~MysqlResult()
+            {
+                if (value_ != nullptr) mysql_free_result(value_);
+            }
+
+            MysqlResult(const MysqlResult&) = delete;
+            MysqlResult& operator=(const MysqlResult&) = delete;
+
+            MYSQL_RES* get() const noexcept { return value_; }
+
+        private:
+            MYSQL_RES* value_ = nullptr;
+        };
+
+        std::once_flag g_mysqlLibraryInitOnce;
+        int g_mysqlLibraryInitResult = 1;
 
         std::string Trim(std::string value)
         {
@@ -33,13 +62,13 @@ namespace trading::stock_pool::platform
                 return character == ' ' || character == '\t' ||
                     character == '\r' || character == '\n';
             };
-            while (!value.empty() && isSpace(
-                       static_cast<unsigned char>(value.front())))
+            while (!value.empty() &&
+                   isSpace(static_cast<unsigned char>(value.front())))
             {
                 value.erase(value.begin());
             }
-            while (!value.empty() && isSpace(
-                       static_cast<unsigned char>(value.back())))
+            while (!value.empty() &&
+                   isSpace(static_cast<unsigned char>(value.back())))
             {
                 value.pop_back();
             }
@@ -62,6 +91,7 @@ namespace trading::stock_pool::platform
                 error = path + " 파일을 열 수 없습니다.";
                 return values;
             }
+
             std::string line;
             bool first = true;
             while (std::getline(input, line)) {
@@ -74,6 +104,7 @@ namespace trading::stock_pool::platform
                     line.erase(0U, 3U);
                 }
                 first = false;
+
                 const std::string trimmed = Trim(line);
                 if (trimmed.empty() || trimmed.front() == '#') continue;
                 const std::size_t equals = trimmed.find('=');
@@ -94,280 +125,43 @@ namespace trading::stock_pool::platform
             return found != values.end() ? found->second : fallback;
         }
 
-        std::wstring Utf8ToWide(const std::string& value)
+        bool ParsePort(const std::string& text, unsigned int& port)
         {
-            if (value.empty()) return {};
-            const int length = MultiByteToWideChar(
-                CP_UTF8,
-                MB_ERR_INVALID_CHARS,
-                value.data(),
-                static_cast<int>(value.size()),
-                nullptr,
-                0);
-            if (length <= 0) return {};
-            std::wstring result(static_cast<std::size_t>(length), L'\0');
-            MultiByteToWideChar(
-                CP_UTF8,
-                MB_ERR_INVALID_CHARS,
-                value.data(),
-                static_cast<int>(value.size()),
-                result.data(),
-                length);
-            return result;
-        }
-
-        std::string WideToUtf8(const std::wstring& value)
-        {
-            if (value.empty()) return {};
-            const int length = WideCharToMultiByte(
-                CP_UTF8,
-                0,
-                value.data(),
-                static_cast<int>(value.size()),
-                nullptr,
-                0,
-                nullptr,
-                nullptr);
-            if (length <= 0) return {};
-            std::string result(static_cast<std::size_t>(length), '\0');
-            WideCharToMultiByte(
-                CP_UTF8,
-                0,
-                value.data(),
-                static_cast<int>(value.size()),
-                result.data(),
-                length,
-                nullptr,
-                nullptr);
-            return result;
-        }
-
-        std::wstring FindMysqlExecutable(
-            const std::unordered_map<std::string, std::string>& values)
-        {
-            const std::string configured = GetValue(
-                values,
-                "MYSQL_EXE",
-                "");
-            if (!configured.empty()) {
-                const std::wstring path = Utf8ToWide(configured);
-                if (!path.empty() &&
-                    GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES)
-                {
-                    return path;
-                }
-            }
-
-            DWORD required = SearchPathW(
-                nullptr,
-                L"mysql.exe",
-                nullptr,
-                0,
-                nullptr,
-                nullptr);
-            if (required == 0U) return {};
-            std::wstring result(static_cast<std::size_t>(required), L'\0');
-            const DWORD written = SearchPathW(
-                nullptr,
-                L"mysql.exe",
-                nullptr,
-                required,
-                result.data(),
-                nullptr);
-            if (written == 0U) return {};
-            result.resize(static_cast<std::size_t>(written));
-            return result;
-        }
-
-        std::string EscapeOptionValue(const std::string& value)
-        {
-            std::string result;
-            result.reserve(value.size() + 8U);
-            for (const char character : value) {
-                if (character == '\\' || character == '"') {
-                    result.push_back('\\');
-                }
-                if (character == '\r' || character == '\n') continue;
-                result.push_back(character);
-            }
-            return result;
-        }
-
-        bool MakeTemporaryFile(
-            const wchar_t* prefix,
-            std::filesystem::path& path,
-            std::string& error)
-        {
-            wchar_t directory[MAX_PATH + 1]{};
-            const DWORD directoryLength = GetTempPathW(MAX_PATH, directory);
-            if (directoryLength == 0U || directoryLength > MAX_PATH) {
-                error = "Windows 임시 폴더를 찾지 못했습니다.";
-                return false;
-            }
-            wchar_t file[MAX_PATH + 1]{};
-            if (GetTempFileNameW(directory, prefix, 0U, file) == 0U) {
-                error = "Windows 임시 파일을 만들지 못했습니다.";
-                return false;
-            }
-            path = file;
-            return true;
-        }
-
-        std::string ReadFileUtf8(const std::filesystem::path& path)
-        {
-            std::ifstream input(path, std::ios::binary);
-            if (!input) return {};
-            std::ostringstream buffer;
-            buffer << input.rdbuf();
-            return buffer.str();
-        }
-
-        std::wstring QuoteCommandArgument(const std::wstring& value)
-        {
-            std::wstring result = L"\"";
-            std::size_t backslashes = 0U;
-            for (const wchar_t character : value) {
-                if (character == L'\\') {
-                    ++backslashes;
-                    continue;
-                }
-                if (character == L'"') {
-                    result.append(backslashes * 2U + 1U, L'\\');
-                    result.push_back(L'"');
-                    backslashes = 0U;
-                    continue;
-                }
-                result.append(backslashes, L'\\');
-                backslashes = 0U;
-                result.push_back(character);
-            }
-            result.append(backslashes * 2U, L'\\');
-            result.push_back(L'"');
-            return result;
-        }
-
-        bool RunMysql(
-            const std::wstring& executable,
-            const std::filesystem::path& optionFile,
-            const std::filesystem::path& outputFile,
-            const std::filesystem::path& errorFile,
-            DWORD& exitCode,
-            std::string& error)
-        {
-            HANDLE output = CreateFileW(
-                outputFile.c_str(),
-                GENERIC_WRITE,
-                FILE_SHARE_READ,
-                nullptr,
-                CREATE_ALWAYS,
-                FILE_ATTRIBUTE_TEMPORARY,
-                nullptr);
-            HANDLE errors = CreateFileW(
-                errorFile.c_str(),
-                GENERIC_WRITE,
-                FILE_SHARE_READ,
-                nullptr,
-                CREATE_ALWAYS,
-                FILE_ATTRIBUTE_TEMPORARY,
-                nullptr);
-            HANDLE input = CreateFileW(
-                L"NUL",
-                GENERIC_READ,
-                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                nullptr,
-                OPEN_EXISTING,
-                FILE_ATTRIBUTE_NORMAL,
-                nullptr);
-            if (output == INVALID_HANDLE_VALUE ||
-                errors == INVALID_HANDLE_VALUE ||
-                input == INVALID_HANDLE_VALUE)
+            errno = 0;
+            char* end = nullptr;
+            const unsigned long parsed = std::strtoul(text.c_str(), &end, 10);
+            if (end == text.c_str() || errno == ERANGE || parsed == 0UL ||
+                parsed > 65535UL)
             {
-                if (output != INVALID_HANDLE_VALUE) CloseHandle(output);
-                if (errors != INVALID_HANDLE_VALUE) CloseHandle(errors);
-                if (input != INVALID_HANDLE_VALUE) CloseHandle(input);
-                error = "MySQL 출력용 임시 파일을 열지 못했습니다.";
                 return false;
             }
-
-            SetHandleInformation(output, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
-            SetHandleInformation(errors, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
-            SetHandleInformation(input, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
-
-            const std::wstring query =
-                L"SELECT code, name, COALESCE(market, '') "
-                L"FROM gate3.g3_symbol_master "
-                L"WHERE delisted = 0 ORDER BY name, code";
-            std::wstring command = QuoteCommandArgument(executable);
-            command += L" --defaults-extra-file=" +
-                QuoteCommandArgument(optionFile.wstring());
-            command +=
-                L" --batch --raw --skip-column-names "
-                L"--default-character-set=utf8mb4 -e ";
-            command += QuoteCommandArgument(query);
-
-            STARTUPINFOW startup{};
-            startup.cb = sizeof(startup);
-            startup.dwFlags = STARTF_USESTDHANDLES;
-            startup.hStdInput = input;
-            startup.hStdOutput = output;
-            startup.hStdError = errors;
-            PROCESS_INFORMATION process{};
-            const BOOL started = CreateProcessW(
-                executable.c_str(),
-                command.data(),
-                nullptr,
-                nullptr,
-                TRUE,
-                CREATE_NO_WINDOW,
-                nullptr,
-                nullptr,
-                &startup,
-                &process);
-
-            CloseHandle(output);
-            CloseHandle(errors);
-            CloseHandle(input);
-            if (!started) {
-                error = "mysql.exe 실행 실패: Windows error " +
-                    std::to_string(GetLastError());
-                return false;
+            while (end != nullptr && *end != '\0') {
+                if (*end != ' ' && *end != '\t') return false;
+                ++end;
             }
-
-            WaitForSingleObject(process.hProcess, INFINITE);
-            exitCode = 1U;
-            GetExitCodeProcess(process.hProcess, &exitCode);
-            CloseHandle(process.hThread);
-            CloseHandle(process.hProcess);
+            port = static_cast<unsigned int>(parsed);
             return true;
         }
 
-        std::vector<import1516::SymbolMasterEntry> ParseMasterOutput(
-            const std::string& text)
+        bool InitializeMysqlLibrary(std::string& error)
         {
-            std::vector<import1516::SymbolMasterEntry> entries;
-            std::istringstream stream(text);
-            std::string line;
-            while (std::getline(stream, line)) {
-                if (!line.empty() && line.back() == '\r') line.pop_back();
-                const std::size_t first = line.find('\t');
-                if (first == std::string::npos) continue;
-                const std::size_t second = line.find('\t', first + 1U);
-                import1516::SymbolMasterEntry entry;
-                entry.code = line.substr(0U, first);
-                entry.name = second == std::string::npos
-                    ? line.substr(first + 1U)
-                    : line.substr(first + 1U, second - first - 1U);
-                entry.market = second == std::string::npos
-                    ? std::string{}
-                    : line.substr(second + 1U);
-                entry.code = Trim(entry.code);
-                entry.name = Trim(entry.name);
-                entry.market = Trim(entry.market);
-                if (!entry.code.empty() && !entry.name.empty()) {
-                    entries.push_back(std::move(entry));
-                }
+            std::call_once(g_mysqlLibraryInitOnce, [] {
+                g_mysqlLibraryInitResult = mysql_library_init(0, nullptr, nullptr);
+            });
+            if (g_mysqlLibraryInitResult == 0) return true;
+            error = "libmysql 초기화에 실패했습니다.";
+            return false;
+        }
+
+        std::string FieldText(
+            MYSQL_ROW row,
+            const unsigned long* lengths,
+            unsigned int index)
+        {
+            if (row == nullptr || row[index] == nullptr || lengths == nullptr) {
+                return {};
             }
-            return entries;
+            return std::string(row[index], row[index] + lengths[index]);
         }
     }
 
@@ -384,60 +178,123 @@ namespace trading::stock_pool::platform
             return result;
         }
 
-        const std::wstring executable = FindMysqlExecutable(values);
-        if (executable.empty()) {
-            result.error =
-                "mysql.exe를 찾지 못했습니다. PATH 또는 .env의 MYSQL_EXE를 설정하십시오.";
-            return result;
-        }
-
-        TemporaryFiles files;
-        if (!MakeTemporaryFile(L"spc", files.option, result.error) ||
-            !MakeTemporaryFile(L"spo", files.output, result.error) ||
-            !MakeTemporaryFile(L"spe", files.error, result.error))
-        {
-            return result;
-        }
+        if (!InitializeMysqlLibrary(result.error)) return result;
 
         const std::string host = GetValue(values, "MYSQL_HOST", "127.0.0.1");
-        const std::string port = GetValue(values, "MYSQL_PORT", "3306");
         const std::string user = GetValue(values, "MYSQL_USER", "root");
         const std::string password = GetValue(values, "MYSQL_PASSWORD", "");
+        const std::string portText = GetValue(values, "MYSQL_PORT", "3306");
+        unsigned int port = 3306U;
+        if (!ParsePort(portText, port)) {
+            result.error = "MYSQL_PORT 값이 올바르지 않습니다: " + portText;
+            return result;
+        }
 
+        MysqlHandle connection;
+        if (connection.get() == nullptr) {
+            result.error = "mysql_init()이 null을 반환했습니다.";
+            return result;
+        }
+
+        unsigned int connectTimeoutSeconds = 5U;
+        mysql_options(
+            connection.get(),
+            MYSQL_OPT_CONNECT_TIMEOUT,
+            &connectTimeoutSeconds);
+        mysql_options(
+            connection.get(),
+            MYSQL_SET_CHARSET_NAME,
+            "utf8mb4");
+        mysql_protocol_type protocol = MYSQL_PROTOCOL_TCP;
+        mysql_options(connection.get(), MYSQL_OPT_PROTOCOL, &protocol);
+
+        if (mysql_real_connect(
+                connection.get(),
+                host.c_str(),
+                user.c_str(),
+                password.c_str(),
+                "gate3",
+                port,
+                nullptr,
+                0UL) == nullptr)
         {
-            std::ofstream option(files.option, std::ios::binary | std::ios::trunc);
-            if (!option) {
-                result.error = "MySQL 임시 client 설정 파일을 쓸 수 없습니다.";
+            result.error =
+                "gate3 MySQL 접속 실패 [" + host + ":" +
+                std::to_string(port) + "]: " +
+                mysql_error(connection.get());
+            return result;
+        }
+
+        if (mysql_set_character_set(connection.get(), "utf8mb4") != 0) {
+            result.error =
+                "MySQL utf8mb4 설정 실패: " +
+                std::string(mysql_error(connection.get()));
+            return result;
+        }
+
+        constexpr const char* query =
+            "SELECT code, name, COALESCE(market, '') "
+            "FROM g3_symbol_master "
+            "WHERE delisted = 0 ORDER BY name, code";
+        if (mysql_real_query(
+                connection.get(),
+                query,
+                static_cast<unsigned long>(std::char_traits<char>::length(query)))
+            != 0)
+        {
+            result.error =
+                "gate3.g3_symbol_master 조회 실패: " +
+                std::string(mysql_error(connection.get()));
+            return result;
+        }
+
+        MysqlResult rows(mysql_store_result(connection.get()));
+        if (rows.get() == nullptr) {
+            if (mysql_field_count(connection.get()) == 0U) {
+                result.error =
+                    "gate3.g3_symbol_master 조회 결과 필드가 없습니다.";
+            }
+            else {
+                result.error =
+                    "gate3.g3_symbol_master 결과 수신 실패: " +
+                    std::string(mysql_error(connection.get()));
+            }
+            return result;
+        }
+
+        if (mysql_num_fields(rows.get()) < 3U) {
+            result.error =
+                "gate3.g3_symbol_master 조회 열 수가 3개보다 적습니다.";
+            return result;
+        }
+
+        MYSQL_ROW row = nullptr;
+        while ((row = mysql_fetch_row(rows.get())) != nullptr) {
+            const unsigned long* lengths = mysql_fetch_lengths(rows.get());
+            if (lengths == nullptr) {
+                result.error =
+                    "gate3.g3_symbol_master 행 길이 수신에 실패했습니다.";
+                result.entries.clear();
                 return result;
             }
-            option << "[client]\n";
-            option << "host=\"" << EscapeOptionValue(host) << "\"\n";
-            option << "port=\"" << EscapeOptionValue(port) << "\"\n";
-            option << "user=\"" << EscapeOptionValue(user) << "\"\n";
-            option << "password=\"" << EscapeOptionValue(password) << "\"\n";
-            option << "default-character-set=utf8mb4\n";
+
+            import1516::SymbolMasterEntry entry;
+            entry.code = Trim(FieldText(row, lengths, 0U));
+            entry.name = Trim(FieldText(row, lengths, 1U));
+            entry.market = Trim(FieldText(row, lengths, 2U));
+            if (!entry.code.empty() && !entry.name.empty()) {
+                result.entries.push_back(std::move(entry));
+            }
         }
 
-        DWORD exitCode = 1U;
-        if (!RunMysql(
-                executable,
-                files.option,
-                files.output,
-                files.error,
-                exitCode,
-                result.error))
-        {
+        if (mysql_errno(connection.get()) != 0U) {
+            result.error =
+                "gate3.g3_symbol_master 행 순회 실패: " +
+                std::string(mysql_error(connection.get()));
+            result.entries.clear();
             return result;
         }
 
-        const std::string stderrText = Trim(ReadFileUtf8(files.error));
-        if (exitCode != 0U) {
-            result.error = "gate3.g3_symbol_master 조회 실패";
-            if (!stderrText.empty()) result.error += ": " + stderrText;
-            return result;
-        }
-
-        result.entries = ParseMasterOutput(ReadFileUtf8(files.output));
         if (result.entries.empty()) {
             result.error =
                 "gate3.g3_symbol_master 조회는 성공했지만 종목이 0건입니다.";
@@ -445,8 +302,10 @@ namespace trading::stock_pool::platform
         }
 
         result.ok = true;
-        result.source = "gate3.g3_symbol_master via " +
-            WideToUtf8(executable);
+        result.source =
+            "gate3.g3_symbol_master via libmysql " +
+            std::string(mysql_get_client_info()) + " @ " + host + ":" +
+            std::to_string(port);
         return result;
     }
 }

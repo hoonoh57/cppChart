@@ -1,4 +1,4 @@
-#include "../app/indicator_workspace_state.h"
+#include "../app/indicator_workspace_store.h"
 
 #include <filesystem>
 #include <fstream>
@@ -56,7 +56,7 @@ int main()
     trading::app::IndicatorWorkspaceSource initialSource =
         trading::app::IndicatorWorkspaceSource::None;
     std::string diagnostic;
-    const bool loadedDefault = trading::app::LoadIndicatorWorkspaceState(
+    const bool loadedDefault = trading::app::LoadVerifiedIndicatorWorkspace(
         saved.string(),
         defaults.string(),
         initial,
@@ -74,18 +74,18 @@ int main()
     Expect(VisibleCount(initial) == 2U, "SMA and EMA must be visible before save");
 
     std::string saveError;
-    const bool savedOk = trading::app::SaveIndicatorWorkspaceState(
+    const bool savedOk = trading::app::SaveVerifiedIndicatorWorkspace(
         saved.string(),
         initial,
         saveError);
-    Expect(savedOk, "workspace save must succeed");
+    Expect(savedOk, "verified workspace save must succeed");
     Expect(std::filesystem::exists(saved), "saved JSON must exist");
 
     trading::app::IndicatorWorkspaceState restarted;
     trading::app::IndicatorWorkspaceSource restartedSource =
         trading::app::IndicatorWorkspaceSource::None;
     diagnostic.clear();
-    const bool restartedOk = trading::app::LoadIndicatorWorkspaceState(
+    const bool restartedOk = trading::app::LoadVerifiedIndicatorWorkspace(
         saved.string(),
         defaults.string(),
         restarted,
@@ -100,6 +100,42 @@ int main()
     Expect(
         restartedEma != nullptr && restartedEma->visible,
         "EMA visible state must survive restart");
+
+    // Create a last-known-good backup by committing another valid state.
+    auto* rsi = FindByType(restarted, "RSI");
+    Expect(rsi != nullptr, "RSI definition must exist");
+    if (rsi != nullptr) rsi->visible = true;
+    saveError.clear();
+    Expect(
+        trading::app::SaveVerifiedIndicatorWorkspace(
+            saved.string(), restarted, saveError),
+        "second verified save must create a backup");
+    Expect(
+        std::filesystem::exists(saved.string() + ".bak"),
+        "last-known-good backup must exist");
+
+    // Corrupt the primary file. The loader must use the backup, never defaults.
+    {
+        std::ofstream output(saved, std::ios::binary | std::ios::trunc);
+        output << "{broken-json";
+    }
+    trading::app::IndicatorWorkspaceState recovered;
+    trading::app::IndicatorWorkspaceSource recoveredSource =
+        trading::app::IndicatorWorkspaceSource::None;
+    diagnostic.clear();
+    const bool recoveredOk = trading::app::LoadVerifiedIndicatorWorkspace(
+        saved.string(),
+        defaults.string(),
+        recovered,
+        recoveredSource,
+        diagnostic);
+    Expect(recoveredOk, "corrupt primary must recover from backup");
+    Expect(
+        recoveredSource == trading::app::IndicatorWorkspaceSource::Saved,
+        "backup recovery must still be treated as saved state");
+    Expect(
+        VisibleCount(recovered) == 2U,
+        "backup recovery must preserve prior SMA and EMA, not defaults");
 
     std::filesystem::remove_all(root, cleanupError);
     if (failures != 0) {

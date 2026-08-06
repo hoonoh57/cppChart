@@ -99,6 +99,12 @@ namespace
         M94IndicatorWorkspaceRuntime& runtime = M94Runtime();
         if (runtime.loadAttempted) return runtime.loaded;
         runtime.loadAttempted = true;
+
+        // A normal latest-chart request must complete with one REST response.
+        // The visible candle count remains controlled independently by zoom.
+        // Older candles are fetched only through the explicit 추가데이터 action.
+        M89SetTargetBars(600U);
+
         M94ResolvePaths(runtime);
 
         std::string diagnostic;
@@ -157,6 +163,9 @@ namespace
             trading::app::VisibleIndicatorSpecs(
                 runtime.loadedState.indicators).size(),
             runtime.loadedState.paneHeightWeights.size());
+        g_log.Add(
+            "SYS",
+            "차트 기본 조회: 600봉 단일 요청, 이전 데이터는 추가데이터로 조회");
         return true;
     }
 

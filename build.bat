@@ -92,7 +92,7 @@ if not exist shell.exe (
     exit /b 1
 )
 
-echo *** VERIFYING INDICATOR WORKSPACE RESTART ROUNDTRIP ***
+echo *** VERIFYING INDICATOR WORKSPACE COMPLETE-PROPERTY RESTART ROUNDTRIP ***
 cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
    tests\indicator_workspace_state_tests.cpp ^
    core\json_lite.cpp ^
@@ -101,6 +101,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
    app\indicator_configuration.cpp ^
    app\indicator_properties.cpp ^
    app\indicator_render_adapter.cpp ^
+   render\value_grid.cpp ^
    render\render_document.cpp ^
    /Fe:indicator_workspace_state_tests.exe
 if errorlevel 1 (
@@ -111,7 +112,7 @@ if errorlevel 1 (
 indicator_workspace_state_tests.exe
 if errorlevel 1 (
     if exist shell.exe del /F /Q shell.exe
-    echo *** BUILD FAILED: indicator workspace restart roundtrip failed ***
+    echo *** BUILD FAILED: indicator workspace complete-property roundtrip failed ***
     exit /b 1
 )
 del /F /Q indicator_workspace_state_tests.exe 2>NUL

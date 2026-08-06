@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d %~dp0
 
 rem The stock-pool workbench is an isolated executable. Its build must never
@@ -21,31 +21,31 @@ if not defined VCPKG_EXE (
 
 if not defined VCPKG_EXE (
     set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
-    if exist "%VSWHERE%" (
-        for /f "usebackq delims=" %%I in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_INSTALL=%%I"
-        if defined VS_INSTALL if exist "%VS_INSTALL%\VC\vcpkg\vcpkg.exe" set "VCPKG_EXE=%VS_INSTALL%\VC\vcpkg\vcpkg.exe"
+    if exist "!VSWHERE!" (
+        for /f "usebackq delims=" %%I in (`"!VSWHERE!" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_INSTALL=%%I"
+        if defined VS_INSTALL if exist "!VS_INSTALL!\VC\vcpkg\vcpkg.exe" set "VCPKG_EXE=!VS_INSTALL!\VC\vcpkg\vcpkg.exe"
     )
 )
 
 if not defined VCPKG_EXE (
     set "LOCAL_VCPKG=%CD%\.tools\vcpkg"
-    if not exist "%LOCAL_VCPKG%\vcpkg.exe" (
+    if not exist "!LOCAL_VCPKG!\vcpkg.exe" (
         echo *** VCPKG NOT FOUND - BOOTSTRAPPING PROJECT-LOCAL COPY ***
         if not exist "%CD%\.tools" mkdir "%CD%\.tools"
-        if not exist "%LOCAL_VCPKG%\.git" (
-            git clone --depth 1 https://github.com/microsoft/vcpkg.git "%LOCAL_VCPKG%"
+        if not exist "!LOCAL_VCPKG!\.git" (
+            git clone --depth 1 https://github.com/microsoft/vcpkg.git "!LOCAL_VCPKG!"
             if errorlevel 1 (
                 echo *** BUILD FAILED: vcpkg clone failed ***
                 exit /b 1
             )
         )
-        call "%LOCAL_VCPKG%\bootstrap-vcpkg.bat" -disableMetrics
+        call "!LOCAL_VCPKG!\bootstrap-vcpkg.bat" -disableMetrics
         if errorlevel 1 (
             echo *** BUILD FAILED: vcpkg bootstrap failed ***
             exit /b 1
         )
     )
-    set "VCPKG_EXE=%LOCAL_VCPKG%\vcpkg.exe"
+    set "VCPKG_EXE=!LOCAL_VCPKG!\vcpkg.exe"
 )
 
 if not exist "%VCPKG_EXE%" (

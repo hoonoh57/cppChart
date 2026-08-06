@@ -16,10 +16,10 @@ if exist shell.exe (
 )
 
 if not exist obj mkdir obj
-echo *** BUILD ENTRYPOINT: shell_main_m94.cpp [renderer-pure indicator state] ***
+echo *** BUILD ENTRYPOINT: shell_main_m95.cpp [single-owner indicator store] ***
 cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0602 ^
    /I"imgui" /I"imgui\backends" ^
-   shell_main_m94.cpp ^
+   shell_main_m95.cpp ^
    core\command_bus.cpp ^
    core\fault_policy.cpp ^
    core\json_lite.cpp ^
@@ -48,6 +48,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    app\market_data_module.cpp ^
    app\chart_workspace_module.cpp ^
    app\indicator_workspace_state.cpp ^
+   app\indicator_workspace_store.cpp ^
    app\indicator_module.cpp ^
    app\indicator_render_adapter.cpp ^
    app\indicator_configuration.cpp ^
@@ -96,6 +97,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
    tests\indicator_workspace_state_tests.cpp ^
    core\json_lite.cpp ^
    app\indicator_workspace_state.cpp ^
+   app\indicator_workspace_store.cpp ^
    app\indicator_configuration.cpp ^
    app\indicator_properties.cpp ^
    app\indicator_render_adapter.cpp ^
@@ -115,4 +117,4 @@ if errorlevel 1 (
 del /F /Q indicator_workspace_state_tests.exe 2>NUL
 
 echo.
-echo *** BUILD OK -^> shell.exe [renderer-pure indicator state] ***
+echo *** BUILD OK -^> shell.exe [single-owner indicator store] ***

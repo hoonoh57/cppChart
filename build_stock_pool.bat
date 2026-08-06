@@ -11,6 +11,32 @@ if not errorlevel 1 (
     exit /b 2
 )
 
+rem 1516 clipboard import resolves names through gate3.g3_symbol_master.
+rem Do not require the user to manually locate mysql.exe when it is installed
+rem in a standard MySQL, MariaDB, or XAMPP directory. Never overwrite an
+rem existing active MYSQL_EXE setting; only append one when it is absent.
+if exist .env (
+    findstr /R /C:"^[ ]*MYSQL_EXE[ ]*=" .env >NUL 2>NUL
+    if errorlevel 1 (
+        set "STOCK_POOL_MYSQL_EXE="
+        for /f "usebackq delims=" %%I in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$c = [System.Collections.Generic.List[string]]::new(); $cmd = Get-Command mysql.exe -ErrorAction SilentlyContinue; if ($cmd) { $c.Add($cmd.Source) }; $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramW6432) ^| Where-Object { $_ }; foreach ($r in $roots) { foreach ($vendor in @('MySQL','MariaDB')) { $p = Join-Path $r $vendor; if (Test-Path $p) { Get-ChildItem $p -Filter mysql.exe -File -Recurse -ErrorAction SilentlyContinue ^| ForEach-Object { $c.Add($_.FullName) } } } }; foreach ($p in @((Join-Path $env:SystemDrive 'xampp\mysql\bin\mysql.exe'), (Join-Path $env:SystemDrive 'laragon\bin\mysql'))) { if (Test-Path $p -PathType Leaf) { $c.Add($p) } elseif (Test-Path $p -PathType Container) { Get-ChildItem $p -Filter mysql.exe -File -Recurse -ErrorAction SilentlyContinue ^| ForEach-Object { $c.Add($_.FullName) } } }; $c ^| Where-Object { $_ -and (Test-Path $_ -PathType Leaf) } ^| Select-Object -First 1"`) do set "STOCK_POOL_MYSQL_EXE=%%I"
+        if defined STOCK_POOL_MYSQL_EXE (
+            >>.env echo.
+            >>.env echo # Auto-detected by build_stock_pool.bat for 1516 symbol resolution.
+            >>.env echo MYSQL_EXE=%STOCK_POOL_MYSQL_EXE%
+            echo *** MYSQL CLIENT AUTO-DETECTED: %STOCK_POOL_MYSQL_EXE% ***
+        ) else (
+            echo *** MYSQL CLIENT NOT FOUND ***
+            echo 1516 text parsing will work, but symbol-code lookup requires mysql.exe.
+            echo Install MySQL client or set MYSQL_EXE in .env.
+        )
+    ) else (
+        echo *** MYSQL CLIENT: using active MYSQL_EXE from .env ***
+    )
+) else (
+    echo *** WARNING: .env not found - 1516 MySQL symbol lookup will fail closed ***
+)
+
 if exist stock_pool_workbench.exe del /F /Q stock_pool_workbench.exe
 if exist stock_pool_workbench_tests.exe del /F /Q stock_pool_workbench_tests.exe
 if not exist obj_stock_pool mkdir obj_stock_pool

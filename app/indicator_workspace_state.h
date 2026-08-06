@@ -12,7 +12,6 @@ namespace trading::app
     {
         None,
         Saved,
-        Legacy,
         Default
     };
 
@@ -22,11 +21,10 @@ namespace trading::app
         std::map<std::string, float> paneHeightWeights;
     };
 
-    // Loads durable application state only. The renderer never reads files and
-    // never decides which indicators are enabled.
+    // Application-state boundary. The renderer receives an already resolved
+    // render plan and never reads JSON or creates default indicators.
     bool LoadIndicatorWorkspaceState(
         const std::string& savedPath,
-        const std::string& legacyPath,
         const std::string& defaultPath,
         IndicatorWorkspaceState& state,
         IndicatorWorkspaceSource& source,

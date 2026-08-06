@@ -4,15 +4,15 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <set>
 #include <string>
 #include <vector>
 
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "app/stock_pool_1516_import.h"
-#include "platform/stock_pool_mysql_symbol_master.h"
+#include "platform/stock_pool_gateway_client.h"
 
-// Dear ImGui's Win32 backend callback lives in the global namespace.
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
     HWND window,
     UINT message,
@@ -48,8 +48,6 @@ namespace
     }
 }
 
-// Intercept only the workbench's generic Load button and final Render call.
-// The existing workbench implementation remains unchanged.
 #define Button StockPoolButton
 #define Render StockPoolRender
 #define ImGui_ImplWin32_WndProcHandler StockPoolImGuiWin32WndProcHandler
@@ -70,9 +68,10 @@ namespace
         bool requestOpen = false;
         bool converted = false;
         bool cohortCommitted = false;
+        long long cohortId = 0LL;
         std::array<char, 262144> clipboardText{};
         ParseResult parsed;
-        std::string databaseStatus;
+        std::string gatewayStatus;
         std::string conversionStatus;
     };
 
@@ -102,8 +101,35 @@ namespace
             clipboard);
         g_historicalImport.converted = false;
         g_historicalImport.cohortCommitted = false;
+        g_historicalImport.cohortId = 0LL;
         g_historicalImport.conversionStatus =
             "클립보드 내용을 붙였습니다. 변환을 누르십시오.";
+    }
+
+    void ApplyGatewayRejectionReasons(
+        const std::vector<trading::stock_pool::platform::GatewayRejectedSymbol>& rejected)
+    {
+        for (const auto& item : rejected) {
+            for (ImportedRow& row : g_historicalImport.parsed.rows) {
+                if (row.name != item.name ||
+                    row.status == ResolutionStatus::Resolved ||
+                    row.status == ResolutionStatus::InvalidRow)
+                {
+                    continue;
+                }
+                row.reason = "server32: " + item.reason;
+                if (item.reason == "exact_name_ambiguous") {
+                    row.status = ResolutionStatus::AmbiguousSymbol;
+                }
+                else if (item.reason == "duplicate_input") {
+                    row.status = ResolutionStatus::DuplicateSymbol;
+                }
+                else {
+                    row.status = ResolutionStatus::MissingSymbol;
+                }
+                break;
+            }
+        }
     }
 
     void Convert1516Clipboard()
@@ -111,9 +137,10 @@ namespace
         g_historicalImport.parsed =
             trading::stock_pool::import1516::ParseClipboardText(
                 g_historicalImport.clipboardText.data());
-        g_historicalImport.databaseStatus.clear();
+        g_historicalImport.gatewayStatus.clear();
         g_historicalImport.converted = true;
         g_historicalImport.cohortCommitted = false;
+        g_historicalImport.cohortId = 0LL;
 
         if (g_historicalImport.parsed.rows.empty()) {
             g_historicalImport.conversionStatus =
@@ -121,35 +148,74 @@ namespace
             return;
         }
 
-        const auto master =
-            trading::stock_pool::platform::LoadGate3SymbolMaster(".env");
-        if (!master.ok) {
-            g_historicalImport.databaseStatus = master.error;
+        std::vector<std::string> names;
+        names.reserve(g_historicalImport.parsed.rows.size());
+        for (const ImportedRow& row : g_historicalImport.parsed.rows) {
+            if (row.status == ResolutionStatus::InvalidRow ||
+                row.name.empty())
+            {
+                continue;
+            }
+            names.push_back(row.name);
+        }
+
+        const auto resolution =
+            trading::stock_pool::platform::ResolveSymbolsViaServer32(
+                names,
+                ".env");
+        if (!resolution.ok) {
+            g_historicalImport.gatewayStatus = resolution.error;
             g_historicalImport.conversionStatus =
-                "텍스트 변환은 완료했지만 종목코드 조회에 실패했습니다.";
+                "텍스트 변환은 완료했지만 server32 종목코드 조회에 실패했습니다.";
             return;
         }
 
         trading::stock_pool::import1516::ResolveExactSymbolNames(
             g_historicalImport.parsed.rows,
-            master.entries);
-        g_historicalImport.databaseStatus =
-            master.source + " | master " +
-            std::to_string(master.entries.size()) + "건";
+            resolution.entries);
+        ApplyGatewayRejectionReasons(resolution.rejected);
+        g_historicalImport.gatewayStatus =
+            resolution.source + " | server32 batch resolve";
 
         const std::size_t resolved = CountStatus(ResolutionStatus::Resolved);
-        const std::size_t rejected =
+        const std::size_t rejectedCount =
             g_historicalImport.parsed.rows.size() - resolved;
         g_historicalImport.conversionStatus =
             "변환 완료: 코드 확정 " + std::to_string(resolved) +
-            "개, 폐기 예정 " + std::to_string(rejected) + "개";
+            "개, 폐기 예정 " + std::to_string(rejectedCount) + "개";
     }
 
     void CommitHistoricalCohort()
     {
+        const auto saved =
+            trading::stock_pool::platform::Save1516CohortViaServer32(
+                g_state.condition,
+                g_state.tradingDate,
+                g_state.captureTime,
+                g_state.timeframeMinutes,
+                g_historicalImport.parsed.rows,
+                ".env");
+        if (!saved.ok) {
+            g_historicalImport.cohortCommitted = false;
+            g_historicalImport.cohortId = 0LL;
+            g_historicalImport.gatewayStatus = saved.error;
+            g_historicalImport.conversionStatus =
+                "Frozen Cohort DB 저장에 실패해 UI cohort도 확정하지 않았습니다.";
+            return;
+        }
+
+        std::set<std::string> rejectedNames;
+        for (const auto& rejected : saved.rejected) {
+            rejectedNames.insert(rejected.name);
+        }
+
         std::vector<MemberSeries> members;
         for (const ImportedRow& row : g_historicalImport.parsed.rows) {
-            if (row.status != ResolutionStatus::Resolved) continue;
+            if (row.status != ResolutionStatus::Resolved ||
+                rejectedNames.find(row.name) != rejectedNames.end())
+            {
+                continue;
+            }
             MemberSeries member;
             member.code = row.code;
             member.name = row.name;
@@ -158,17 +224,23 @@ namespace
         }
         if (members.empty()) {
             g_historicalImport.conversionStatus =
-                "확정 가능한 종목코드가 없어 cohort를 만들지 않았습니다.";
+                "DB 저장 응답에 확정 가능한 종목이 없어 UI cohort를 만들지 않았습니다.";
             return;
         }
 
         g_state.rawMembers = std::move(members);
         ApplyTimeframe();
         g_historicalImport.cohortCommitted = true;
+        g_historicalImport.cohortId = saved.cohortId;
+        g_historicalImport.gatewayStatus =
+            saved.source + " | cohort_id=" +
+            std::to_string(saved.cohortId) + " | hash=" +
+            saved.rawImportHash;
         g_state.status =
-            "1516 Frozen Cohort 확정: " +
+            "1516 Frozen Cohort DB 저장/확정: " +
             std::to_string(g_state.members.size()) +
-            "개 | 다음 단계: 포착시각 이후 실제 분봉 hydration";
+            "개 | cohort_id=" + std::to_string(saved.cohortId) +
+            " | 다음 단계: 포착시각 이후 실제 분봉 hydration";
     }
 
     void DrawResolvedRows()
@@ -274,7 +346,7 @@ namespace
         }
 
         ImGui::TextWrapped(
-            "키움 1516 성과검증 우측 검색 종목 목록에서 컨텍스트 메뉴의 복사(Z)를 실행한 뒤 붙여넣으십시오. 7시간·최고수익률은 사후 label로만 보존되며 장중 상대강도 계산에는 사용하지 않습니다.");
+            "키움 1516 성과검증 우측 검색 종목 목록에서 컨텍스트 메뉴의 복사(Z)를 실행한 뒤 붙여넣으십시오. 종목코드 조회와 cohort 저장은 server32가 MySQL을 담당합니다. 7시간·최고수익률은 사후 label로만 저장되며 장중 상대강도 계산에는 사용하지 않습니다.");
         ImGui::Separator();
 
         if (ImGui::Button("클립보드 붙여넣기")) Paste1516Clipboard();
@@ -284,7 +356,8 @@ namespace
             g_historicalImport.parsed = {};
             g_historicalImport.converted = false;
             g_historicalImport.cohortCommitted = false;
-            g_historicalImport.databaseStatus.clear();
+            g_historicalImport.cohortId = 0LL;
+            g_historicalImport.gatewayStatus.clear();
             g_historicalImport.conversionStatus.clear();
         }
         ImGui::SameLine();
@@ -293,7 +366,7 @@ namespace
         }
         ImGui::SameLine();
         ImGui::TextDisabled(
-            "DB: gate3.g3_symbol_master / exact name / delisted=0");
+            "server32 -> gate3.g3_symbol_master / exact name / delisted=0");
 
         ImGui::InputTextMultiline(
             "##1516_clipboard_text",
@@ -307,10 +380,10 @@ namespace
                 "변환: %s",
                 g_historicalImport.conversionStatus.c_str());
         }
-        if (!g_historicalImport.databaseStatus.empty()) {
+        if (!g_historicalImport.gatewayStatus.empty()) {
             ImGui::TextWrapped(
-                "종목마스터: %s",
-                g_historicalImport.databaseStatus.c_str());
+                "데이터 게이트웨이: %s",
+                g_historicalImport.gatewayStatus.c_str());
         }
         for (const std::string& diagnostic :
              g_historicalImport.parsed.diagnostics)
@@ -330,7 +403,7 @@ namespace
 
         const std::size_t resolved = CountStatus(ResolutionStatus::Resolved);
         ImGui::BeginDisabled(resolved == 0U);
-        if (ImGui::Button("코드 확정 종목으로 Frozen Cohort 생성")) {
+        if (ImGui::Button("DB 저장 + Frozen Cohort 생성")) {
             CommitHistoricalCohort();
         }
         ImGui::EndDisabled();
@@ -338,8 +411,9 @@ namespace
         if (g_historicalImport.cohortCommitted) {
             ImGui::TextColored(
                 ImVec4(0.35f, 0.95f, 0.65f, 1.0f),
-                "확정 완료: %zu종목",
-                g_state.members.size());
+                "확정 완료: %zu종목 / cohort_id=%lld",
+                g_state.members.size(),
+                g_historicalImport.cohortId);
             ImGui::SameLine();
         }
         if (ImGui::Button("닫기")) ImGui::CloseCurrentPopup();

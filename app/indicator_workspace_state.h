@@ -30,6 +30,25 @@ namespace trading::app
         IndicatorWorkspaceSource& source,
         std::string& diagnostic);
 
+    // Compatibility signature for the current shell wrapper. legacyPath is
+    // deliberately ignored so the old chart workspace can never repopulate
+    // hard-coded indicators.
+    inline bool LoadIndicatorWorkspaceState(
+        const std::string& savedPath,
+        const std::string&,
+        const std::string& defaultPath,
+        IndicatorWorkspaceState& state,
+        IndicatorWorkspaceSource& source,
+        std::string& diagnostic)
+    {
+        return LoadIndicatorWorkspaceState(
+            savedPath,
+            defaultPath,
+            state,
+            source,
+            diagnostic);
+    }
+
     bool SaveIndicatorWorkspaceState(
         const std::string& path,
         const IndicatorWorkspaceState& state,

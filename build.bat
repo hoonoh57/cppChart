@@ -16,10 +16,10 @@ if exist shell.exe (
 )
 
 if not exist obj mkdir obj
-echo *** BUILD ENTRYPOINT: shell_main_m95.cpp [single-owner indicator store] ***
+echo *** BUILD ENTRYPOINT: shell_main_m96.cpp [comparison workspace store] ***
 cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0602 ^
    /I"imgui" /I"imgui\backends" ^
-   shell_main_m95.cpp ^
+   shell_main_m96.cpp ^
    core\command_bus.cpp ^
    core\fault_policy.cpp ^
    core\json_lite.cpp ^
@@ -58,6 +58,8 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    app\comparison_transform.cpp ^
    app\comparison_module.cpp ^
    app\comparison_render_adapter.cpp ^
+   app\comparison_workspace_state.cpp ^
+   app\comparison_workspace_store.cpp ^
    app\symbol_master_cache.cpp ^
    app\symbol_master_cache_compat.cpp ^
    render\chart_viewport.cpp ^
@@ -118,4 +120,4 @@ if errorlevel 1 (
 del /F /Q indicator_workspace_state_tests.exe 2>NUL
 
 echo.
-echo *** BUILD OK -^> shell.exe [single-owner indicator store] ***
+echo *** BUILD OK -^> shell.exe [comparison workspace store] ***

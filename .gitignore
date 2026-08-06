@@ -36,6 +36,9 @@ patch*_shell.ps1
 /x64/
 /Debug/
 /Release/
+/obj_stock_pool/
+/vcpkg_installed/
+/.tools/
 *.exe
 *.dll
 *.obj
@@ -49,6 +52,7 @@ patch*_shell.ps1
 
 # Local UI state
 /shell_layout.ini
+/stock_pool_workbench_layout.ini
 /data/indicator_workspace.json
 /data/indicator_workspace.json.tmp
 /data/indicator_workspace.json.bak

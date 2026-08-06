@@ -59,6 +59,8 @@ namespace
         M94Clock::time_point changedAt{};
     };
 
+    trading::ui::ApplyIndicatorDefinitions g_m94BaseApplyDefinitions = nullptr;
+
     M94IndicatorWorkspaceRuntime& M94Runtime()
     {
         static M94IndicatorWorkspaceRuntime runtime;
@@ -177,19 +179,23 @@ namespace
         return state;
     }
 
-    void M94SaveWorkspace(const char* reason)
+    bool M94PersistWorkspaceState(
+        const trading::app::IndicatorWorkspaceState& requestedState,
+        const char* reason,
+        std::string& error)
     {
         M94IndicatorWorkspaceRuntime& runtime = M94Runtime();
-        if (!runtime.loaded) return;
+        if (!runtime.loaded) {
+            error = "지표 상태 저장기가 초기화되지 않았습니다.";
+            return false;
+        }
 
-        trading::app::IndicatorWorkspaceState state = M94CurrentState();
-        std::string error;
+        trading::app::IndicatorWorkspaceState state = requestedState;
         if (!trading::app::NormalizeIndicatorWorkspaceDefinitions(
                 state.indicators,
                 error))
         {
-            g_log.Add("FAULT", "지표 상태 정규화 실패: %s", error.c_str());
-            return;
+            return false;
         }
 
         std::string serialized;
@@ -198,13 +204,14 @@ namespace
                 serialized,
                 error))
         {
-            g_log.Add("FAULT", "지표 상태 직렬화 실패: %s", error.c_str());
-            return;
+            return false;
         }
         if (serialized == runtime.lastSavedJson) {
+            runtime.loadedState = state;
             runtime.lastObservedJson = serialized;
             runtime.dirty = false;
-            return;
+            error.clear();
+            return true;
         }
 
         if (!trading::app::SaveIndicatorWorkspaceState(
@@ -212,8 +219,7 @@ namespace
                 state,
                 error))
         {
-            g_log.Add("FAULT", "지표 상태 저장 실패: %s", error.c_str());
-            return;
+            return false;
         }
 
         runtime.loadedState = state;
@@ -228,6 +234,55 @@ namespace
             state.indicators.size(),
             trading::app::VisibleIndicatorSpecs(state.indicators).size(),
             state.paneHeightWeights.size());
+        error.clear();
+        return true;
+    }
+
+    void M94SaveWorkspace(const char* reason)
+    {
+        std::string error;
+        if (!M94PersistWorkspaceState(
+                M94CurrentState(),
+                reason,
+                error))
+        {
+            g_log.Add("FAULT", "지표 상태 저장 실패: %s", error.c_str());
+        }
+    }
+
+    bool M94ApplyAndPersistIndicatorDefinitions(
+        const std::vector<trading::app::IndicatorInstanceDefinition>& candidate,
+        std::string& error)
+    {
+        if (g_m94BaseApplyDefinitions == nullptr) {
+            error = "지표 구성 적용 함수가 없습니다.";
+            return false;
+        }
+
+        const std::vector<trading::app::IndicatorInstanceDefinition> previous =
+            g_indicatorDefinitions;
+        if (!g_m94BaseApplyDefinitions(candidate, error)) {
+            return false;
+        }
+
+        trading::app::IndicatorWorkspaceState state;
+        state.indicators = candidate;
+        state.paneHeightWeights = g_mainRenderSurface.paneHeightWeights;
+        std::string saveError;
+        if (!M94PersistWorkspaceState(state, "지표 적용", saveError)) {
+            std::string rollbackError;
+            if (!g_m94BaseApplyDefinitions(previous, rollbackError)) {
+                g_log.Add(
+                    "FAULT",
+                    "지표 저장 실패 후 런타임 복원 실패: %s",
+                    rollbackError.c_str());
+            }
+            error = "지표 구성 저장 실패: " + saveError;
+            return false;
+        }
+
+        error.clear();
+        return true;
     }
 
     void M94PersistencePump()
@@ -310,11 +365,14 @@ void trading::ui::M94DrawIndicatorManagerWindow(
     IndicatorManagerUiState& state,
     ApplyIndicatorDefinitions applyDefinitions)
 {
+    g_m94BaseApplyDefinitions = applyDefinitions;
     trading::ui::DrawIndicatorManagerWindow(
         definitions,
         state,
-        applyDefinitions);
-    M94RestoreMissingBuiltins(definitions, applyDefinitions);
+        M94ApplyAndPersistIndicatorDefinitions);
+    M94RestoreMissingBuiltins(
+        definitions,
+        M94ApplyAndPersistIndicatorDefinitions);
 }
 
 bool ImGui::M94SmallButton(const char* label)

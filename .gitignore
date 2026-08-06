@@ -49,6 +49,8 @@ patch*_shell.ps1
 
 # Local UI state
 /shell_layout.ini
+/data/indicator_workspace.json
+/data/indicator_workspace.json.tmp
 /data/chart_workspace.json
 /data/chart_workspace.json.tmp
 /data/chart_workspace.json.bak

@@ -1,11 +1,13 @@
 #include "../core/stock_pool_engine.h"
 #include "../app/stock_pool_evaluator.h"
 #include "../app/stock_pool_fixture.h"
+#include "../app/stock_pool_1516_import.h"
 
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -25,11 +27,51 @@ namespace
         }
         return nullptr;
     }
+
+    void Verify1516ClipboardImport()
+    {
+        using namespace trading::stock_pool::import1516;
+        const std::string clipboard =
+            "\t종목명\t기간 수익률\t\t\t기간 내 최고수익률\t검색시점 거래량\t기타\n"
+            "\t\t1분간\t3분간\t7시간\n"
+            "\t아로마티카\t\"+6.81%\"\t\"+3.61%\"\t\"+24.31%\"\t\"+24.31%\"\t\"53,841\"\t\"14.86\"\n"
+            "\t져스텍\t\"0%\"\t\"+1.10%\"\t\"+13.46%\"\t\"+21.81%\"\t\"82,193\"\t\"16.24\"\n"
+            "\t아로마티카\t\"-1.00%\"\t\"0%\"\t\"+1.00%\"\t\"+2.00%\"\t\"1,000\"\t\"-0.50\"\n";
+
+        ParseResult parsed = ParseClipboardText(clipboard);
+        Require(parsed.rows.size() == 3U, "1516 parsed row count");
+        Require(
+            std::abs(parsed.rows[0].return1mPercent - 6.81) < 1.0e-9,
+            "1516 percentage parsing");
+        Require(
+            parsed.rows[0].captureVolume == 53841,
+            "1516 volume parsing");
+        Require(
+            std::abs(parsed.rows[1].return1mPercent) < 1.0e-9,
+            "1516 zero percentage parsing");
+
+        const std::vector<SymbolMasterEntry> master = {
+            {"123450", "아로마티카", "KOSDAQ"},
+            {"005930", "삼성전자", "KOSPI"}};
+        ResolveExactSymbolNames(parsed.rows, master);
+        Require(
+            parsed.rows[0].status == ResolutionStatus::Resolved &&
+                parsed.rows[0].code == "123450",
+            "1516 exact symbol resolution");
+        Require(
+            parsed.rows[1].status == ResolutionStatus::MissingSymbol,
+            "1516 missing symbol rejection");
+        Require(
+            parsed.rows[2].status == ResolutionStatus::DuplicateSymbol,
+            "1516 duplicate symbol rejection");
+    }
 }
 
 int main()
 {
     using namespace trading::stock_pool;
+
+    Verify1516ClipboardImport();
 
     const ScoringProfile profile;
     const auto members = fixture::BuildDeterministicFixture();
@@ -88,6 +130,6 @@ int main()
         report.capturedWinnerCount >= 1,
         "causal ranking captured no fixture winner");
 
-    std::cout << "stock pool engine tests passed" << std::endl;
+    std::cout << "stock pool engine and 1516 import tests passed" << std::endl;
     return 0;
 }

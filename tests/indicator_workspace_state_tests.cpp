@@ -62,6 +62,7 @@ int main()
         initial,
         initialSource,
         diagnostic);
+    if (!loadedDefault) std::cerr << "loadDefaultError: " << diagnostic << '\n';
     Expect(loadedDefault, "default workspace must load");
     Expect(
         initialSource == trading::app::IndicatorWorkspaceSource::Default,
@@ -78,6 +79,7 @@ int main()
         saved.string(),
         initial,
         saveError);
+    if (!savedOk) std::cerr << "saveError: " << saveError << '\n';
     Expect(savedOk, "verified workspace save must succeed");
     Expect(std::filesystem::exists(saved), "saved JSON must exist");
 
@@ -91,6 +93,7 @@ int main()
         restarted,
         restartedSource,
         diagnostic);
+    if (!restartedOk) std::cerr << "restartError: " << diagnostic << '\n';
     Expect(restartedOk, "saved workspace must reload");
     Expect(
         restartedSource == trading::app::IndicatorWorkspaceSource::Saved,
@@ -101,20 +104,18 @@ int main()
         restartedEma != nullptr && restartedEma->visible,
         "EMA visible state must survive restart");
 
-    // Create a last-known-good backup by committing another valid state.
     auto* rsi = FindByType(restarted, "RSI");
     Expect(rsi != nullptr, "RSI definition must exist");
     if (rsi != nullptr) rsi->visible = true;
     saveError.clear();
-    Expect(
-        trading::app::SaveVerifiedIndicatorWorkspace(
-            saved.string(), restarted, saveError),
-        "second verified save must create a backup");
+    const bool secondSaved = trading::app::SaveVerifiedIndicatorWorkspace(
+        saved.string(), restarted, saveError);
+    if (!secondSaved) std::cerr << "secondSaveError: " << saveError << '\n';
+    Expect(secondSaved, "second verified save must create a backup");
     Expect(
         std::filesystem::exists(saved.string() + ".bak"),
         "last-known-good backup must exist");
 
-    // Corrupt the primary file. The loader must use the backup, never defaults.
     {
         std::ofstream output(saved, std::ios::binary | std::ios::trunc);
         output << "{broken-json";
@@ -129,6 +130,7 @@ int main()
         recovered,
         recoveredSource,
         diagnostic);
+    if (!recoveredOk) std::cerr << "recoveryError: " << diagnostic << '\n';
     Expect(recoveredOk, "corrupt primary must recover from backup");
     Expect(
         recoveredSource == trading::app::IndicatorWorkspaceSource::Saved,

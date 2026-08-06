@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "indicators": [
     {"id":"sma.20","type":"SMA","level":"Visible","parameters":{"period":20}},
     {"id":"ema.20","type":"EMA","level":"Off","parameters":{"period":20}},
@@ -8,16 +8,13 @@
     {"id":"macd.12.26.9","type":"MACD","level":"Off","parameters":{"fast_period":12,"slow_period":26,"signal_period":9}},
     {"id":"dmi.14","type":"DMI","level":"Off","parameters":{"period":14}},
     {"id":"supertrend.14.2","type":"SUPERTREND","level":"Off","parameters":{"period":14,"multiplier":2}},
-    {"id":"jma.20","type":"JMA","level":"Visible","parameters":{"period":20,"phase":0,"power":2}},
-    {"id":"vwap.session","type":"VWAP","level":"Visible","parameters":{"std_dev_1":1,"std_dev_2":2}},
-    {"id":"obv.20","type":"OBV","level":"Visible","parameters":{"signal_period":20}},
-    {"id":"adx.14","type":"ADX","level":"Visible","parameters":{"period":14}}
+    {"id":"jma.20","type":"JMA","level":"Off","parameters":{"period":20,"phase":0,"power":2}},
+    {"id":"vwap.session","type":"VWAP","level":"Off","parameters":{"std_dev_1":1,"std_dev_2":2}},
+    {"id":"obv.20","type":"OBV","level":"Off","parameters":{"signal_period":20}},
+    {"id":"adx.14","type":"ADX","level":"Off","parameters":{"period":14}}
   ],
   "pane_height_weights": {
     "price": 1.0,
-    "volume": 0.25,
-    "indicator.jma.20.slope.pane": 0.22,
-    "indicator.obv.20.pane": 0.30,
-    "indicator.adx.14.pane": 0.25
+    "volume": 0.25
   }
 }

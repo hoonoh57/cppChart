@@ -90,5 +90,29 @@ if not exist shell.exe (
     echo *** BUILD FAILED: linker reported success but shell.exe is missing ***
     exit /b 1
 )
+
+echo *** VERIFYING INDICATOR WORKSPACE RESTART ROUNDTRIP ***
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc ^
+   tests\indicator_workspace_state_tests.cpp ^
+   core\json_lite.cpp ^
+   app\indicator_workspace_state.cpp ^
+   app\indicator_configuration.cpp ^
+   app\indicator_properties.cpp ^
+   app\indicator_render_adapter.cpp ^
+   render\render_document.cpp ^
+   /Fe:indicator_workspace_state_tests.exe
+if errorlevel 1 (
+    if exist shell.exe del /F /Q shell.exe
+    echo *** BUILD FAILED: indicator workspace restart test did not compile ***
+    exit /b 1
+)
+indicator_workspace_state_tests.exe
+if errorlevel 1 (
+    if exist shell.exe del /F /Q shell.exe
+    echo *** BUILD FAILED: indicator workspace restart roundtrip failed ***
+    exit /b 1
+)
+del /F /Q indicator_workspace_state_tests.exe 2>NUL
+
 echo.
 echo *** BUILD OK -^> shell.exe [renderer-pure indicator state] ***

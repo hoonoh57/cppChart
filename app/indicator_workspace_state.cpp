@@ -59,11 +59,12 @@ namespace trading::app
             return BooleanValue(object, "visible", fallback);
         }
 
-        void AppendQuoted(
+        void AppendJsonString(
             std::ostringstream& stream,
             const std::string& value)
         {
-            stream << '"' << json_lite::EscapeString(value) << '"';
+            // EscapeString already includes the opening and closing quotes.
+            stream << json_lite::EscapeString(value);
         }
 
         const char* DefaultIdForType(const std::string& type) noexcept
@@ -217,14 +218,16 @@ namespace trading::app
         {
             const json_lite::ParseResult parsed = json_lite::Parse(text);
             if (!parsed.ok || !parsed.value.IsObject()) {
-                error = parsed.ok
+                std::ostringstream message;
+                message << (parsed.ok
                     ? "지표 JSON 루트가 객체가 아닙니다."
-                    : "지표 JSON 파싱 실패: " + parsed.error;
+                    : "지표 JSON 파싱 실패: " + parsed.error);
+                if (!parsed.ok) message << " at byte " << parsed.errorOffset;
+                error = message.str();
                 return false;
             }
 
-            const json_lite::Value* schema =
-                Find(parsed.value, "schema_version");
+            const json_lite::Value* schema = Find(parsed.value, "schema_version");
             if (schema == nullptr || !schema->IsNumber() ||
                 schema->AsInt(0) != SchemaVersion)
             {
@@ -259,8 +262,7 @@ namespace trading::app
                     return false;
                 }
 
-                const json_lite::Value* parameters =
-                    Find(item, "parameters");
+                const json_lite::Value* parameters = Find(item, "parameters");
                 if (parameters != nullptr && parameters->IsObject()) {
                     for (const auto& parameter : parameters->AsObject()) {
                         if (!parameter.second.IsNumber()) continue;
@@ -273,8 +275,7 @@ namespace trading::app
 
                 IndicatorInstanceDefinition definition;
                 if (!CreateIndicatorDefinition(spec, definition, error)) {
-                    error = "지표 JSON 정의 생성 실패 " + spec.id + ": " +
-                        error;
+                    error = "지표 JSON 정의 생성 실패 " + spec.id + ": " + error;
                     return false;
                 }
                 definition.visible = LevelVisible(item, false);
@@ -296,8 +297,8 @@ namespace trading::app
                 for (const auto& pane : paneWeights->AsObject()) {
                     if (!pane.second.IsNumber()) continue;
                     const double value = pane.second.AsNumber();
-                    if (!pane.first.empty() &&
-                        std::isfinite(value) && value > 0.0 && value <= 100.0)
+                    if (!pane.first.empty() && std::isfinite(value) &&
+                        value > 0.0 && value <= 100.0)
                     {
                         candidate.paneHeightWeights[pane.first] =
                             static_cast<float>(value);
@@ -316,18 +317,15 @@ namespace trading::app
             std::string& error)
         {
             std::string text;
-            if (!ReadText(std::filesystem::path(path), text, error)) {
-                return false;
-            }
+            if (!ReadText(std::filesystem::path(path), text, error)) return false;
             return ParseState(text, state, error);
         }
 
         bool Exists(const std::string& path)
         {
             std::error_code error;
-            return std::filesystem::exists(
-                std::filesystem::path(path),
-                error);
+            return !path.empty() &&
+                std::filesystem::exists(std::filesystem::path(path), error);
         }
     }
 
@@ -381,8 +379,7 @@ namespace trading::app
         std::string& json,
         std::string& error)
     {
-        std::vector<IndicatorInstanceDefinition> definitions =
-            state.indicators;
+        std::vector<IndicatorInstanceDefinition> definitions = state.indicators;
         if (!NormalizeIndicatorWorkspaceDefinitions(definitions, error)) {
             return false;
         }
@@ -395,18 +392,18 @@ namespace trading::app
             const IndicatorInstanceDefinition& definition = definitions[index];
             stream << (index == 0U ? "\n" : ",\n");
             stream << "    {\"id\":";
-            AppendQuoted(stream, definition.spec.id);
+            AppendJsonString(stream, definition.spec.id);
             stream << ",\"type\":";
-            AppendQuoted(stream, definition.spec.type);
+            AppendJsonString(stream, definition.spec.type);
             stream << ",\"level\":";
-            AppendQuoted(stream, definition.visible ? "Visible" : "Off");
+            AppendJsonString(stream, definition.visible ? "Visible" : "Off");
             stream << ",\"parameters\":{";
             bool firstParameter = true;
             for (const auto& parameter : definition.spec.parameters) {
                 if (!std::isfinite(parameter.second)) continue;
                 if (!firstParameter) stream << ',';
                 firstParameter = false;
-                AppendQuoted(stream, parameter.first);
+                AppendJsonString(stream, parameter.first);
                 stream << ':' << parameter.second;
             }
             stream << "},\"outputs\":[";
@@ -416,12 +413,11 @@ namespace trading::app
             {
                 if (outputIndex > 0U) stream << ',';
                 stream << "{\"id\":";
-                AppendQuoted(stream, definition.outputs[outputIndex].seriesId);
+                AppendJsonString(stream, definition.outputs[outputIndex].seriesId);
                 stream << ",\"level\":";
-                AppendQuoted(
+                AppendJsonString(
                     stream,
-                    definition.outputs[outputIndex].visible
-                        ? "Visible" : "Off");
+                    definition.outputs[outputIndex].visible ? "Visible" : "Off");
                 stream << '}';
             }
             stream << "],\"references\":[";
@@ -431,11 +427,11 @@ namespace trading::app
             {
                 if (referenceIndex > 0U) stream << ',';
                 stream << "{\"id\":";
-                AppendQuoted(
+                AppendJsonString(
                     stream,
                     definition.references[referenceIndex].referenceId);
                 stream << ",\"level\":";
-                AppendQuoted(
+                AppendJsonString(
                     stream,
                     definition.references[referenceIndex].visible
                         ? "Visible" : "Off");
@@ -446,8 +442,7 @@ namespace trading::app
         stream << "\n  ],\n  \"pane_height_weights\": {";
         bool firstPane = true;
         for (const auto& pane : state.paneHeightWeights) {
-            if (pane.first.empty() ||
-                !std::isfinite(pane.second) ||
+            if (pane.first.empty() || !std::isfinite(pane.second) ||
                 pane.second <= 0.0f || pane.second > 100.0f)
             {
                 continue;
@@ -455,13 +450,21 @@ namespace trading::app
             stream << (firstPane ? "\n" : ",\n");
             firstPane = false;
             stream << "    ";
-            AppendQuoted(stream, pane.first);
+            AppendJsonString(stream, pane.first);
             stream << ": " << pane.second;
         }
         if (!firstPane) stream << '\n';
         stream << "  }\n}\n";
 
-        json = stream.str();
+        const std::string candidate = stream.str();
+        IndicatorWorkspaceState roundTrip;
+        std::string parseError;
+        if (!ParseState(candidate, roundTrip, parseError)) {
+            error = "직렬화된 지표 JSON 자체 검증 실패: " + parseError;
+            return false;
+        }
+
+        json = candidate;
         error.clear();
         return true;
     }
@@ -476,7 +479,7 @@ namespace trading::app
         source = IndicatorWorkspaceSource::None;
         diagnostic.clear();
 
-        if (!savedPath.empty() && Exists(savedPath)) {
+        if (Exists(savedPath)) {
             IndicatorWorkspaceState saved;
             std::string savedError;
             if (LoadOne(savedPath, saved, savedError)) {
@@ -487,7 +490,7 @@ namespace trading::app
             diagnostic = "기존 지표 JSON 무시: " + savedError;
         }
 
-        if (!defaultPath.empty() && Exists(defaultPath)) {
+        if (Exists(defaultPath)) {
             IndicatorWorkspaceState defaults;
             std::string defaultError;
             if (LoadOne(defaultPath, defaults, defaultError)) {
@@ -511,9 +514,7 @@ namespace trading::app
         std::string& error)
     {
         std::string json;
-        if (!SerializeIndicatorWorkspaceState(state, json, error)) {
-            return false;
-        }
+        if (!SerializeIndicatorWorkspaceState(state, json, error)) return false;
         return WriteAtomic(std::filesystem::path(path), json, error);
     }
 

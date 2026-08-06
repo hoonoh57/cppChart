@@ -11,6 +11,15 @@ if not errorlevel 1 (
     exit /b 2
 )
 
+rem Remove every runnable or diagnostic artifact before dependency restore.
+rem A failed vcpkg restore must never leave an older mysql.exe-based binary
+rem available for accidental execution.
+if exist stock_pool_workbench.exe del /F /Q stock_pool_workbench.exe
+if exist stock_pool_workbench_tests.exe del /F /Q stock_pool_workbench_tests.exe
+if exist stock_pool_workbench.build.txt del /F /Q stock_pool_workbench.build.txt
+if exist obj_stock_pool rmdir /S /Q obj_stock_pool
+mkdir obj_stock_pool
+
 set "VCPKG_DISABLE_METRICS=1"
 set "VCPKG_EXE="
 
@@ -79,10 +88,6 @@ if not defined MYSQL_LIBRARY (
 
 echo *** MYSQL CLIENT LIBRARY: %MYSQL_LIBRARY% ***
 
-if exist stock_pool_workbench.exe del /F /Q stock_pool_workbench.exe
-if exist stock_pool_workbench_tests.exe del /F /Q stock_pool_workbench_tests.exe
-if not exist obj_stock_pool mkdir obj_stock_pool
-
 echo *** VERIFYING STOCK-POOL CAUSAL ENGINE AND 1516 IMPORTER ***
 cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc /MD ^
    /I"." ^
@@ -137,8 +142,15 @@ if exist "%VCPKG_TRIPLET_ROOT%\bin\*.dll" (
     for %%F in ("%VCPKG_TRIPLET_ROOT%\bin\*.dll") do copy /Y "%%~fF" "%CD%\" >NUL
 )
 
+set "BUILD_HEAD=unknown"
+for /f "delims=" %%I in ('git rev-parse HEAD 2^>NUL') do set "BUILD_HEAD=%%I"
+>stock_pool_workbench.build.txt echo head=!BUILD_HEAD!
+>>stock_pool_workbench.build.txt echo adapter=native-libmysql
+>>stock_pool_workbench.build.txt echo executable=stock_pool_workbench.exe
+
 echo.
 echo *** BUILD OK -^> stock_pool_workbench.exe [1516 native libmysql import] ***
 echo Existing shell.exe was not modified.
 echo MySQL server installation path and mysql.exe are not required.
+echo Build identity: stock_pool_workbench.build.txt
 exit /b 0

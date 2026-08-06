@@ -16,10 +16,10 @@ if exist shell.exe (
 )
 
 if not exist obj mkdir obj
-echo *** BUILD ENTRYPOINT: shell_main_m93.cpp [stable indicator profile] ***
+echo *** BUILD ENTRYPOINT: shell_main_m94.cpp [renderer-pure indicator state] ***
 cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0602 ^
    /I"imgui" /I"imgui\backends" ^
-   shell_main_m93.cpp ^
+   shell_main_m94.cpp ^
    core\command_bus.cpp ^
    core\fault_policy.cpp ^
    core\json_lite.cpp ^
@@ -47,8 +47,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    app\feature_registry.cpp ^
    app\market_data_module.cpp ^
    app\chart_workspace_module.cpp ^
-   app\chart_workspace_persistence.cpp ^
-   app\chart_workspace_profile.cpp ^
+   app\indicator_workspace_state.cpp ^
    app\indicator_module.cpp ^
    app\indicator_render_adapter.cpp ^
    app\indicator_configuration.cpp ^
@@ -92,4 +91,4 @@ if not exist shell.exe (
     exit /b 1
 )
 echo.
-echo *** BUILD OK -^> shell.exe [stable indicator profile] ***
+echo *** BUILD OK -^> shell.exe [renderer-pure indicator state] ***

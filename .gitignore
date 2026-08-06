@@ -51,6 +51,10 @@ patch*_shell.ps1
 /shell_layout.ini
 /data/indicator_workspace.json
 /data/indicator_workspace.json.tmp
+/data/indicator_workspace.json.bak
+/data/comparison_workspace.json
+/data/comparison_workspace.json.tmp
+/data/comparison_workspace.json.bak
 /data/chart_workspace.json
 /data/chart_workspace.json.tmp
 /data/chart_workspace.json.bak

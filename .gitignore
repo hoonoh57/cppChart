@@ -39,6 +39,7 @@ patch*_shell.ps1
 /obj_stock_pool/
 /vcpkg_installed/
 /.tools/
+/stock_pool_workbench.build.txt
 *.exe
 *.dll
 *.obj

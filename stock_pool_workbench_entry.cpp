@@ -55,9 +55,11 @@ namespace
 #define Button StockPoolButton
 #define TextDisabled StockPoolTextDisabled
 #define Render StockPoolRender
+#define DrawToolbar StockPoolLegacyDrawToolbar
 #define ImGui_ImplWin32_WndProcHandler StockPoolImGuiWin32WndProcHandler
 #include "stock_pool_workbench_main.cpp"
 #undef ImGui_ImplWin32_WndProcHandler
+#undef DrawToolbar
 #undef Render
 #undef TextDisabled
 #undef Button

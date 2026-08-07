@@ -22,16 +22,9 @@ namespace trading::stock_pool::intuitive
         int obvSignalPeriod = 9;
         int obvNormalizationBars = 20;
         int maxFreshBars = 3;
-
-        // Packed YYYYMMDDHHMMSS*1000 values. Bars before sessionStart warm the
-        // indicators only. Wave state is reset at sessionStart. Buy priority is
-        // valid only inside [evaluationStart, evaluationEnd].
         EpochMillis sessionStart = 0;
         EpochMillis evaluationStart = 0;
         EpochMillis evaluationEnd = 0;
-
-        // Tick-rate acceleration compares current real T<n> rate with this
-        // trailing median-sized window. No minute-volume proxy is allowed.
         int tickRateBaselineBars = 20;
     };
 
@@ -40,19 +33,15 @@ namespace trading::stock_pool::intuitive
         EpochMillis asOf = 0;
         double close = 0.0;
         double sessionReturnPercent = 0.0;
-
         double fastJma = 0.0;
         double slowJma = 0.0;
         double fastJmaSlopePercent = 0.0;
         double slowJmaSlopePercent = 0.0;
-
         double macdHistogramAtr = 0.0;
         double obvImpulse = 0.0;
-
         bool warmupOnly = false;
         bool inSession = false;
         bool inEvaluationWindow = false;
-
         bool bullishRegime = false;
         bool crossUp = false;
         bool crossDown = false;
@@ -61,9 +50,6 @@ namespace trading::stock_pool::intuitive
         double waveJmaGainPercent = 0.0;
         double priceExtensionPercent = 0.0;
         bool fresh = false;
-
-        // Real tick participation populated from T<n> candle completion time.
-        // Example: a T60 candle completed in 2 seconds => 30 ticks/second.
         bool tickAvailable = false;
         double tickRatePerSecond = std::numeric_limits<double>::quiet_NaN();
         double tickRatePerMinute = std::numeric_limits<double>::quiet_NaN();
@@ -102,9 +88,17 @@ namespace trading::stock_pool::intuitive
         const std::vector<MemberSeries>& members,
         const StrengthConfig& config);
 
+    // Retained for fixtures and legacy index-aligned tests.
     StrengthSnapshot BuildStrengthSnapshot(
         const std::vector<MemberStrengthSeries>& series,
         std::size_t asOfIndex,
+        const StrengthConfig& config);
+
+    // Tick candles are asynchronous across symbols. At a clock time, each
+    // symbol contributes its latest completed candle at or before asOfTime.
+    StrengthSnapshot BuildStrengthSnapshotAtTime(
+        const std::vector<MemberStrengthSeries>& series,
+        EpochMillis asOfTime,
         const StrengthConfig& config);
 
     const char* BuyStateName(const StrengthRow& row) noexcept;

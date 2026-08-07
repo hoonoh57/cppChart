@@ -16,6 +16,7 @@ if exist stock_pool_workbench.exe del /F /Q stock_pool_workbench.exe
 if exist stock_pool_workbench_tests.exe del /F /Q stock_pool_workbench_tests.exe
 if exist stock_pool_strength_cross_tests.exe del /F /Q stock_pool_strength_cross_tests.exe
 if exist intuitive_strength_engine_tests.exe del /F /Q intuitive_strength_engine_tests.exe
+if exist intuitive_strength_warmup_tests.exe del /F /Q intuitive_strength_warmup_tests.exe
 if exist stock_pool_workbench.build.txt del /F /Q stock_pool_workbench.build.txt
 if exist obj_stock_pool rmdir /S /Q obj_stock_pool
 mkdir obj_stock_pool
@@ -79,8 +80,27 @@ if errorlevel 1 (
 )
 del /F /Q intuitive_strength_engine_tests.exe 2>NUL
 
+echo *** VERIFYING PRIOR-SESSION INDICATOR WARM-UP AND 09:03 GATE ***
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc /MD ^
+   /I"." ^
+   tests\intuitive_strength_warmup_tests.cpp ^
+   core\intuitive_strength_engine.cpp ^
+   core\intuitive_strength_snapshot.cpp ^
+   /Foobj_stock_pool\ /Fe:intuitive_strength_warmup_tests.exe
+if errorlevel 1 (
+    echo *** BUILD FAILED: warmup tests did not compile ***
+    exit /b 1
+)
+intuitive_strength_warmup_tests.exe
+if errorlevel 1 (
+    del /F /Q intuitive_strength_warmup_tests.exe 2>NUL
+    echo *** BUILD FAILED: prior-session warmup / 09:03 gate regression ***
+    exit /b 1
+)
+del /F /Q intuitive_strength_warmup_tests.exe 2>NUL
+
 rem Large WinHTTP/JSON adapters are deliberately compiled without optimizer.
-rem This isolates the known MSVC C1001 class from the calculation/rendering TUs.
+rem This isolates the known MSVC C1001 class from calculation/rendering TUs.
 echo *** COMPILING SERVER32 GATEWAY ADAPTER WITH MSVC ICE GUARD (/Od /Ob0) ***
 cl /nologo /std:c++17 /utf-8 /Od /Ob0 /W3 /EHsc /MD ^
    /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0602 ^
@@ -144,15 +164,17 @@ set "BUILD_HEAD=unknown"
 for /f "delims=" %%I in ('git rev-parse HEAD 2^>NUL') do set "BUILD_HEAD=%%I"
 >stock_pool_workbench.build.txt echo head=!BUILD_HEAD!
 >>stock_pool_workbench.build.txt echo adapter=server32-http-mysql
->>stock_pool_workbench.build.txt echo market_data=server32-cybos-real-tick-candles
+>>stock_pool_workbench.build.txt echo market_data=server32-cybos-real-Tn-candles
 >>stock_pool_workbench.build.txt echo tick_sizes=60,120,180,360,720
+>>stock_pool_workbench.build.txt echo historical_tick_timestamp=HHmm-minute-resolution
+>>stock_pool_workbench.build.txt echo within_minute_render=cybos-order-preserved-even-spacing
 >>stock_pool_workbench.build.txt echo indicator_warmup=latest-prior-session-tail
 >>stock_pool_workbench.build.txt echo indicator_reset_at_0900=false
 >>stock_pool_workbench.build.txt echo wave_state_reset_at_0900=true
 >>stock_pool_workbench.build.txt echo evaluation_window=09:03:00-10:00:00
->>stock_pool_workbench.build.txt echo snapshot_alignment=latest-completed-tick-candle-by-clock-time
->>stock_pool_workbench.build.txt echo chart_x_axis=actual-clock-time
->>stock_pool_workbench.build.txt echo tick_participation=raw-ticks-per-minute-from-tick-candle-duration
+>>stock_pool_workbench.build.txt echo snapshot_alignment=minute-close-latest-completed-Tn-candle
+>>stock_pool_workbench.build.txt echo chart_x_axis=real-minute-plus-order-preserving-within-minute-layout
+>>stock_pool_workbench.build.txt echo tick_participation=completed-Tn-bars-per-minute-times-n
 >>stock_pool_workbench.build.txt echo trend_strength=jma7-50-2_vs_jma20-50-2
 >>stock_pool_workbench.build.txt echo legacy_relative_strength=available-by-checkbox
 >>stock_pool_workbench.build.txt echo executable=stock_pool_workbench.exe
@@ -163,7 +185,8 @@ echo *** BUILD OK -^> stock_pool_workbench.exe [warm-start opening tick WYSIWYG]
 echo Existing shell.exe was not modified.
 echo Prior-session bars warm indicators but never create today's buy state.
 echo Buy priority is emitted only from 09:03 through 10:00.
-echo Tick density is derived from real Tn candle completion time, never from volume.
+echo Historical Tn timestamps are minute-resolution; no fake seconds are claimed.
+echo Tick density is completed Tn bars per minute times n, never inferred from volume.
 echo Build identity: stock_pool_workbench.build.txt
 exit /b 0
 

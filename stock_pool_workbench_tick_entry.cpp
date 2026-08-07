@@ -11,6 +11,7 @@
 #include "imgui_impl_win32.h"
 #include "core/intuitive_strength_engine.h"
 #include "platform/stock_pool_tick_client.h"
+#include "ui/stock_pool_tick_detail_ui.h"
 
 #define wWinMain StockPoolLegacyWinMain
 #include "stock_pool_workbench_entry.cpp"
@@ -45,6 +46,7 @@ namespace
     };
 
     TickWorkbenchState g_tick;
+    trading::stock_pool::ui::TickDetailUiState g_tickDetail;
 
     std::string DigitsOnly(const char* text)
     {
@@ -133,6 +135,44 @@ namespace
             g_tick.config);
     }
 
+    void DrawTickDetail()
+    {
+        if (!g_tickDetail.open) return;
+        if (!g_tick.calculated ||
+            g_tickDetail.memberIndex >= g_tick.members.size())
+        {
+            g_tickDetail.open = false;
+            return;
+        }
+
+        const MemberStrengthSeries* strength =
+            FindStrength(g_tickDetail.memberIndex);
+        if (strength == nullptr) {
+            g_tickDetail.open = false;
+            return;
+        }
+
+        const bool calculationChanged =
+            trading::stock_pool::ui::DrawTickDetailWindow(
+                g_tickDetail,
+                &g_tick.members[g_tickDetail.memberIndex],
+                strength,
+                g_tick.config,
+                std::string(g_state.tradingDate),
+                g_tick.tickSize,
+                g_tick.asOfMinute);
+        if (calculationChanged) {
+            g_tick.series = CalculateStrengthSeries(
+                g_tick.members,
+                g_tick.config);
+            RebuildSnapshot();
+            g_state.status =
+                "상세분석 JMA/Gate 설정 변경 — 동일 실제 T" +
+                std::to_string(g_tick.tickSize) +
+                " 데이터로 전체 종목 재계산 완료";
+        }
+    }
+
     bool LoadTickStrength()
     {
         if (g_state.rawMembers.empty()) {
@@ -151,6 +191,7 @@ namespace
         g_tick.series.clear();
         g_tick.previousTradingDate.clear();
         g_tick.calculated = false;
+        g_tickDetail.open = false;
         g_state.status =
             "server32 실제 CYBOS T" + std::to_string(g_tick.tickSize) +
             " 적재 중 — 전일 warm-up + 당일 09:00~10:00";
@@ -225,6 +266,7 @@ namespace
         {
             g_tick.tickSize = tickSizes[tickIndex];
             g_tick.calculated = false;
+            g_tickDetail.open = false;
         }
 
         ImGui::SameLine();
@@ -233,6 +275,7 @@ namespace
             g_tick.warmupBars =
                 (std::max)(40, (std::min)(600, g_tick.warmupBars));
             g_tick.calculated = false;
+            g_tickDetail.open = false;
         }
 
         ImGui::SameLine();
@@ -286,8 +329,17 @@ namespace
     void DrawGrid()
     {
         if (!g_tick.calculated || g_tick.snapshot.rows.empty()) {
-            ImGui::TextWrapped(
-                "1516 종목 확정 후 실제 틱강도 분석을 실행하십시오. 당일 09:00부터 지표를 새로 초기화하지 않습니다.");
+            if (!g_state.rawMembers.empty()) {
+                ImGui::TextWrapped(
+                    "Frozen Cohort %zu종목은 확정돼 있습니다. 틱강도 계산이 아직 완료되지 않았거나 실패했습니다. 상단 상태 메시지를 확인한 뒤 분석을 실행하십시오.",
+                    g_state.rawMembers.size());
+            }
+            else {
+                ImGui::TextWrapped(
+                    "1516 종목을 먼저 확정한 뒤 실제 틱강도 분석을 실행하십시오.");
+            }
+            ImGui::TextDisabled(
+                "당일 09:00부터 지표를 새로 초기화하지 않으며 전일 데이터는 warm-up 전용입니다.");
             return;
         }
 
@@ -301,6 +353,8 @@ namespace
             g_tick.snapshot.rows.size(),
             g_tick.tickSize,
             g_tick.previousTradingDate.c_str());
+        ImGui::TextDisabled(
+            "종목 행 또는 오른쪽 미니차트를 더블클릭하면 같은 계산결과의 상세분석 창을 엽니다.");
 
         if (!ImGui::BeginTable(
                 "##tick_strength_grid",
@@ -334,7 +388,19 @@ namespace
             if (row.buyPriority > 0) ImGui::Text("%d", row.buyPriority);
             else ImGui::TextDisabled("-");
             ImGui::TableSetColumnIndex(1);
-            ImGui::Text("%s %s", row.code.c_str(), row.name.c_str());
+            const std::string detailLabel =
+                row.code + " " + row.name + "##tick_detail_" + row.code;
+            ImGui::Selectable(
+                detailLabel.c_str(),
+                false,
+                ImGuiSelectableFlags_SpanAllColumns);
+            if (ImGui::IsItemHovered() &&
+                ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+            {
+                trading::stock_pool::ui::OpenTickDetail(
+                    g_tickDetail,
+                    row.memberIndex);
+            }
             ImGui::TableSetColumnIndex(2);
             ImGui::TextUnformatted(BuyStateName(row));
             ImGui::TableSetColumnIndex(3);
@@ -420,6 +486,13 @@ namespace
         ImGui::InvisibleButton(
             ("##tick_strip_" + row.code).c_str(),
             ImVec2((std::max)(620.0f, ImGui::GetContentRegionAvail().x), 160.0f));
+        if (ImGui::IsItemHovered() &&
+            ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+        {
+            trading::stock_pool::ui::OpenTickDetail(
+                g_tickDetail,
+                row.memberIndex);
+        }
         const ImVec2 minimum = ImGui::GetItemRectMin();
         const ImVec2 maximum = ImGui::GetItemRectMax();
         ImDrawList* draw = ImGui::GetWindowDrawList();
@@ -644,7 +717,7 @@ namespace
         const double slopeScale = GlobalSlopeScale();
         const double tickScale = GlobalTickRateScale();
         ImGui::TextWrapped(
-            "X축=09:00~10:00 실제 분 단위. 같은 분의 여러 Tn봉은 CYBOS 반환순서를 보존해 분 내부에 균등 배치합니다. 밀도와 순서는 실제지만 분내 초 위치는 시각화용입니다. 노란선=09:03 평가 시작, 청록선=실제 분당 틱수.");
+            "X축=09:00~10:00 실제 분 단위. 같은 분의 여러 Tn봉은 CYBOS 반환순서를 보존해 분 내부에 균등 배치합니다. 밀도와 순서는 실제지만 분내 초 위치는 시각화용입니다. 노란선=09:03 평가 시작, 청록선=실제 분당 틱수. 더블클릭=상세분석.");
         ImGui::TextDisabled(
             "모든 종목 공통 scale: JMA slope +/- %.1f%%/bar | Tick %.0f/min",
             slopeScale,
@@ -817,6 +890,7 @@ int WINAPI wWinMain(
         DrawWorkbenchTick();
         ImGui::End();
 
+        DrawTickDetail();
         ImGui::StockPoolRender();
         const float clearColor[4] = {0.05f, 0.055f, 0.065f, 1.0f};
         g_context->OMSetRenderTargets(1, &g_renderTarget, nullptr);

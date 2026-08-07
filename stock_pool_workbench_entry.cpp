@@ -12,6 +12,7 @@
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "app/stock_pool_1516_import.h"
+#include "app/stock_pool_hydration.h"
 #include "platform/stock_pool_gateway_client.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
@@ -244,7 +245,80 @@ namespace
             "1516 Frozen Cohort DB 저장/확정: " +
             std::to_string(g_state.members.size()) +
             "개 | cohort_id=" + std::to_string(saved.cohortId) +
-            " | 다음 단계: 포착시각 이후 실제 분봉 hydration";
+            " | 백테스트 클릭 시 실제 분봉 hydration";
+    }
+
+    bool HistoricalMembersNeedHydration()
+    {
+        if (g_state.rawMembers.empty()) return true;
+        return std::any_of(
+            g_state.rawMembers.begin(),
+            g_state.rawMembers.end(),
+            [](const MemberSeries& member) {
+                return member.bars.empty();
+            });
+    }
+
+    bool HydrateHistoricalCohort()
+    {
+        if (g_state.rawMembers.empty()) {
+            g_state.status =
+                "백테스트 거부 — 먼저 1516 Frozen Cohort를 확정하십시오.";
+            return false;
+        }
+
+        g_state.status =
+            "server32 실제 1분봉 hydration 진행 중 — 창이 응답할 때까지 기다리십시오.";
+        const auto hydrated =
+            trading::stock_pool::hydration::HydrateHistoricalMembers(
+                g_state.rawMembers,
+                g_state.tradingDate,
+                g_state.captureTime,
+                g_state.profile.minimumHistoryBars,
+                ".env");
+        if (!hydrated.ok) {
+            g_state.status = "분봉 hydration 실패 — " + hydrated.error;
+            return false;
+        }
+
+        g_state.rawMembers = hydrated.members;
+        ApplyTimeframe();
+        g_state.status =
+            "분봉 hydration 완료: " +
+            std::to_string(g_state.rawMembers.size()) + "종목 x " +
+            std::to_string(hydrated.barsPerMember) +
+            "개 공통 실제 1분봉 | " + hydrated.source;
+        return true;
+    }
+
+    bool RunHistoricalBacktest()
+    {
+        if (g_state.rawMembers.empty()) {
+            g_state.status =
+                "백테스트 거부 — 먼저 1516 Frozen Cohort를 확정하십시오.";
+            return false;
+        }
+        if (HistoricalMembersNeedHydration() && !HydrateHistoricalCohort()) {
+            return false;
+        }
+
+        const int availableBars = MaximumBarCount();
+        if (availableBars < g_state.profile.minimumHistoryBars) {
+            g_state.status =
+                "백테스트 거부 — 선택 timeframe의 공통 봉이 " +
+                std::to_string(availableBars) + "개이며 최소 " +
+                std::to_string(g_state.profile.minimumHistoryBars) +
+                "개가 필요합니다.";
+            return false;
+        }
+
+        RunBacktest();
+        if (g_state.backtest.snapshots.empty()) {
+            g_state.status =
+                "백테스트 실패 — 분봉은 적재됐지만 causal snapshot이 생성되지 않았습니다.";
+            return false;
+        }
+        return true;
     }
 
     void DrawResolvedRows()
@@ -427,11 +501,16 @@ namespace
 
     void DrawFrozenCohortMembers()
     {
+        const bool waiting = HistoricalMembersNeedHydration();
         ImGui::TextDisabled(
-            "Frozen Cohort %zu개 — 실제 분봉 hydration 대기",
+            waiting
+                ? "Frozen Cohort %zu개 — 실제 분봉 hydration 대기"
+                : "Frozen Cohort %zu개 — 실제 분봉 적재 완료",
             g_state.members.size());
         ImGui::TextWrapped(
-            "아래 목록은 DB에서 확정된 포착 종목입니다. 순위·강도·수익률은 아직 계산하지 않았으며, 포착시각 이후 분봉이 적재된 뒤에만 causal snapshot을 생성합니다.");
+            waiting
+                ? "아래 목록은 DB에서 확정된 포착 종목입니다. 백테스트를 누르면 server32에서 포착시각 이후 실제 1분봉을 적재하고, 동기화 검증 후 causal snapshot을 생성합니다."
+                : "실제 분봉 적재가 완료됐습니다. 백테스트를 누르면 미래정보 없이 causal snapshot과 Top-M 결과를 생성합니다.");
 
         if (!ImGui::BeginTable(
                 "##frozen_cohort_members",
@@ -489,13 +568,22 @@ bool ImGui::StockPoolButton(
     const ImVec2& size)
 {
     const bool clicked = ImGui::Button(label, size);
-    if (clicked && label != nullptr &&
-        std::strcmp(label, "불러오기") == 0 &&
+    if (!clicked || label == nullptr) return clicked;
+
+    if (std::strcmp(label, "불러오기") == 0 &&
         g_state.sourceMode == SourceMode::Historical1516)
     {
         g_historicalImport.requestOpen = true;
         return false;
     }
+
+    if (std::strcmp(label, "백테스트") == 0 &&
+        g_state.sourceMode == SourceMode::Historical1516)
+    {
+        RunHistoricalBacktest();
+        return false;
+    }
+
     return clicked;
 }
 

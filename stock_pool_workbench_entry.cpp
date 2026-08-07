@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <set>
@@ -24,6 +25,7 @@ namespace ImGui
     bool StockPoolButton(
         const char* label,
         const ImVec2& size = ImVec2(0.0f, 0.0f));
+    void StockPoolTextDisabled(const char* format, ...);
     void StockPoolRender();
 }
 
@@ -49,11 +51,13 @@ namespace
 }
 
 #define Button StockPoolButton
+#define TextDisabled StockPoolTextDisabled
 #define Render StockPoolRender
 #define ImGui_ImplWin32_WndProcHandler StockPoolImGuiWin32WndProcHandler
 #include "stock_pool_workbench_main.cpp"
 #undef ImGui_ImplWin32_WndProcHandler
 #undef Render
+#undef TextDisabled
 #undef Button
 
 namespace
@@ -420,6 +424,64 @@ namespace
 
         ImGui::EndPopup();
     }
+
+    void DrawFrozenCohortMembers()
+    {
+        ImGui::TextDisabled(
+            "Frozen Cohort %zu개 — 실제 분봉 hydration 대기",
+            g_state.members.size());
+        ImGui::TextWrapped(
+            "아래 목록은 DB에서 확정된 포착 종목입니다. 순위·강도·수익률은 아직 계산하지 않았으며, 포착시각 이후 분봉이 적재된 뒤에만 causal snapshot을 생성합니다.");
+
+        if (!ImGui::BeginTable(
+                "##frozen_cohort_members",
+                4,
+                ImGuiTableFlags_Borders |
+                    ImGuiTableFlags_RowBg |
+                    ImGuiTableFlags_ScrollY |
+                    ImGuiTableFlags_Resizable,
+                ImVec2(0.0f, -1.0f)))
+        {
+            return;
+        }
+
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("종목", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("코드", ImGuiTableColumnFlags_WidthFixed, 82.0f);
+        ImGui::TableSetupColumn("시장", ImGuiTableColumnFlags_WidthFixed, 72.0f);
+        ImGui::TableSetupColumn("분봉 상태", ImGuiTableColumnFlags_WidthFixed, 110.0f);
+        ImGui::TableHeadersRow();
+
+        for (std::size_t index = 0U; index < g_state.members.size(); ++index) {
+            const MemberSeries& member = g_state.members[index];
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            const bool selected =
+                static_cast<int>(index) == g_state.selectedMemberIndex;
+            const std::string label =
+                member.name + "##frozen_" + member.code;
+            if (ImGui::Selectable(
+                    label.c_str(),
+                    selected,
+                    ImGuiSelectableFlags_SpanAllColumns))
+            {
+                g_state.selectedMemberIndex = static_cast<int>(index);
+            }
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(member.code.c_str());
+            ImGui::TableSetColumnIndex(2);
+            ImGui::TextUnformatted(
+                member.market.empty() ? "-" : member.market.c_str());
+            ImGui::TableSetColumnIndex(3);
+            if (member.bars.empty()) {
+                ImGui::TextDisabled("대기");
+            }
+            else {
+                ImGui::Text("%zu개", member.bars.size());
+            }
+        }
+        ImGui::EndTable();
+    }
 }
 
 bool ImGui::StockPoolButton(
@@ -435,6 +497,26 @@ bool ImGui::StockPoolButton(
         return false;
     }
     return clicked;
+}
+
+void ImGui::StockPoolTextDisabled(const char* format, ...)
+{
+    static constexpr const char* emptyRankingMessage =
+        "불러오기 후 재생 또는 백테스트를 실행하십시오.";
+
+    if (format != nullptr &&
+        std::strcmp(format, emptyRankingMessage) == 0 &&
+        g_state.sourceMode == SourceMode::Historical1516 &&
+        !g_state.members.empty())
+    {
+        DrawFrozenCohortMembers();
+        return;
+    }
+
+    std::va_list arguments;
+    va_start(arguments, format);
+    ImGui::TextDisabledV(format, arguments);
+    va_end(arguments);
 }
 
 void ImGui::StockPoolRender()

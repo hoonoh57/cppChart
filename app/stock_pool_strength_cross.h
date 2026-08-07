@@ -38,6 +38,10 @@ namespace trading::stock_pool::strategy
         double currentStrength,
         double threshold) noexcept;
 
+    double CaptureAnchoredReturnPercent(
+        const MemberSeries& member,
+        std::size_t asOfIndex) noexcept;
+
     StrengthCrossSummary RunStrengthCrossBacktest(
         const std::vector<MemberSeries>& members,
         int rankingTopM,

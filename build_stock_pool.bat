@@ -135,6 +135,7 @@ echo *** BUILDING PRIOR-SESSION WARM-UP / OPENING TICK WYSIWYG WORKBENCH ***
 cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0602 ^
    /I"." /I"imgui" /I"imgui\backends" ^
    stock_pool_workbench_tick_entry.cpp ^
+   ui\stock_pool_tick_detail_ui.cpp ^
    core\stock_pool_engine.cpp ^
    core\intuitive_strength_engine.cpp ^
    core\intuitive_strength_snapshot.cpp ^
@@ -179,6 +180,7 @@ for /f "delims=" %%I in ('git rev-parse HEAD 2^>NUL') do set "BUILD_HEAD=%%I"
 >>stock_pool_workbench.build.txt echo chart_x_axis=real-minute-plus-order-preserving-within-minute-layout
 >>stock_pool_workbench.build.txt echo tick_participation=completed-Tn-bars-per-minute-times-n
 >>stock_pool_workbench.build.txt echo trend_strength=jma7-50-2_vs_jma20-50-2
+>>stock_pool_workbench.build.txt echo detail_drilldown=double-click-time-axis-crosshair-jma-gate
 >>stock_pool_workbench.build.txt echo legacy_relative_strength=available-by-checkbox
 >>stock_pool_workbench.build.txt echo executable=stock_pool_workbench.exe
 >>stock_pool_workbench.build.txt echo compiler=!CL_PATH!
@@ -190,6 +192,7 @@ echo User-selected trading date is authoritative for target-session candles.
 echo Prior-session bars warm indicators but never create today's buy state.
 echo Buy priority is emitted only from 09:03 through 10:00.
 echo CYBOS native tick request never exceeds T120; larger sizes use completed real base candles.
+echo Tick detail drill-down uses the same bars and intuitive-strength series as the overview.
 echo Historical Tn timestamps are minute-resolution; no fake seconds are claimed.
 echo Tick density is completed Tn bars per minute times n, never inferred from volume.
 echo Build identity: stock_pool_workbench.build.txt

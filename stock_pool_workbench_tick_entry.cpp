@@ -198,7 +198,7 @@ namespace
         return true;
     }
 
-    void DrawToolbar()
+    void DrawTickToolbar()
     {
         ImGui::BeginChild("##tick_toolbar", ImVec2(0.0f, 118.0f), true);
 
@@ -662,7 +662,7 @@ namespace
 
     void DrawWorkbenchTick()
     {
-        DrawToolbar();
+        DrawTickToolbar();
         if (g_tick.showLegacy) {
             DrawWorkbench();
             return;

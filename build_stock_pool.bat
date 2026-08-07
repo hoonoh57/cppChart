@@ -67,6 +67,24 @@ if errorlevel 1 (
 )
 del /F /Q stock_pool_strength_cross_tests.exe 2>NUL
 
+rem MSVC 19.x has reproduced C1001 in the optimizer for this WinHTTP/JSON
+rem translation unit. Compile only this adapter with optimization disabled and
+rem link the verified object into the otherwise /O2 workbench.
+echo *** COMPILING SERVER32 GATEWAY ADAPTER WITH MSVC ICE GUARD (/Od /Ob0) ***
+cl /nologo /std:c++17 /utf-8 /Od /Ob0 /W3 /EHsc /MD ^
+   /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0602 ^
+   /I"." ^
+   /c platform\stock_pool_gateway_client.cpp ^
+   /Foobj_stock_pool\stock_pool_gateway_client.obj
+if errorlevel 1 (
+    echo *** BUILD FAILED: stock_pool_gateway_client.cpp did not compile ***
+    exit /b 1
+)
+if not exist obj_stock_pool\stock_pool_gateway_client.obj (
+    echo *** BUILD FAILED: gateway compiler returned success but object is missing ***
+    exit /b 1
+)
+
 echo *** BUILDING ISOLATED STOCK-POOL WORKBENCH WITH SERVER32 HTTP GATEWAY ***
 cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0602 ^
    /I"." /I"imgui" /I"imgui\backends" ^
@@ -77,20 +95,20 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    app\stock_pool_fixture.cpp ^
    app\stock_pool_1516_import.cpp ^
    app\stock_pool_strength_cross.cpp ^
-   platform\stock_pool_gateway_client.cpp ^
    platform\stock_pool_minute_client.cpp ^
    imgui\imgui.cpp imgui\imgui_draw.cpp imgui\imgui_tables.cpp imgui\imgui_widgets.cpp ^
    imgui\backends\imgui_impl_win32.cpp imgui\backends\imgui_impl_dx11.cpp ^
+   obj_stock_pool\stock_pool_gateway_client.obj ^
    /Foobj_stock_pool\ /Fe:stock_pool_workbench.exe ^
    /link winhttp.lib d3d11.lib dxgi.lib d3dcompiler.lib user32.lib gdi32.lib dwmapi.lib
 if errorlevel 1 (
     if exist stock_pool_workbench.exe del /F /Q stock_pool_workbench.exe
-    echo *** BUILD FAILED - NO stock_pool_workbench.exe WAS LEFT TO RUN ***
+    echo *** BUILD FAILED: workbench compile/link command returned an error ***
     exit /b 1
 )
 
 if not exist stock_pool_workbench.exe (
-    echo *** BUILD FAILED: linker reported success but executable is missing ***
+    echo *** BUILD FAILED: compile/link command returned success but executable is missing ***
     exit /b 1
 )
 
@@ -98,9 +116,11 @@ set "BUILD_HEAD=unknown"
 for /f "delims=" %%I in ('git rev-parse HEAD 2^>NUL') do set "BUILD_HEAD=%%I"
 >stock_pool_workbench.build.txt echo head=!BUILD_HEAD!
 >>stock_pool_workbench.build.txt echo adapter=server32-http-mysql
+>>stock_pool_workbench.build.txt echo adapter_compile=msvc-ice-guard-od-ob0
 >>stock_pool_workbench.build.txt echo market_data=server32-cybos-minute
 >>stock_pool_workbench.build.txt echo strategy=10m-strict-strength-cross-below100-above100-tp1-sl1-next-open
 >>stock_pool_workbench.build.txt echo summary_anchor=first-source-bar-open
+>>stock_pool_workbench.build.txt echo session_end=15:30
 >>stock_pool_workbench.build.txt echo executable=stock_pool_workbench.exe
 >>stock_pool_workbench.build.txt echo compiler=!CL_PATH!
 

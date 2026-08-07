@@ -56,6 +56,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    app\stock_pool_fixture.cpp ^
    app\stock_pool_1516_import.cpp ^
    platform\stock_pool_gateway_client.cpp ^
+   platform\stock_pool_minute_client.cpp ^
    imgui\imgui.cpp imgui\imgui_draw.cpp imgui\imgui_tables.cpp imgui\imgui_widgets.cpp ^
    imgui\backends\imgui_impl_win32.cpp imgui\backends\imgui_impl_dx11.cpp ^
    /Foobj_stock_pool\ /Fe:stock_pool_workbench.exe ^
@@ -75,6 +76,7 @@ set "BUILD_HEAD=unknown"
 for /f "delims=" %%I in ('git rev-parse HEAD 2^>NUL') do set "BUILD_HEAD=%%I"
 >stock_pool_workbench.build.txt echo head=!BUILD_HEAD!
 >>stock_pool_workbench.build.txt echo adapter=server32-http-mysql
+>>stock_pool_workbench.build.txt echo market_data=server32-cybos-minute
 >>stock_pool_workbench.build.txt echo executable=stock_pool_workbench.exe
 >>stock_pool_workbench.build.txt echo compiler=!CL_PATH!
 

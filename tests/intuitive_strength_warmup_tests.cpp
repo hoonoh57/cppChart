@@ -1,4 +1,6 @@
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <vector>
@@ -57,7 +59,6 @@ int main()
     member.code = "WARM";
     member.name = "WARM";
 
-    // Prior-session tail: enough history to fully warm JMA20/MACD/OBV.
     for (int index = 0; index < 80; ++index) {
         char stamp[32]{};
         const int minute = 14 * 60 + index;
@@ -93,7 +94,6 @@ int main()
     Require(open.inSession, "09:00 point must enter today's session");
     Require(!open.inEvaluationWindow, "09:00 point must not be buy-evaluable");
 
-    // If JMA were reset at 09:00, its first value would equal the 108 close.
     Require(
         std::abs(open.fastJma - open.close) > 0.1,
         "09:00 JMA must retain prior-session state instead of resetting to price");

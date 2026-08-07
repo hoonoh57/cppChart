@@ -116,14 +116,14 @@ if not exist obj_stock_pool\stock_pool_gateway_client.obj (
     exit /b 1
 )
 
-echo *** COMPILING REAL CYBOS TICK-CANDLE ADAPTER WITH MSVC ICE GUARD (/Od /Ob0) ***
+echo *** COMPILING CYBOS TICK-CANDLE RESAMPLING ADAPTER WITH MSVC ICE GUARD (/Od /Ob0) ***
 cl /nologo /std:c++17 /utf-8 /Od /Ob0 /W3 /EHsc /MD ^
    /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0602 ^
    /I"." ^
-   /c platform\stock_pool_tick_client.cpp ^
+   /c platform\stock_pool_tick_resampling_client.cpp ^
    /Foobj_stock_pool\stock_pool_tick_client.obj
 if errorlevel 1 (
-    echo *** BUILD FAILED: stock_pool_tick_client.cpp did not compile ***
+    echo *** BUILD FAILED: stock_pool_tick_resampling_client.cpp did not compile ***
     exit /b 1
 )
 if not exist obj_stock_pool\stock_pool_tick_client.obj (
@@ -165,6 +165,9 @@ for /f "delims=" %%I in ('git rev-parse HEAD 2^>NUL') do set "BUILD_HEAD=%%I"
 >stock_pool_workbench.build.txt echo head=!BUILD_HEAD!
 >>stock_pool_workbench.build.txt echo adapter=server32-http-mysql
 >>stock_pool_workbench.build.txt echo market_data=server32-cybos-real-Tn-candles
+>>stock_pool_workbench.build.txt echo analysis_date=user-selected-trading-date
+>>stock_pool_workbench.build.txt echo native_tick_limit=120
+>>stock_pool_workbench.build.txt echo derived_tick_sizes=T180:T60x3,T360:T120x3,T720:T120x6
 >>stock_pool_workbench.build.txt echo tick_sizes=60,120,180,360,720
 >>stock_pool_workbench.build.txt echo historical_tick_timestamp=HHmm-minute-resolution
 >>stock_pool_workbench.build.txt echo within_minute_render=cybos-order-preserved-even-spacing
@@ -183,8 +186,10 @@ for /f "delims=" %%I in ('git rev-parse HEAD 2^>NUL') do set "BUILD_HEAD=%%I"
 echo.
 echo *** BUILD OK -^> stock_pool_workbench.exe [warm-start opening tick WYSIWYG] ***
 echo Existing shell.exe was not modified.
+echo User-selected trading date is authoritative for target-session candles.
 echo Prior-session bars warm indicators but never create today's buy state.
 echo Buy priority is emitted only from 09:03 through 10:00.
+echo CYBOS native tick request never exceeds T120; larger sizes use completed real base candles.
 echo Historical Tn timestamps are minute-resolution; no fake seconds are claimed.
 echo Tick density is completed Tn bars per minute times n, never inferred from volume.
 echo Build identity: stock_pool_workbench.build.txt

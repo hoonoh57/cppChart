@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <deque>
-#include <numeric>
 
 namespace trading::stock_pool::intuitive
 {
@@ -19,6 +18,11 @@ namespace trading::stock_pool::intuitive
                 return 0.0;
             }
             return (current / previous - 1.0) * 100.0;
+        }
+
+        double RoundTo(double value, double scale)
+        {
+            return std::round(value * scale) / scale;
         }
 
         class Ema final
@@ -87,16 +91,19 @@ namespace trading::stock_pool::intuitive
 
                 ++count_;
                 warmSum_ += source;
-                const double current = count_ <= period_
+                const double rawCurrent = count_ <= period_
                     ? warmSum_ / static_cast<double>(count_)
                     : e2_ + lastJma_;
+                const double current = RoundTo(rawCurrent, 10000.0);
                 const double previous = lastJma_;
 
                 if (current > previous) direction_ = 1;
                 else if (current < previous) direction_ = -1;
                 else if (direction_ == 0) direction_ = 1;
 
-                const double slope = SafePercent(current, previous);
+                const double slope = RoundTo(
+                    SafePercent(current, previous),
+                    10.0);
                 lastJma_ = current;
                 return JmaStep{current, slope, direction_};
             }
@@ -335,6 +342,12 @@ namespace trading::stock_pool::intuitive
                     {
                         return left.point.fastJmaSlopePercent >
                             right.point.fastJmaSlopePercent;
+                    }
+                    if (left.point.macdHistogramAtr !=
+                        right.point.macdHistogramAtr)
+                    {
+                        return left.point.macdHistogramAtr >
+                            right.point.macdHistogramAtr;
                     }
                 }
                 if (left.point.sessionReturnPercent !=

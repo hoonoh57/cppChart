@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <deque>
+#include <map>
 #include <vector>
 
 namespace trading::stock_pool::intuitive
@@ -48,6 +49,13 @@ namespace trading::stock_pool::intuitive
                 values.begin(),
                 values.begin() + static_cast<std::ptrdiff_t>(middle));
             return (lower + upper) * 0.5;
+        }
+
+        EpochMillis MinuteKey(EpochMillis timestamp)
+        {
+            if (timestamp <= 0) return 0;
+            const long long packed = timestamp / 1000LL;
+            return static_cast<EpochMillis>((packed / 100LL) * 100LL) * 1000LL;
         }
 
         class Ema final
@@ -200,6 +208,15 @@ namespace trading::stock_pool::intuitive
             Ema macdSignal(config.macdSignalPeriod);
             Ema obvSignal(config.obvSignalPeriod);
 
+            std::map<EpochMillis, int> completedTickBarsPerMinute;
+            std::map<EpochMillis, int> tickSizePerMinute;
+            for (const Bar& bar : member.bars) {
+                if (bar.tickCount <= 0) continue;
+                const EpochMillis key = MinuteKey(bar.closeTimestampMs);
+                ++completedTickBarsPerMinute[key];
+                tickSizePerMinute[key] = bar.tickCount;
+            }
+
             std::deque<double> atrWindow;
             double atrSum = 0.0;
             std::deque<double> volumeWindow;
@@ -287,34 +304,40 @@ namespace trading::stock_pool::intuitive
                     ? (obv - obvSignalValue) / rollingVolume
                     : 0.0;
 
-                if (bar.tickCount > 0 &&
-                    std::isfinite(bar.tickRatePerSecond) &&
-                    bar.tickRatePerSecond > 0.0)
-                {
-                    point.tickAvailable = true;
-                    point.tickRatePerSecond = bar.tickRatePerSecond;
-                    point.tickRatePerMinute = bar.tickRatePerSecond * 60.0;
-                    std::vector<double> baseline(
-                        tickRateWindow.begin(), tickRateWindow.end());
-                    const double median = Median(std::move(baseline));
-                    point.tickAcceleration = median > kEpsilon
-                        ? bar.tickRatePerSecond / median
-                        : 1.0;
-                    tickRateWindow.push_back(bar.tickRatePerSecond);
-                    while (tickRateWindow.size() > static_cast<std::size_t>(
-                               (std::max)(1, config.tickRateBaselineBars)))
-                    {
-                        tickRateWindow.pop_front();
+                if (bar.tickCount > 0) {
+                    const EpochMillis key = MinuteKey(bar.closeTimestampMs);
+                    const int completedBars = completedTickBarsPerMinute[key];
+                    const int tickSize = tickSizePerMinute[key];
+                    if (completedBars > 0 && tickSize > 0) {
+                        // CYBOS StockChart preserves tick-candle order but only
+                        // HHmm timestamps. Therefore the exact observable
+                        // participation metric is completed T<n> bars per
+                        // minute, not fabricated sub-minute seconds.
+                        const double ratePerMinute =
+                            static_cast<double>(completedBars) *
+                            static_cast<double>(tickSize);
+                        point.tickAvailable = true;
+                        point.tickRatePerMinute = ratePerMinute;
+                        point.tickRatePerSecond = ratePerMinute / 60.0;
+
+                        std::vector<double> baseline(
+                            tickRateWindow.begin(), tickRateWindow.end());
+                        const double median = Median(std::move(baseline));
+                        point.tickAcceleration = median > kEpsilon
+                            ? ratePerMinute / median
+                            : 1.0;
+                        tickRateWindow.push_back(ratePerMinute);
+                        while (tickRateWindow.size() > static_cast<std::size_t>(
+                                   (std::max)(1, config.tickRateBaselineBars)))
+                        {
+                            tickRateWindow.pop_front();
+                        }
                     }
                 }
 
                 const bool warmed = index + 1U >= static_cast<std::size_t>(
                     (std::max)(config.fastJmaPeriod, config.slowJmaPeriod));
 
-                // Indicators are deliberately NOT reset at 09:00. Only the
-                // trading-wave state is reset, so opening JMA/MACD/OBV values
-                // are based on prior-session history while today's cross is a
-                // new event.
                 if (point.inSession && !sessionStateReset) {
                     activeWave = false;
                     barsSinceCross = -1;
@@ -423,11 +446,11 @@ namespace trading::stock_pool::intuitive
                         return left.point.tickAvailable > right.point.tickAvailable;
                     }
                     if (left.point.tickAvailable &&
-                        left.point.tickRatePerSecond !=
-                            right.point.tickRatePerSecond)
+                        left.point.tickRatePerMinute !=
+                            right.point.tickRatePerMinute)
                     {
-                        return left.point.tickRatePerSecond >
-                            right.point.tickRatePerSecond;
+                        return left.point.tickRatePerMinute >
+                            right.point.tickRatePerMinute;
                     }
                     if (left.point.fastJmaSlopePercent !=
                         right.point.fastJmaSlopePercent)

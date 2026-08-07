@@ -47,7 +47,7 @@ if errorlevel 1 (
 )
 del /F /Q stock_pool_workbench_tests.exe 2>NUL
 
-echo *** VERIFYING 10-MINUTE STRENGTH 100 CROSS STRATEGY ***
+echo *** VERIFYING STRICT 10-MINUTE STRENGTH 100 CROSS STRATEGY ***
 cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc /MD ^
    /I"." ^
    tests\stock_pool_strength_cross_tests.cpp ^
@@ -70,7 +70,7 @@ del /F /Q stock_pool_strength_cross_tests.exe 2>NUL
 echo *** BUILDING ISOLATED STOCK-POOL WORKBENCH WITH SERVER32 HTTP GATEWAY ***
 cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0602 ^
    /I"." /I"imgui" /I"imgui\backends" ^
-   stock_pool_workbench_entry.cpp ^
+   stock_pool_workbench_10m_entry.cpp ^
    core\stock_pool_engine.cpp ^
    core\json_lite.cpp ^
    app\stock_pool_evaluator.cpp ^
@@ -99,12 +99,13 @@ for /f "delims=" %%I in ('git rev-parse HEAD 2^>NUL') do set "BUILD_HEAD=%%I"
 >stock_pool_workbench.build.txt echo head=!BUILD_HEAD!
 >>stock_pool_workbench.build.txt echo adapter=server32-http-mysql
 >>stock_pool_workbench.build.txt echo market_data=server32-cybos-minute
->>stock_pool_workbench.build.txt echo strategy=10m-strength-cross-100-tp1-sl1-next-open
+>>stock_pool_workbench.build.txt echo strategy=10m-strict-strength-cross-below100-above100-tp1-sl1-next-open
+>>stock_pool_workbench.build.txt echo summary_anchor=first-source-bar-open
 >>stock_pool_workbench.build.txt echo executable=stock_pool_workbench.exe
 >>stock_pool_workbench.build.txt echo compiler=!CL_PATH!
 
 echo.
-echo *** BUILD OK -^> stock_pool_workbench.exe [10m strength-cross strategy] ***
+echo *** BUILD OK -^> stock_pool_workbench.exe [strict 10m strength-cross strategy] ***
 echo Existing shell.exe was not modified.
 echo C++ vcpkg, libmysql, and mysql.exe are not used.
 echo Build identity: stock_pool_workbench.build.txt
@@ -156,7 +157,6 @@ if errorlevel 1 (
 )
 
 :msvc_ready
-set "CL_PATH="
-for /f "delims=" %%I in ('where cl 2^>NUL') do if not defined CL_PATH set "CL_PATH=%%I"
+set "CL_PATH="nfor /f "delims=" %%I in ('where cl 2^>NUL') do if not defined CL_PATH set "CL_PATH=%%I"
 echo MSVC compiler: !CL_PATH!
 exit /b 0

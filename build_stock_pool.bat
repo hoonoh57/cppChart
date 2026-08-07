@@ -157,6 +157,7 @@ if errorlevel 1 (
 )
 
 :msvc_ready
-set "CL_PATH="nfor /f "delims=" %%I in ('where cl 2^>NUL') do if not defined CL_PATH set "CL_PATH=%%I"
+set "CL_PATH="
+for /f "delims=" %%I in ('where cl 2^>NUL') do if not defined CL_PATH set "CL_PATH=%%I"
 echo MSVC compiler: !CL_PATH!
 exit /b 0

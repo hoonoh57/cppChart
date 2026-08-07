@@ -5,6 +5,7 @@
 #include <limits>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace trading::stock_pool::strategy
 {
@@ -30,6 +31,41 @@ namespace trading::stock_pool::strategy
                 return 0.0;
             }
             return (exitPrice / entryPrice - 1.0) * 100.0;
+        }
+
+        double Median(std::vector<double> values)
+        {
+            if (values.empty()) return 0.0;
+            std::sort(values.begin(), values.end());
+            const std::size_t middle = values.size() / 2U;
+            if ((values.size() & 1U) != 0U) return values[middle];
+            return (values[middle - 1U] + values[middle]) * 0.5;
+        }
+
+        void NormalizeSnapshotDisplay(
+            RankingSnapshot& snapshot,
+            const std::vector<MemberSeries>& members)
+        {
+            std::vector<double> returns;
+            returns.reserve(snapshot.rows.size());
+            int positive = 0;
+
+            for (RankRow& row : snapshot.rows) {
+                row.published = false;
+                if (!row.eligible || row.memberIndex >= members.size()) continue;
+                row.sessionReturnPercent =
+                    CaptureAnchoredReturnPercent(
+                        members[row.memberIndex],
+                        snapshot.asOfIndex);
+                returns.push_back(row.sessionReturnPercent);
+                if (row.sessionReturnPercent > 0.0) ++positive;
+            }
+
+            snapshot.breadthPositive = returns.empty()
+                ? 0.0
+                : static_cast<double>(positive) /
+                    static_cast<double>(returns.size());
+            snapshot.medianSessionReturnPercent = Median(returns);
         }
 
         void AppendTrade(
@@ -99,8 +135,18 @@ namespace trading::stock_pool::strategy
         return std::isfinite(previousStrength) &&
             std::isfinite(currentStrength) &&
             std::isfinite(threshold) &&
-            previousStrength <= threshold &&
-            currentStrength > threshold;
+            previousStrength < threshold - kEpsilon &&
+            currentStrength > threshold + kEpsilon;
+    }
+
+    double CaptureAnchoredReturnPercent(
+        const MemberSeries& member,
+        std::size_t asOfIndex) noexcept
+    {
+        if (member.bars.empty() || asOfIndex >= member.bars.size()) return 0.0;
+        const double anchor = member.bars.front().open;
+        const double current = member.bars[asOfIndex].close;
+        return SafeReturn(current, anchor);
     }
 
     StrengthCrossSummary RunStrengthCrossBacktest(
@@ -111,7 +157,7 @@ namespace trading::stock_pool::strategy
     {
         StrengthCrossSummary summary;
         summary.contract =
-            "10m strength <=100 -> >100; next-bar open; TP +1.00%; SL -1.00%; rank ignored";
+            "10m strength <100 -> >100 without touch; next-bar open; TP +1.00%; SL -1.00%; rank ignored";
         if (members.empty()) return summary;
 
         std::size_t commonBars = std::numeric_limits<std::size_t>::max();
@@ -245,10 +291,7 @@ namespace trading::stock_pool::strategy
                     index,
                     rankingTopM,
                     scoringProfile);
-
-            for (RankRow& row : snapshot.rows) {
-                row.published = false;
-            }
+            NormalizeSnapshotDisplay(snapshot, members);
 
             if (hasPreviousSnapshot && index + 1U < commonBars) {
                 for (RankRow& current : snapshot.rows) {

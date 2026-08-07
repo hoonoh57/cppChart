@@ -103,13 +103,18 @@ namespace trading::stock_pool::hydration
             result.error = "포착시각은 유효한 정분 시각이어야 합니다.";
             return result;
         }
+
         const int captureMinuteOfDay = captureHour * 60 + captureMinute;
+        constexpr int regularSessionEndMinute = 15 * 60 + 30;
+        if (captureMinuteOfDay > regularSessionEndMinute) {
+            result.error = "포착시각이 정규장 종료 15:30 이후입니다.";
+            return result;
+        }
 
         std::vector<MemberSeries> fetchedMembers;
         fetchedMembers.reserve(cohortMembers.size());
         int commonStartMinute = captureMinuteOfDay;
-        int commonEndMinute = 24 * 60 - 1;
-        bool firstMember = true;
+        const int commonEndMinute = regularSessionEndMinute;
         std::string source;
 
         for (const MemberSeries& metadata : cohortMembers) {
@@ -161,27 +166,22 @@ namespace trading::stock_pool::hydration
                         std::to_string(bar.closeTimestampMs);
                     return result;
                 }
-                if (minuteOfDay < captureMinuteOfDay) continue;
+                if (minuteOfDay < captureMinuteOfDay ||
+                    minuteOfDay > regularSessionEndMinute)
+                {
+                    continue;
+                }
                 if (firstMinute < 0) firstMinute = minuteOfDay;
                 lastMinute = minuteOfDay;
             }
 
             if (firstMinute < 0 || lastMinute < firstMinute) {
                 result.error = metadata.code + " " + metadata.name +
-                    " 포착시각 이후 유효한 실제 분봉이 없습니다.";
+                    " 포착시각 이후 정규장 내 유효한 실제 분봉이 없습니다.";
                 return result;
             }
 
-            if (firstMember) {
-                commonStartMinute = firstMinute;
-                commonEndMinute = lastMinute;
-                firstMember = false;
-            }
-            else {
-                commonStartMinute = (std::max)(commonStartMinute, firstMinute);
-                commonEndMinute = (std::min)(commonEndMinute, lastMinute);
-            }
-
+            commonStartMinute = (std::max)(commonStartMinute, firstMinute);
             fetchedMembers.push_back(std::move(member));
             source = fetched.source;
         }
@@ -216,7 +216,8 @@ namespace trading::stock_pool::hydration
                         minuteOfDay,
                         second) &&
                     date == expectedDate && second == 0 &&
-                    minuteOfDay >= captureMinuteOfDay)
+                    minuteOfDay >= captureMinuteOfDay &&
+                    minuteOfDay <= regularSessionEndMinute)
                 {
                     observedByMinute[minuteOfDay] = bar;
                 }
@@ -282,7 +283,7 @@ namespace trading::stock_pool::hydration
         result.lastTimestamp =
             PackMinuteTimestamp(expectedDate, commonEndMinute);
         result.source = source +
-            " | alignment=causal-no-trade-carry | carried=" +
+            " | alignment=causal-no-trade-carry-to-1530 | carried=" +
             std::to_string(carriedForward);
         result.ok = true;
         return result;

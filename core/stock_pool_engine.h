@@ -35,6 +35,13 @@ namespace trading::stock_pool
         double close = 0.0;
         double cumulativeTurnover = 0.0;
         double tradeIntensity = 0.0;
+
+        // Populated only for real T<n> candles. Minute bars and fixtures leave
+        // these at zero; callers must never synthesize tick participation from
+        // volume.
+        int tickCount = 0;
+        double tickDurationSeconds = 0.0;
+        double tickRatePerSecond = 0.0;
     };
 
     struct MemberSeries final

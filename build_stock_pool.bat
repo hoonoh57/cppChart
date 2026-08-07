@@ -20,6 +20,7 @@ rem Remove every runnable and object artifact first. A failed build must never
 rem leave an older mysql.exe/libmysql-based workbench available to execute.
 if exist stock_pool_workbench.exe del /F /Q stock_pool_workbench.exe
 if exist stock_pool_workbench_tests.exe del /F /Q stock_pool_workbench_tests.exe
+if exist stock_pool_strength_cross_tests.exe del /F /Q stock_pool_strength_cross_tests.exe
 if exist stock_pool_workbench.build.txt del /F /Q stock_pool_workbench.build.txt
 if exist obj_stock_pool rmdir /S /Q obj_stock_pool
 mkdir obj_stock_pool
@@ -46,6 +47,26 @@ if errorlevel 1 (
 )
 del /F /Q stock_pool_workbench_tests.exe 2>NUL
 
+echo *** VERIFYING 10-MINUTE STRENGTH 100 CROSS STRATEGY ***
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc /MD ^
+   /I"." ^
+   tests\stock_pool_strength_cross_tests.cpp ^
+   app\stock_pool_strength_cross.cpp ^
+   core\stock_pool_engine.cpp ^
+   /Foobj_stock_pool\ /Fe:stock_pool_strength_cross_tests.exe
+if errorlevel 1 (
+    echo *** BUILD FAILED: strength-cross tests did not compile ***
+    exit /b 1
+)
+
+stock_pool_strength_cross_tests.exe
+if errorlevel 1 (
+    del /F /Q stock_pool_strength_cross_tests.exe 2>NUL
+    echo *** BUILD FAILED: strength-cross tests failed ***
+    exit /b 1
+)
+del /F /Q stock_pool_strength_cross_tests.exe 2>NUL
+
 echo *** BUILDING ISOLATED STOCK-POOL WORKBENCH WITH SERVER32 HTTP GATEWAY ***
 cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0602 ^
    /I"." /I"imgui" /I"imgui\backends" ^
@@ -55,6 +76,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    app\stock_pool_evaluator.cpp ^
    app\stock_pool_fixture.cpp ^
    app\stock_pool_1516_import.cpp ^
+   app\stock_pool_strength_cross.cpp ^
    platform\stock_pool_gateway_client.cpp ^
    platform\stock_pool_minute_client.cpp ^
    imgui\imgui.cpp imgui\imgui_draw.cpp imgui\imgui_tables.cpp imgui\imgui_widgets.cpp ^
@@ -77,11 +99,12 @@ for /f "delims=" %%I in ('git rev-parse HEAD 2^>NUL') do set "BUILD_HEAD=%%I"
 >stock_pool_workbench.build.txt echo head=!BUILD_HEAD!
 >>stock_pool_workbench.build.txt echo adapter=server32-http-mysql
 >>stock_pool_workbench.build.txt echo market_data=server32-cybos-minute
+>>stock_pool_workbench.build.txt echo strategy=10m-strength-cross-100-tp1-sl1-next-open
 >>stock_pool_workbench.build.txt echo executable=stock_pool_workbench.exe
 >>stock_pool_workbench.build.txt echo compiler=!CL_PATH!
 
 echo.
-echo *** BUILD OK -^> stock_pool_workbench.exe [1516 server32 gateway] ***
+echo *** BUILD OK -^> stock_pool_workbench.exe [10m strength-cross strategy] ***
 echo Existing shell.exe was not modified.
 echo C++ vcpkg, libmysql, and mysql.exe are not used.
 echo Build identity: stock_pool_workbench.build.txt

@@ -2,6 +2,11 @@
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d %~dp0
 
+rem The stock-pool workbench must build from an ordinary Command Prompt or
+rem PowerShell session. Do not require the caller to open a VS Developer Prompt.
+call :ensure_msvc
+if errorlevel 1 exit /b 1
+
 rem The stock-pool workbench is an isolated executable. Its build must never
 rem delete, replace, or relink the existing Trading Shell executable.
 tasklist /FI "IMAGENAME eq stock_pool_workbench.exe" 2>NUL | find /I "stock_pool_workbench.exe" >NUL
@@ -71,10 +76,62 @@ for /f "delims=" %%I in ('git rev-parse HEAD 2^>NUL') do set "BUILD_HEAD=%%I"
 >stock_pool_workbench.build.txt echo head=!BUILD_HEAD!
 >>stock_pool_workbench.build.txt echo adapter=server32-http-mysql
 >>stock_pool_workbench.build.txt echo executable=stock_pool_workbench.exe
+>>stock_pool_workbench.build.txt echo compiler=!CL_PATH!
 
 echo.
 echo *** BUILD OK -^> stock_pool_workbench.exe [1516 server32 gateway] ***
 echo Existing shell.exe was not modified.
 echo C++ vcpkg, libmysql, and mysql.exe are not used.
 echo Build identity: stock_pool_workbench.build.txt
+exit /b 0
+
+:ensure_msvc
+where cl >NUL 2>&1
+if not errorlevel 1 goto :msvc_ready
+
+echo *** INITIALIZING MSVC BUILD ENVIRONMENT ***
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+set "VS_INSTALL="
+set "VSDEV="
+
+if exist "%VSWHERE%" (
+    for /f "usebackq delims=" %%I in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2^>NUL`) do set "VS_INSTALL=%%I"
+)
+
+if defined VS_INSTALL (
+    if exist "!VS_INSTALL!\Common7\Tools\VsDevCmd.bat" (
+        set "VSDEV=!VS_INSTALL!\Common7\Tools\VsDevCmd.bat"
+    )
+)
+
+if not defined VSDEV if exist "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" set "VSDEV=%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat"
+if not defined VSDEV if exist "%ProgramFiles%\Microsoft Visual Studio\2022\Professional\Common7\Tools\VsDevCmd.bat" set "VSDEV=%ProgramFiles%\Microsoft Visual Studio\2022\Professional\Common7\Tools\VsDevCmd.bat"
+if not defined VSDEV if exist "%ProgramFiles%\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat" set "VSDEV=%ProgramFiles%\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat"
+if not defined VSDEV if exist "%ProgramFiles%\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat" set "VSDEV=%ProgramFiles%\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat"
+if not defined VSDEV if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\2019\Enterprise\Common7\Tools\VsDevCmd.bat" set "VSDEV=%ProgramFiles(x86)%\Microsoft Visual Studio\2019\Enterprise\Common7\Tools\VsDevCmd.bat"
+if not defined VSDEV if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\2019\Professional\Common7\Tools\VsDevCmd.bat" set "VSDEV=%ProgramFiles(x86)%\Microsoft Visual Studio\2019\Professional\Common7\Tools\VsDevCmd.bat"
+if not defined VSDEV if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\2019\Community\Common7\Tools\VsDevCmd.bat" set "VSDEV=%ProgramFiles(x86)%\Microsoft Visual Studio\2019\Community\Common7\Tools\VsDevCmd.bat"
+if not defined VSDEV if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\2019\BuildTools\Common7\Tools\VsDevCmd.bat" set "VSDEV=%ProgramFiles(x86)%\Microsoft Visual Studio\2019\BuildTools\Common7\Tools\VsDevCmd.bat"
+
+if not defined VSDEV (
+    echo *** BUILD FAILED: MSVC C++ build tools were not found ***
+    echo Install Visual Studio Build Tools with the Desktop development with C++ workload.
+    echo Required component: Microsoft.VisualStudio.Component.VC.Tools.x86.x64
+    exit /b 1
+)
+
+echo MSVC environment script: !VSDEV!
+set "VSCMD_SKIP_SENDTELEMETRY=1"
+call "!VSDEV!" -no_logo -arch=x64 -host_arch=x64
+
+where cl >NUL 2>&1
+if errorlevel 1 (
+    echo *** BUILD FAILED: VsDevCmd completed but cl.exe is still unavailable ***
+    exit /b 1
+)
+
+:msvc_ready
+set "CL_PATH="
+for /f "delims=" %%I in ('where cl 2^>NUL') do if not defined CL_PATH set "CL_PATH=%%I"
+echo MSVC compiler: !CL_PATH!
 exit /b 0

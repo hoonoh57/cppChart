@@ -42,5 +42,5 @@ namespace trading::stock_pool::strategy
         const std::vector<MemberSeries>& members,
         int rankingTopM,
         const ScoringProfile& scoringProfile,
-        const StrengthCrossProfile& strategyProfile = {});
+        const StrengthCrossProfile& strategyProfile);
 }

@@ -10,6 +10,7 @@
 #include "imgui_impl_dx11.h"
 #include "imgui_impl_win32.h"
 #include "core/intuitive_strength_engine.h"
+#include "core/intuitive_strength_trade_evaluator.h"
 #include "platform/stock_pool_tick_client.h"
 #include "ui/stock_pool_tick_detail_ui.h"
 
@@ -25,11 +26,14 @@ namespace
     using trading::stock_pool::intuitive::BuildStrengthSnapshotAtTime;
     using trading::stock_pool::intuitive::BuyStateName;
     using trading::stock_pool::intuitive::CalculateStrengthSeries;
+    using trading::stock_pool::intuitive::EvaluateCausalJmaTrades;
     using trading::stock_pool::intuitive::MemberStrengthSeries;
+    using trading::stock_pool::intuitive::MemberTradeEvaluation;
     using trading::stock_pool::intuitive::StrengthConfig;
     using trading::stock_pool::intuitive::StrengthPoint;
     using trading::stock_pool::intuitive::StrengthRow;
     using trading::stock_pool::intuitive::StrengthSnapshot;
+    using trading::stock_pool::intuitive::TradeCostConfig;
 
     struct TickWorkbenchState final
     {
@@ -119,6 +123,30 @@ namespace
             if (series.memberIndex == memberIndex) return &series;
         }
         return nullptr;
+    }
+
+    TradeCostConfig CurrentTradeCosts()
+    {
+        TradeCostConfig costs;
+        costs.feePercentEachSide = g_tickDetail.feePercentEachSide;
+        costs.sellTaxPercent = g_tickDetail.sellTaxPercent;
+        costs.slippageBps = g_tickDetail.slippageBps;
+        return costs;
+    }
+
+    MemberTradeEvaluation EvaluateMemberTrade(std::size_t memberIndex)
+    {
+        if (memberIndex >= g_tick.members.size()) return {};
+        const MemberStrengthSeries* strength = FindStrength(memberIndex);
+        if (strength == nullptr) return {};
+        const std::string date = DigitsOnly(g_state.tradingDate);
+        if (date.size() != 8U) return {};
+        return EvaluateCausalJmaTrades(
+            g_tick.members[memberIndex],
+            *strength,
+            g_tick.config,
+            MakePackedTimestamp(date, g_tick.asOfMinute * 60 + 59),
+            CurrentTradeCosts());
     }
 
     void RebuildSnapshot()
@@ -354,14 +382,15 @@ namespace
             g_tick.tickSize,
             g_tick.previousTradingDate.c_str());
         ImGui::TextDisabled(
-            "종목 행 또는 오른쪽 미니차트를 더블클릭하면 같은 계산결과의 상세분석 창을 엽니다.");
+            "세션%=09:00 첫 봉 대비 단순 등락, 교차%=crossUp~crossDown 포착력, Gross/Net=다음 Tn봉 시가 causal 체결. 종목 더블클릭=상세분석.");
 
         if (!ImGui::BeginTable(
                 "##tick_strength_grid",
-                12,
+                18,
                 ImGuiTableFlags_Borders |
                     ImGuiTableFlags_RowBg |
                     ImGuiTableFlags_ScrollY |
+                    ImGuiTableFlags_ScrollX |
                     ImGuiTableFlags_Resizable,
                 ImVec2(0.0f, -1.0f)))
         {
@@ -369,7 +398,7 @@ namespace
         }
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("우선", ImGuiTableColumnFlags_WidthFixed, 40.0f);
-        ImGui::TableSetupColumn("종목", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("종목", ImGuiTableColumnFlags_WidthFixed, 150.0f);
         ImGui::TableSetupColumn("상태", ImGuiTableColumnFlags_WidthFixed, 72.0f);
         ImGui::TableSetupColumn("JMA현재%", ImGuiTableColumnFlags_WidthFixed, 65.0f);
         ImGui::TableSetupColumn("돌파강도%", ImGuiTableColumnFlags_WidthFixed, 68.0f);
@@ -379,10 +408,17 @@ namespace
         ImGui::TableSetupColumn("파동JMA%", ImGuiTableColumnFlags_WidthFixed, 66.0f);
         ImGui::TableSetupColumn("MACD/ATR", ImGuiTableColumnFlags_WidthFixed, 64.0f);
         ImGui::TableSetupColumn("OBVimp", ImGuiTableColumnFlags_WidthFixed, 58.0f);
-        ImGui::TableSetupColumn("누적%", ImGuiTableColumnFlags_WidthFixed, 56.0f);
+        ImGui::TableSetupColumn("세션%", ImGuiTableColumnFlags_WidthFixed, 56.0f);
+        ImGui::TableSetupColumn("교차%", ImGuiTableColumnFlags_WidthFixed, 58.0f);
+        ImGui::TableSetupColumn("Gross%", ImGuiTableColumnFlags_WidthFixed, 58.0f);
+        ImGui::TableSetupColumn("Net%", ImGuiTableColumnFlags_WidthFixed, 58.0f);
+        ImGui::TableSetupColumn("MFE%", ImGuiTableColumnFlags_WidthFixed, 56.0f);
+        ImGui::TableSetupColumn("MAE%", ImGuiTableColumnFlags_WidthFixed, 56.0f);
+        ImGui::TableSetupColumn("거래", ImGuiTableColumnFlags_WidthFixed, 52.0f);
         ImGui::TableHeadersRow();
 
         for (const StrengthRow& row : g_tick.snapshot.rows) {
+            const MemberTradeEvaluation trade = EvaluateMemberTrade(row.memberIndex);
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
             if (row.buyPriority > 0) ImGui::Text("%d", row.buyPriority);
@@ -432,7 +468,32 @@ namespace
             ImGui::TableSetColumnIndex(10);
             ImGui::Text("%+.3f", row.point.obvImpulse);
             ImGui::TableSetColumnIndex(11);
-            ImGui::Text("%+.2f", row.point.sessionReturnPercent);
+            ImGui::Text("%+.2f", trade.sessionReturnPercent);
+            ImGui::TableSetColumnIndex(12);
+            if (!trade.waves.empty()) ImGui::Text("%+.2f", trade.crossWaveCompoundPercent);
+            else ImGui::TextDisabled("-");
+            ImGui::TableSetColumnIndex(13);
+            if (!trade.trades.empty()) ImGui::Text("%+.2f", trade.executionGrossCompoundPercent);
+            else ImGui::TextDisabled("-");
+            ImGui::TableSetColumnIndex(14);
+            if (!trade.trades.empty()) ImGui::Text("%+.2f", trade.executionNetCompoundPercent);
+            else ImGui::TextDisabled("-");
+            ImGui::TableSetColumnIndex(15);
+            if (!trade.trades.empty()) ImGui::Text("%+.2f", trade.bestMfePercent);
+            else ImGui::TextDisabled("-");
+            ImGui::TableSetColumnIndex(16);
+            if (!trade.trades.empty()) ImGui::Text("%+.2f", trade.worstMaePercent);
+            else ImGui::TextDisabled("-");
+            ImGui::TableSetColumnIndex(17);
+            if (!trade.trades.empty()) {
+                if (trade.hasOpenTrade)
+                    ImGui::Text("%zu/O", trade.trades.size());
+                else
+                    ImGui::Text("%zu", trade.trades.size());
+            }
+            else {
+                ImGui::TextDisabled("-");
+            }
         }
         ImGui::EndTable();
     }
@@ -743,7 +804,7 @@ namespace
         const float width = ImGui::GetContentRegionAvail().x;
         ImGui::BeginChild(
             "틱강도 우선순위",
-            ImVec2(width * 0.38f, 0.0f),
+            ImVec2(width * 0.46f, 0.0f),
             true);
         DrawGrid();
         ImGui::EndChild();

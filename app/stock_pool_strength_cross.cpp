@@ -246,8 +246,12 @@ namespace trading::stock_pool::strategy
                     rankingTopM,
                     scoringProfile);
 
+            for (RankRow& row : snapshot.rows) {
+                row.published = false;
+            }
+
             if (hasPreviousSnapshot && index + 1U < commonBars) {
-                for (const RankRow& current : snapshot.rows) {
+                for (RankRow& current : snapshot.rows) {
                     if (!current.eligible ||
                         positions.count(current.code) != 0U ||
                         pendingEntries.count(current.code) != 0U)
@@ -265,6 +269,7 @@ namespace trading::stock_pool::strategy
                         continue;
                     }
 
+                    current.published = true;
                     PendingEntry pending;
                     pending.memberIndex = current.memberIndex;
                     pending.executeIndex = index + 1U;

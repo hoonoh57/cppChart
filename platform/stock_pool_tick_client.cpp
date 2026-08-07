@@ -393,8 +393,7 @@ namespace trading::stock_pool::platform
                 value = field->AsNumber(0.0);
                 return std::isfinite(value);
             }
-            return field->IsString() &&
-                ParseDoubleText(field->AsString(), value);
+            return field->IsString() && ParseDoubleText(field->AsString(), value);
         }
 
         bool ParsePackedTimestamp(
@@ -459,10 +458,8 @@ namespace trading::stock_pool::platform
                 error = "server32 틱봉 JSON 파싱 실패: " + parsed.error;
                 return false;
             }
-            const json_lite::Value* success =
-                FindAny(parsed.value, "Success", "success");
-            const json_lite::Value* message =
-                FindAny(parsed.value, "Message", "message");
+            const json_lite::Value* success = FindAny(parsed.value, "Success", "success");
+            const json_lite::Value* message = FindAny(parsed.value, "Message", "message");
             data = FindAny(parsed.value, "Data", "data");
             if (success == nullptr || !success->AsBoolean(false)) {
                 error = message == nullptr
@@ -471,8 +468,7 @@ namespace trading::stock_pool::platform
                 return false;
             }
             if (http.statusCode < 200UL || http.statusCode >= 300UL) {
-                error = "server32 HTTP status " +
-                    std::to_string(http.statusCode);
+                error = "server32 HTTP status " + std::to_string(http.statusCode);
                 return false;
             }
             if (data == nullptr || !data->IsArray()) {
@@ -514,9 +510,6 @@ namespace trading::stock_pool::platform
             return result;
         }
 
-        // Ten calendar days safely spans ordinary weekends/holidays. From the
-        // response we keep only the latest actual trading session before the
-        // target date, so indicator warm-up never spans arbitrary old history.
         const std::string queryDate = DateMinusDays(date, 10);
         if (queryDate.empty()) {
             result.error = "틱봉 warm-up 시작일 계산 실패";
@@ -535,8 +528,7 @@ namespace trading::stock_pool::platform
         json_lite::ParseResult parsed;
         const json_lite::Value* data = nullptr;
         if (!ParseEnvelopeArray(http, parsed, data, result.error)) {
-            result.error = baseUrl + " | " + normalizedCode + " | " +
-                result.error;
+            result.error = baseUrl + " | " + normalizedCode + " | " + result.error;
             return result;
         }
 
@@ -545,12 +537,15 @@ namespace trading::stock_pool::platform
         {
             std::string timestamp;
             std::string date;
+            std::size_t sequence = 0U;
             Bar bar;
         };
         std::vector<ParsedBar> parsedBars;
         parsedBars.reserve(result.responseRowCount);
 
+        std::size_t sequence = 0U;
         for (const json_lite::Value& row : data->AsArray()) {
+            const std::size_t rowSequence = sequence++;
             if (!row.IsObject()) continue;
             const json_lite::Value* timestampField = row.Find("체결시간");
             if (timestampField == nullptr || !timestampField->IsString()) continue;
@@ -575,9 +570,7 @@ namespace trading::stock_pool::platform
             low = std::abs(low);
             close = std::abs(close);
             volume = std::abs(volume);
-            if (open <= 0.0 || high <= 0.0 || low <= 0.0 || close <= 0.0) {
-                continue;
-            }
+            if (open <= 0.0 || high <= 0.0 || low <= 0.0 || close <= 0.0) continue;
 
             EpochMillis packed = 0;
             if (!ParsePackedTimestamp(timestamp, packed)) continue;
@@ -590,14 +583,25 @@ namespace trading::stock_pool::platform
             bar.cumulativeTurnover = volume;
             bar.tradeIntensity = 100.0;
             bar.tickCount = tickSize;
-            parsedBars.push_back(ParsedBar{timestamp, timestamp.substr(0U, 8U), bar});
+            parsedBars.push_back(ParsedBar{
+                timestamp,
+                timestamp.substr(0U, 8U),
+                rowSequence,
+                bar});
         }
 
-        std::sort(
+        // server32/Cybos already returns oldest->newest, but keep an explicit
+        // stable ordering contract. The sequence tie-breaker is essential
+        // because CYBOS StockChart exposes HHmm (seconds=00) for T<n> candles,
+        // so multiple completed tick candles legitimately share one timestamp.
+        std::stable_sort(
             parsedBars.begin(),
             parsedBars.end(),
             [](const ParsedBar& left, const ParsedBar& right) {
-                return left.timestamp < right.timestamp;
+                if (left.timestamp != right.timestamp) {
+                    return left.timestamp < right.timestamp;
+                }
+                return left.sequence < right.sequence;
             });
 
         std::string previousDate;
@@ -628,18 +632,15 @@ namespace trading::stock_pool::platform
         }
 
         if (result.warmupRowCount == 0U) {
-            result.error = normalizedCode +
-                " | 전일 실제 틱봉 warm-up 데이터가 없습니다.";
+            result.error = normalizedCode + " | 전일 실제 틱봉 warm-up 데이터가 없습니다.";
             return result;
         }
         if (result.sessionRowCount == 0U) {
-            result.error = normalizedCode +
-                " | 당일 09:00~분석종료 시각의 실제 틱봉이 없습니다.";
+            result.error = normalizedCode + " | 당일 09:00~분석종료 시각의 실제 틱봉이 없습니다.";
             return result;
         }
 
         double cumulativeTurnover = 0.0;
-        EpochMillis previousTimestamp = 0;
         result.bars.reserve(selected.size());
         for (Bar bar : selected) {
             const double volume = bar.cumulativeTurnover;
@@ -648,35 +649,11 @@ namespace trading::stock_pool::platform
             cumulativeTurnover += typicalPrice * volume;
             bar.cumulativeTurnover = cumulativeTurnover;
 
-            if (previousTimestamp > 0 &&
-                bar.closeTimestampMs > previousTimestamp)
-            {
-                // Packed YYYYMMDDHHMMSS timestamps are not linear milliseconds;
-                // for tick density use clock seconds only when both bars are in
-                // the same YYYYMMDD session. Session-boundary duration remains 0.
-                const long long previousPacked = previousTimestamp / 1000LL;
-                const long long currentPacked = bar.closeTimestampMs / 1000LL;
-                const long long previousDatePart = previousPacked / 1000000LL;
-                const long long currentDatePart = currentPacked / 1000000LL;
-                if (previousDatePart == currentDatePart) {
-                    const int previousHms = static_cast<int>(previousPacked % 1000000LL);
-                    const int currentHms = static_cast<int>(currentPacked % 1000000LL);
-                    const auto toSeconds = [](int hhmmss) {
-                        return (hhmmss / 10000) * 3600 +
-                            ((hhmmss / 100) % 100) * 60 +
-                            (hhmmss % 100);
-                    };
-                    const int duration =
-                        toSeconds(currentHms) - toSeconds(previousHms);
-                    if (duration > 0) {
-                        bar.tickDurationSeconds = static_cast<double>(duration);
-                        bar.tickRatePerSecond =
-                            static_cast<double>(tickSize) /
-                            static_cast<double>(duration);
-                    }
-                }
-            }
-            previousTimestamp = bar.closeTimestampMs;
+            // Exact seconds are not present in the historical StockChart T<n>
+            // contract. Participation is therefore derived later from the
+            // exact count of completed T<n> bars in each HHmm bucket.
+            bar.tickDurationSeconds = 0.0;
+            bar.tickRatePerSecond = 0.0;
             result.bars.push_back(bar);
         }
 

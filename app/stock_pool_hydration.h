@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
-#include <set>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -17,6 +17,7 @@ namespace trading::stock_pool::hydration
         bool ok = false;
         std::vector<MemberSeries> members;
         std::size_t barsPerMember = 0U;
+        std::size_t carriedForwardBarCount = 0U;
         EpochMillis firstTimestamp = 0;
         EpochMillis lastTimestamp = 0;
         std::string source;
@@ -56,6 +57,15 @@ namespace trading::stock_pool::hydration
         return true;
     }
 
+    inline EpochMillis PackMinuteTimestamp(long long date, int minuteOfDay)
+    {
+        const int hour = minuteOfDay / 60;
+        const int minute = minuteOfDay % 60;
+        const long long packed =
+            (((date * 100LL + hour) * 100LL + minute) * 100LL);
+        return static_cast<EpochMillis>(packed) * 1000LL;
+    }
+
     inline HistoricalHydrationResult HydrateHistoricalMembers(
         const std::vector<MemberSeries>& cohortMembers,
         const std::string& tradingDate,
@@ -83,12 +93,22 @@ namespace trading::stock_pool::hydration
 
         const long long expectedDate = std::strtoll(
             dateDigits.c_str(), nullptr, 10);
-        const long long expectedFirstPacked = std::strtoll(
-            (dateDigits + timeDigits).c_str(), nullptr, 10);
+        const int captureHour = std::atoi(timeDigits.substr(0U, 2U).c_str());
+        const int captureMinute = std::atoi(timeDigits.substr(2U, 2U).c_str());
+        const int captureSecond = std::atoi(timeDigits.substr(4U, 2U).c_str());
+        if (captureHour < 0 || captureHour > 23 ||
+            captureMinute < 0 || captureMinute > 59 ||
+            captureSecond != 0)
+        {
+            result.error = "포착시각은 유효한 정분 시각이어야 합니다.";
+            return result;
+        }
+        const int captureMinuteOfDay = captureHour * 60 + captureMinute;
 
         std::vector<MemberSeries> fetchedMembers;
         fetchedMembers.reserve(cohortMembers.size());
-        std::set<EpochMillis> commonTimestamps;
+        int commonStartMinute = captureMinuteOfDay;
+        int commonEndMinute = 24 * 60 - 1;
         bool firstMember = true;
         std::string source;
 
@@ -110,99 +130,143 @@ namespace trading::stock_pool::hydration
             member.name = metadata.name;
             member.market = metadata.market;
             member.bars = fetched.bars;
-            fetchedMembers.push_back(std::move(member));
-            source = fetched.source;
+            std::sort(
+                member.bars.begin(),
+                member.bars.end(),
+                [](const Bar& left, const Bar& right) {
+                    return left.closeTimestampMs < right.closeTimestampMs;
+                });
 
-            std::set<EpochMillis> timestamps;
-            for (const Bar& bar : fetched.bars) {
-                timestamps.insert(bar.closeTimestampMs);
+            if (member.bars.empty()) {
+                result.error = metadata.code + " " + metadata.name +
+                    " 분봉 응답이 비어 있습니다.";
+                return result;
             }
+
+            int firstMinute = -1;
+            int lastMinute = -1;
+            for (const Bar& bar : member.bars) {
+                long long date = 0LL;
+                int minuteOfDay = 0;
+                int second = 0;
+                if (!PackedTimestampParts(
+                        bar.closeTimestampMs,
+                        date,
+                        minuteOfDay,
+                        second) ||
+                    date != expectedDate || second != 0)
+                {
+                    result.error = metadata.code +
+                        " 분봉 timestamp 형식 또는 거래일 불변식이 깨졌습니다: " +
+                        std::to_string(bar.closeTimestampMs);
+                    return result;
+                }
+                if (minuteOfDay < captureMinuteOfDay) continue;
+                if (firstMinute < 0) firstMinute = minuteOfDay;
+                lastMinute = minuteOfDay;
+            }
+
+            if (firstMinute < 0 || lastMinute < firstMinute) {
+                result.error = metadata.code + " " + metadata.name +
+                    " 포착시각 이후 유효한 실제 분봉이 없습니다.";
+                return result;
+            }
+
             if (firstMember) {
-                commonTimestamps = std::move(timestamps);
+                commonStartMinute = firstMinute;
+                commonEndMinute = lastMinute;
                 firstMember = false;
             }
             else {
-                for (auto iterator = commonTimestamps.begin();
-                     iterator != commonTimestamps.end();)
-                {
-                    if (timestamps.find(*iterator) == timestamps.end()) {
-                        iterator = commonTimestamps.erase(iterator);
-                    }
-                    else {
-                        ++iterator;
-                    }
-                }
+                commonStartMinute = (std::max)(commonStartMinute, firstMinute);
+                commonEndMinute = (std::min)(commonEndMinute, lastMinute);
             }
-            if (commonTimestamps.empty()) {
-                result.error =
-                    "종목 간 공통 1분봉 시각이 없습니다. 시계열을 합성하지 않고 중단했습니다.";
-                return result;
-            }
+
+            fetchedMembers.push_back(std::move(member));
+            source = fetched.source;
         }
 
         minimumHistoryBars = (std::max)(1, minimumHistoryBars);
-        if (commonTimestamps.size() <
-            static_cast<std::size_t>(minimumHistoryBars))
-        {
+        if (commonEndMinute < commonStartMinute) {
             result.error =
-                "공통 실제 분봉이 " +
-                std::to_string(commonTimestamps.size()) +
-                "개뿐입니다. 최소 " +
-                std::to_string(minimumHistoryBars) +
-                "개가 필요합니다.";
+                "모든 종목이 동시에 평가 가능한 공통 분봉 구간이 없습니다.";
             return result;
         }
 
-        const long long actualFirstPacked =
-            *commonTimestamps.begin() / 1000LL;
-        if (actualFirstPacked != expectedFirstPacked) {
+        const std::size_t timelineCount = static_cast<std::size_t>(
+            commonEndMinute - commonStartMinute + 1);
+        if (timelineCount < static_cast<std::size_t>(minimumHistoryBars)) {
             result.error =
-                "포착시각 첫 봉이 모든 종목에 공통으로 존재하지 않습니다. expected=" +
-                std::to_string(expectedFirstPacked) + " actual=" +
-                std::to_string(actualFirstPacked) +
-                ". 가짜 봉을 만들지 않고 중단했습니다.";
+                "공통 평가 구간이 " + std::to_string(timelineCount) +
+                "분뿐입니다. 최소 " +
+                std::to_string(minimumHistoryBars) + "분이 필요합니다.";
             return result;
         }
 
-        int previousMinute = -1;
-        for (EpochMillis timestamp : commonTimestamps) {
-            long long date = 0LL;
-            int minuteOfDay = 0;
-            int second = 0;
-            if (!PackedTimestampParts(
-                    timestamp,
-                    date,
-                    minuteOfDay,
-                    second) ||
-                date != expectedDate || second != 0)
-            {
-                result.error =
-                    "분봉 timestamp 형식 또는 거래일 불변식이 깨졌습니다: " +
-                    std::to_string(timestamp);
-                return result;
-            }
-            if (previousMinute >= 0 && minuteOfDay != previousMinute + 1) {
-                result.error =
-                    "공통 분봉 시계열이 연속 1분 간격이 아닙니다: " +
-                    std::to_string(previousMinute) + " -> " +
-                    std::to_string(minuteOfDay) +
-                    ". 누락 봉을 합성하지 않고 중단했습니다.";
-                return result;
-            }
-            previousMinute = minuteOfDay;
-        }
-
+        std::size_t carriedForward = 0U;
         for (MemberSeries& member : fetchedMembers) {
-            std::vector<Bar> synchronized;
-            synchronized.reserve(commonTimestamps.size());
+            std::map<int, Bar> observedByMinute;
             for (const Bar& bar : member.bars) {
-                if (commonTimestamps.find(bar.closeTimestampMs) !=
-                    commonTimestamps.end())
+                long long date = 0LL;
+                int minuteOfDay = 0;
+                int second = 0;
+                if (PackedTimestampParts(
+                        bar.closeTimestampMs,
+                        date,
+                        minuteOfDay,
+                        second) &&
+                    date == expectedDate && second == 0 &&
+                    minuteOfDay >= captureMinuteOfDay)
                 {
-                    synchronized.push_back(bar);
+                    observedByMinute[minuteOfDay] = bar;
                 }
             }
-            if (synchronized.size() != commonTimestamps.size()) {
+
+            std::vector<Bar> synchronized;
+            synchronized.reserve(timelineCount);
+            Bar lastKnown;
+            bool hasLastKnown = false;
+
+            const auto firstUsable = observedByMinute.upper_bound(commonStartMinute);
+            if (firstUsable != observedByMinute.begin()) {
+                auto previous = firstUsable;
+                --previous;
+                lastKnown = previous->second;
+                hasLastKnown = true;
+            }
+
+            for (int minute = commonStartMinute;
+                 minute <= commonEndMinute;
+                 ++minute)
+            {
+                const auto observed = observedByMinute.find(minute);
+                if (observed != observedByMinute.end()) {
+                    lastKnown = observed->second;
+                    hasLastKnown = true;
+                    synchronized.push_back(lastKnown);
+                    continue;
+                }
+
+                if (!hasLastKnown || lastKnown.close <= 0.0) {
+                    result.error = member.code +
+                        " 공통 시작시각 이전의 인과적 기준가격이 없습니다.";
+                    return result;
+                }
+
+                Bar noTrade = lastKnown;
+                noTrade.closeTimestampMs =
+                    PackMinuteTimestamp(expectedDate, minute);
+                noTrade.open = lastKnown.close;
+                noTrade.high = lastKnown.close;
+                noTrade.low = lastKnown.close;
+                noTrade.close = lastKnown.close;
+                noTrade.tradeIntensity = 100.0;
+                synchronized.push_back(noTrade);
+                lastKnown = noTrade;
+                ++carriedForward;
+            }
+
+            if (synchronized.size() != timelineCount) {
                 result.error = member.code +
                     " 동기화 분봉 수가 공통 timeline과 일치하지 않습니다.";
                 return result;
@@ -211,10 +275,15 @@ namespace trading::stock_pool::hydration
         }
 
         result.members = std::move(fetchedMembers);
-        result.barsPerMember = commonTimestamps.size();
-        result.firstTimestamp = *commonTimestamps.begin();
-        result.lastTimestamp = *commonTimestamps.rbegin();
-        result.source = source;
+        result.barsPerMember = timelineCount;
+        result.carriedForwardBarCount = carriedForward;
+        result.firstTimestamp =
+            PackMinuteTimestamp(expectedDate, commonStartMinute);
+        result.lastTimestamp =
+            PackMinuteTimestamp(expectedDate, commonEndMinute);
+        result.source = source +
+            " | alignment=causal-no-trade-carry | carried=" +
+            std::to_string(carriedForward);
         result.ok = true;
         return result;
     }

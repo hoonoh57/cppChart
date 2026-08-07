@@ -17,10 +17,14 @@ namespace trading::stock_pool::ui
         bool showSlowJma = true;
         bool showCrossSignals = true;
         bool showBuyEligible = true;
+        bool showTradeMarkers = true;
         bool showSlope = true;
         bool showTickRate = true;
         bool showMacdAtr = true;
         bool showObv = true;
+        double feePercentEachSide = 0.015;
+        double sellTaxPercent = 0.15;
+        double slippageBps = 2.0;
     };
 
     void OpenTickDetail(

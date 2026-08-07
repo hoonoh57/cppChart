@@ -91,6 +91,13 @@ namespace trading::stock_pool::intuitive
             maePercent = SafePercent(worstLow, entryPrice);
         }
 
+        void IncludeExitFillExcursion(CausalTrade& trade)
+        {
+            const double fillReturn = SafePercent(trade.exitPrice, trade.entryPrice);
+            trade.mfePercent = (std::max)(trade.mfePercent, fillReturn);
+            trade.maePercent = (std::min)(trade.maePercent, fillReturn);
+        }
+
         double Compound(const std::vector<double>& returns)
         {
             double equity = 1.0;
@@ -210,6 +217,7 @@ namespace trading::stock_pool::intuitive
                     trade.entryPrice,
                     trade.mfePercent,
                     trade.maePercent);
+                IncludeExitFillExcursion(trade);
                 trade.closed = true;
                 result.bestMfePercent = (std::max)(
                     result.bestMfePercent,
@@ -243,6 +251,7 @@ namespace trading::stock_pool::intuitive
                 trade.entryPrice,
                 trade.mfePercent,
                 trade.maePercent);
+            IncludeExitFillExcursion(trade);
             trade.closed = false;
             result.bestMfePercent = (std::max)(
                 result.bestMfePercent,

@@ -17,6 +17,7 @@ if exist stock_pool_workbench_tests.exe del /F /Q stock_pool_workbench_tests.exe
 if exist stock_pool_strength_cross_tests.exe del /F /Q stock_pool_strength_cross_tests.exe
 if exist intuitive_strength_engine_tests.exe del /F /Q intuitive_strength_engine_tests.exe
 if exist intuitive_strength_warmup_tests.exe del /F /Q intuitive_strength_warmup_tests.exe
+if exist intuitive_strength_trade_evaluator_tests.exe del /F /Q intuitive_strength_trade_evaluator_tests.exe
 if exist stock_pool_workbench.build.txt del /F /Q stock_pool_workbench.build.txt
 if exist obj_stock_pool rmdir /S /Q obj_stock_pool
 mkdir obj_stock_pool
@@ -99,6 +100,24 @@ if errorlevel 1 (
 )
 del /F /Q intuitive_strength_warmup_tests.exe 2>NUL
 
+echo *** VERIFYING CAUSAL JMA TRADE EVALUATOR / CROSS-WAVE VS EXECUTION PNL ***
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc /MD ^
+   /I"." ^
+   tests\intuitive_strength_trade_evaluator_tests.cpp ^
+   core\intuitive_strength_trade_evaluator.cpp ^
+   /Foobj_stock_pool\ /Fe:intuitive_strength_trade_evaluator_tests.exe
+if errorlevel 1 (
+    echo *** BUILD FAILED: causal JMA trade evaluator tests did not compile ***
+    exit /b 1
+)
+intuitive_strength_trade_evaluator_tests.exe
+if errorlevel 1 (
+    del /F /Q intuitive_strength_trade_evaluator_tests.exe 2>NUL
+    echo *** BUILD FAILED: causal JMA trade evaluator regression ***
+    exit /b 1
+)
+del /F /Q intuitive_strength_trade_evaluator_tests.exe 2>NUL
+
 rem Large WinHTTP/JSON adapters are deliberately compiled without optimizer.
 rem This isolates the known MSVC C1001 class from calculation/rendering TUs.
 echo *** COMPILING SERVER32 GATEWAY ADAPTER WITH MSVC ICE GUARD (/Od /Ob0) ***
@@ -135,10 +154,11 @@ echo *** BUILDING PRIOR-SESSION WARM-UP / OPENING TICK WYSIWYG WORKBENCH ***
 cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0602 ^
    /I"." /I"imgui" /I"imgui\backends" ^
    stock_pool_workbench_tick_entry.cpp ^
-   ui\stock_pool_tick_detail_ui.cpp ^
+   ui\stock_pool_tick_trade_detail_ui.cpp ^
    core\stock_pool_engine.cpp ^
    core\intuitive_strength_engine.cpp ^
    core\intuitive_strength_snapshot.cpp ^
+   core\intuitive_strength_trade_evaluator.cpp ^
    core\json_lite.cpp ^
    app\stock_pool_evaluator.cpp ^
    app\stock_pool_fixture.cpp ^
@@ -181,6 +201,9 @@ for /f "delims=" %%I in ('git rev-parse HEAD 2^>NUL') do set "BUILD_HEAD=%%I"
 >>stock_pool_workbench.build.txt echo tick_participation=completed-Tn-bars-per-minute-times-n
 >>stock_pool_workbench.build.txt echo trend_strength=jma7-50-2_vs_jma20-50-2
 >>stock_pool_workbench.build.txt echo detail_drilldown=double-click-time-axis-crosshair-jma-gate
+>>stock_pool_workbench.build.txt echo trade_evaluation=cross-wave-vs-next-Tn-open-causal-execution
+>>stock_pool_workbench.build.txt echo trade_metrics=session,cross-wave,gross,net,mfe,mae
+>>stock_pool_workbench.build.txt echo trade_cost_defaults=fee0.015pct-each-side,selltax0.15pct,slippage2bps
 >>stock_pool_workbench.build.txt echo legacy_relative_strength=available-by-checkbox
 >>stock_pool_workbench.build.txt echo executable=stock_pool_workbench.exe
 >>stock_pool_workbench.build.txt echo compiler=!CL_PATH!
@@ -193,6 +216,8 @@ echo Prior-session bars warm indicators but never create today's buy state.
 echo Buy priority is emitted only from 09:03 through 10:00.
 echo CYBOS native tick request never exceeds T120; larger sizes use completed real base candles.
 echo Tick detail drill-down uses the same bars and intuitive-strength series as the overview.
+echo Trade evaluation separates session return, cross-wave capture, causal gross/net PnL, MFE and MAE.
+echo Causal BUY/SELL fills occur at the next completed Tn bar open after the confirmed signal; open positions are MTM only.
 echo Historical Tn timestamps are minute-resolution; no fake seconds are claimed.
 echo Tick density is completed Tn bars per minute times n, never inferred from volume.
 echo Build identity: stock_pool_workbench.build.txt

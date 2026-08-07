@@ -22,6 +22,17 @@ namespace trading::stock_pool::intuitive
         int obvSignalPeriod = 9;
         int obvNormalizationBars = 20;
         int maxFreshBars = 3;
+
+        // Packed YYYYMMDDHHMMSS*1000 values. Bars before sessionStart warm the
+        // indicators only. Wave state is reset at sessionStart. Buy priority is
+        // valid only inside [evaluationStart, evaluationEnd].
+        EpochMillis sessionStart = 0;
+        EpochMillis evaluationStart = 0;
+        EpochMillis evaluationEnd = 0;
+
+        // Tick-rate acceleration compares current real T<n> rate with this
+        // trailing median-sized window. No minute-volume proxy is allowed.
+        int tickRateBaselineBars = 20;
     };
 
     struct StrengthPoint final
@@ -38,6 +49,10 @@ namespace trading::stock_pool::intuitive
         double macdHistogramAtr = 0.0;
         double obvImpulse = 0.0;
 
+        bool warmupOnly = false;
+        bool inSession = false;
+        bool inEvaluationWindow = false;
+
         bool bullishRegime = false;
         bool crossUp = false;
         bool crossDown = false;
@@ -47,9 +62,10 @@ namespace trading::stock_pool::intuitive
         double priceExtensionPercent = 0.0;
         bool fresh = false;
 
-        // Tick participation is intentionally unavailable until a real
-        // execution-event adapter is connected. Never infer it from volume.
+        // Real tick participation populated from T<n> candle completion time.
+        // Example: a T60 candle completed in 2 seconds => 30 ticks/second.
         bool tickAvailable = false;
+        double tickRatePerSecond = std::numeric_limits<double>::quiet_NaN();
         double tickRatePerMinute = std::numeric_limits<double>::quiet_NaN();
         double tickAcceleration = std::numeric_limits<double>::quiet_NaN();
         double tickContinuity = std::numeric_limits<double>::quiet_NaN();

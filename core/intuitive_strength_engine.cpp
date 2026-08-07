@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <deque>
+#include <vector>
 
 namespace trading::stock_pool::intuitive
 {
@@ -23,6 +24,30 @@ namespace trading::stock_pool::intuitive
         double RoundTo(double value, double scale)
         {
             return std::round(value * scale) / scale;
+        }
+
+        double Median(std::vector<double> values)
+        {
+            values.erase(
+                std::remove_if(
+                    values.begin(),
+                    values.end(),
+                    [](double value) {
+                        return !std::isfinite(value) || value <= 0.0;
+                    }),
+                values.end());
+            if (values.empty()) return 0.0;
+            const std::size_t middle = values.size() / 2U;
+            std::nth_element(
+                values.begin(),
+                values.begin() + static_cast<std::ptrdiff_t>(middle),
+                values.end());
+            const double upper = values[middle];
+            if ((values.size() % 2U) != 0U) return upper;
+            const double lower = *std::max_element(
+                values.begin(),
+                values.begin() + static_cast<std::ptrdiff_t>(middle));
+            return (lower + upper) * 0.5;
         }
 
         class Ema final
@@ -145,6 +170,16 @@ namespace trading::stock_pool::intuitive
             return typical > kEpsilon ? turnover / typical : 0.0;
         }
 
+        bool InRange(
+            EpochMillis value,
+            EpochMillis start,
+            EpochMillis end)
+        {
+            if (start > 0 && value < start) return false;
+            if (end > 0 && value > end) return false;
+            return true;
+        }
+
         MemberStrengthSeries CalculateMember(
             const MemberSeries& member,
             std::size_t memberIndex,
@@ -169,6 +204,7 @@ namespace trading::stock_pool::intuitive
             double atrSum = 0.0;
             std::deque<double> volumeWindow;
             double rollingVolume = 0.0;
+            std::deque<double> tickRateWindow;
             double obv = 0.0;
             double previousClose = 0.0;
             double previousTurnover = 0.0;
@@ -181,18 +217,28 @@ namespace trading::stock_pool::intuitive
             double crossFast = 0.0;
             double crossClose = 0.0;
             double crossSlope = 0.0;
-
-            const double sessionAnchor = member.bars.front().open > 0.0
-                ? member.bars.front().open
-                : member.bars.front().close;
+            bool sessionStateReset = false;
+            double sessionAnchor = 0.0;
 
             for (std::size_t index = 0U; index < member.bars.size(); ++index) {
                 const Bar& bar = member.bars[index];
                 StrengthPoint point;
                 point.asOf = bar.closeTimestampMs;
                 point.close = bar.close;
-                point.sessionReturnPercent =
-                    SafePercent(bar.close, sessionAnchor);
+                point.inSession =
+                    config.sessionStart <= 0 || bar.closeTimestampMs >= config.sessionStart;
+                point.warmupOnly = !point.inSession;
+                point.inEvaluationWindow = InRange(
+                    bar.closeTimestampMs,
+                    config.evaluationStart,
+                    config.evaluationEnd) && point.inSession;
+
+                if (point.inSession && sessionAnchor <= 0.0) {
+                    sessionAnchor = bar.open > 0.0 ? bar.open : bar.close;
+                }
+                point.sessionReturnPercent = sessionAnchor > 0.0
+                    ? SafePercent(bar.close, sessionAnchor)
+                    : 0.0;
 
                 const JmaStep fast = fastJma.Step(bar.close);
                 const JmaStep slow = slowJma.Step(bar.close);
@@ -241,15 +287,50 @@ namespace trading::stock_pool::intuitive
                     ? (obv - obvSignalValue) / rollingVolume
                     : 0.0;
 
+                if (bar.tickCount > 0 &&
+                    std::isfinite(bar.tickRatePerSecond) &&
+                    bar.tickRatePerSecond > 0.0)
+                {
+                    point.tickAvailable = true;
+                    point.tickRatePerSecond = bar.tickRatePerSecond;
+                    point.tickRatePerMinute = bar.tickRatePerSecond * 60.0;
+                    std::vector<double> baseline(
+                        tickRateWindow.begin(), tickRateWindow.end());
+                    const double median = Median(std::move(baseline));
+                    point.tickAcceleration = median > kEpsilon
+                        ? bar.tickRatePerSecond / median
+                        : 1.0;
+                    tickRateWindow.push_back(bar.tickRatePerSecond);
+                    while (tickRateWindow.size() > static_cast<std::size_t>(
+                               (std::max)(1, config.tickRateBaselineBars)))
+                    {
+                        tickRateWindow.pop_front();
+                    }
+                }
+
                 const bool warmed = index + 1U >= static_cast<std::size_t>(
                     (std::max)(config.fastJmaPeriod, config.slowJmaPeriod));
-                if (warmed && hasPreviousJma) {
+
+                // Indicators are deliberately NOT reset at 09:00. Only the
+                // trading-wave state is reset, so opening JMA/MACD/OBV values
+                // are based on prior-session history while today's cross is a
+                // new event.
+                if (point.inSession && !sessionStateReset) {
+                    activeWave = false;
+                    barsSinceCross = -1;
+                    crossFast = 0.0;
+                    crossClose = 0.0;
+                    crossSlope = 0.0;
+                    sessionStateReset = true;
+                }
+
+                if (point.inSession && warmed && hasPreviousJma) {
                     point.crossUp =
                         previousFast < previousSlow && fast.value > slow.value;
                     point.crossDown =
                         previousFast > previousSlow && fast.value < slow.value;
                 }
-                point.bullishRegime = fast.value > slow.value;
+                point.bullishRegime = point.inSession && fast.value > slow.value;
 
                 if (point.crossDown) {
                     activeWave = false;
@@ -266,7 +347,7 @@ namespace trading::stock_pool::intuitive
                     crossSlope = fast.slopePercent;
                 }
 
-                if (activeWave && point.bullishRegime) {
+                if (point.inSession && activeWave && point.bullishRegime) {
                     point.barsSinceCross = barsSinceCross;
                     point.crossJmaSlopePercent = crossSlope;
                     point.waveJmaGainPercent = SafePercent(fast.value, crossFast);
@@ -317,6 +398,7 @@ namespace trading::stock_pool::intuitive
             row.market = member.market;
             row.point = member.points[asOfIndex];
             row.buyEligible =
+                row.point.inEvaluationWindow &&
                 row.point.fresh &&
                 row.point.bullishRegime &&
                 row.point.barsSinceCross >= 0 &&
@@ -337,17 +419,21 @@ namespace trading::stock_pool::intuitive
                         return left.point.crossJmaSlopePercent >
                             right.point.crossJmaSlopePercent;
                     }
+                    if (left.point.tickAvailable != right.point.tickAvailable) {
+                        return left.point.tickAvailable > right.point.tickAvailable;
+                    }
+                    if (left.point.tickAvailable &&
+                        left.point.tickRatePerSecond !=
+                            right.point.tickRatePerSecond)
+                    {
+                        return left.point.tickRatePerSecond >
+                            right.point.tickRatePerSecond;
+                    }
                     if (left.point.fastJmaSlopePercent !=
                         right.point.fastJmaSlopePercent)
                     {
                         return left.point.fastJmaSlopePercent >
                             right.point.fastJmaSlopePercent;
-                    }
-                    if (left.point.macdHistogramAtr !=
-                        right.point.macdHistogramAtr)
-                    {
-                        return left.point.macdHistogramAtr >
-                            right.point.macdHistogramAtr;
                     }
                 }
                 if (left.point.sessionReturnPercent !=
@@ -369,6 +455,11 @@ namespace trading::stock_pool::intuitive
 
     const char* BuyStateName(const StrengthRow& row) noexcept
     {
+        if (row.point.warmupOnly) return "전일워밍업";
+        if (!row.point.inEvaluationWindow) {
+            if (row.point.inSession) return "평가시간외";
+            return "대기";
+        }
         if (row.buyEligible) return "매수유효";
         if (row.point.barsSinceCross >= 0 && row.point.bullishRegime) {
             if (!row.point.fresh) return "돌파만료";

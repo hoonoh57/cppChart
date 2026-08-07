@@ -13,6 +13,7 @@
 #include "imgui_impl_win32.h"
 #include "app/stock_pool_1516_import.h"
 #include "app/stock_pool_hydration.h"
+#include "app/stock_pool_strength_cross.h"
 #include "platform/stock_pool_gateway_client.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
@@ -192,6 +193,7 @@ namespace
 
     void CommitHistoricalCohort()
     {
+        g_state.timeframeMinutes = 10;
         const auto saved =
             trading::stock_pool::platform::Save1516CohortViaServer32(
                 g_state.condition,
@@ -245,7 +247,7 @@ namespace
             "1516 Frozen Cohort DB 저장/확정: " +
             std::to_string(g_state.members.size()) +
             "개 | cohort_id=" + std::to_string(saved.cohortId) +
-            " | 백테스트 클릭 시 실제 분봉 hydration";
+            " | 10분 강도100 상향돌파 백테스트 대기";
     }
 
     bool HistoricalMembersNeedHydration()
@@ -298,6 +300,12 @@ namespace
                 "백테스트 거부 — 먼저 1516 Frozen Cohort를 확정하십시오.";
             return false;
         }
+
+        if (g_state.timeframeMinutes != 10) {
+            g_state.timeframeMinutes = 10;
+            if (!HistoricalMembersNeedHydration()) ApplyTimeframe();
+        }
+
         if (HistoricalMembersNeedHydration() && !HydrateHistoricalCohort()) {
             return false;
         }
@@ -305,19 +313,54 @@ namespace
         const int availableBars = MaximumBarCount();
         if (availableBars < g_state.profile.minimumHistoryBars) {
             g_state.status =
-                "백테스트 거부 — 선택 timeframe의 공통 봉이 " +
+                "백테스트 거부 — 10분 공통 봉이 " +
                 std::to_string(availableBars) + "개이며 최소 " +
                 std::to_string(g_state.profile.minimumHistoryBars) +
                 "개가 필요합니다.";
             return false;
         }
 
-        RunBacktest();
+        trading::stock_pool::strategy::StrengthCrossProfile strategyProfile;
+        strategyProfile.entryStrength = 100.0;
+        strategyProfile.takeProfitPercent = 1.0;
+        strategyProfile.stopLossPercent = 1.0;
+        strategyProfile.stopFirstWhenBothTouched = true;
+
+        auto summary =
+            trading::stock_pool::strategy::RunStrengthCrossBacktest(
+                g_state.members,
+                g_state.topM,
+                g_state.profile,
+                strategyProfile);
+        g_state.backtest = std::move(summary.backtest);
+        g_state.evaluation =
+            trading::stock_pool::evaluation::EvaluateWinnerCapture(
+                g_state.members,
+                g_state.backtest,
+                3);
+        g_state.replayHistory = g_state.backtest.snapshots;
+        g_state.nextBarIndex =
+            static_cast<std::size_t>(MaximumBarCount());
+        g_state.replayEngine.Reset();
+        g_state.playing = false;
+
         if (g_state.backtest.snapshots.empty()) {
             g_state.status =
                 "백테스트 실패 — 분봉은 적재됐지만 causal snapshot이 생성되지 않았습니다.";
             return false;
         }
+
+        char message[512]{};
+        std::snprintf(
+            message,
+            sizeof(message),
+            "10분 강도100 상향돌파 완료: cross %zu | trade %zu | TP %zu | SL %zu | 장마감 %zu | 순위는 진입조건 아님",
+            summary.upwardCrossCount,
+            g_state.backtest.trades.size(),
+            summary.takeProfitCount,
+            summary.stopLossCount,
+            summary.sessionCloseCount);
+        g_state.status = message;
         return true;
     }
 
@@ -509,8 +552,8 @@ namespace
             g_state.members.size());
         ImGui::TextWrapped(
             waiting
-                ? "아래 목록은 DB에서 확정된 포착 종목입니다. 백테스트를 누르면 server32에서 포착시각 이후 실제 1분봉을 적재하고, 동기화 검증 후 causal snapshot을 생성합니다."
-                : "실제 분봉 적재가 완료됐습니다. 백테스트를 누르면 미래정보 없이 causal snapshot과 Top-M 결과를 생성합니다.");
+                ? "아래 목록은 DB에서 확정된 포착 종목입니다. 백테스트를 누르면 server32에서 포착시각 이후 실제 1분봉을 적재하고 10분봉으로 집계합니다."
+                : "실제 분봉 적재가 완료됐습니다. 매수는 상대순위가 아니라 강도 100 상향돌파에서만 발생합니다.");
 
         if (!ImGui::BeginTable(
                 "##frozen_cohort_members",

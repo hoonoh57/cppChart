@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -37,7 +38,7 @@ namespace
         StrengthSnapshot snapshot;
         int tickSize = 360;
         int warmupBars = 160;
-        int asOfSecond = 10 * 3600;
+        int asOfMinute = 10 * 60;
         bool calculated = false;
         bool showLegacy = false;
         std::string previousTradingDate;
@@ -100,15 +101,14 @@ namespace
         return static_cast<EpochMillis>(std::strtoll(buffer, nullptr, 10)) * 1000LL;
     }
 
-    void FormatClock(int secondOfDay, char* buffer, std::size_t size)
+    void FormatMinute(int minuteOfDay, char* buffer, std::size_t size)
     {
         std::snprintf(
             buffer,
             size,
-            "%02d:%02d:%02d",
-            secondOfDay / 3600,
-            (secondOfDay / 60) % 60,
-            secondOfDay % 60);
+            "%02d:%02d 완료",
+            minuteOfDay / 60,
+            minuteOfDay % 60);
     }
 
     const MemberStrengthSeries* FindStrength(std::size_t memberIndex)
@@ -121,14 +121,15 @@ namespace
 
     void RebuildSnapshot()
     {
-        const std::string date = DigitsOnly(g_state.tradingDate);
-        if (date.size() != 8U || !g_tick.calculated) {
+        if (!g_tick.calculated) {
             g_tick.snapshot = {};
             return;
         }
+        const std::string date = DigitsOnly(g_state.tradingDate);
+        if (date.size() != 8U) return;
         g_tick.snapshot = BuildStrengthSnapshotAtTime(
             g_tick.series,
-            MakePackedTimestamp(date, g_tick.asOfSecond),
+            MakePackedTimestamp(date, g_tick.asOfMinute * 60 + 59),
             g_tick.config);
     }
 
@@ -152,7 +153,7 @@ namespace
         g_tick.calculated = false;
         g_state.status =
             "server32 실제 CYBOS T" + std::to_string(g_tick.tickSize) +
-            " 틱봉 적재 중 — 전일 warm-up + 당일 09:00~10:00";
+            " 적재 중 — 전일 warm-up + 당일 09:00~10:00";
 
         for (const MemberSeries& cohort : g_state.rawMembers) {
             const auto fetched =
@@ -185,21 +186,21 @@ namespace
             date, 9 * 3600 + 3 * 60);
         g_tick.config.evaluationEnd = MakePackedTimestamp(date, 10 * 3600);
         g_tick.series = CalculateStrengthSeries(g_tick.members, g_tick.config);
-        g_tick.asOfSecond = 10 * 3600;
+        g_tick.asOfMinute = 10 * 60;
         g_tick.calculated = true;
         RebuildSnapshot();
 
         g_state.status =
             "실제 T" + std::to_string(g_tick.tickSize) +
-            " 틱강도 준비 완료 | 전일 " + g_tick.previousTradingDate +
+            " 준비 완료 | 전일 " + g_tick.previousTradingDate +
             " warm-up " + std::to_string(g_tick.warmupBars) +
-            "봉 | 지표 계산 09:00 이전부터 연속 | 매수평가 09:03~10:00";
+            "봉 | 지표연속 | 파동 09:00 reset | 평가 09:03~10:00";
         return true;
     }
 
     void DrawToolbar()
     {
-        ImGui::BeginChild("##tick_toolbar", ImVec2(0.0f, 112.0f), true);
+        ImGui::BeginChild("##tick_toolbar", ImVec2(0.0f, 118.0f), true);
 
         ImGui::SetNextItemWidth(118.0f);
         ImGui::InputText("일자", g_state.tradingDate, sizeof(g_state.tradingDate));
@@ -208,14 +209,20 @@ namespace
         ImGui::InputText("조건식", g_state.condition, sizeof(g_state.condition));
 
         static const int tickSizes[] = {60, 120, 180, 360, 720};
-        static const char* tickLabels[] = {"60틱", "120틱", "180틱", "360틱", "720틱"};
+        static const char* tickLabels[] = {
+            "60틱", "120틱", "180틱", "360틱", "720틱"};
         int tickIndex = 3;
         for (int index = 0; index < IM_ARRAYSIZE(tickSizes); ++index) {
             if (g_tick.tickSize == tickSizes[index]) tickIndex = index;
         }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(76.0f);
-        if (ImGui::Combo("틱캔들", &tickIndex, tickLabels, IM_ARRAYSIZE(tickLabels))) {
+        if (ImGui::Combo(
+                "틱캔들",
+                &tickIndex,
+                tickLabels,
+                IM_ARRAYSIZE(tickLabels)))
+        {
             g_tick.tickSize = tickSizes[tickIndex];
             g_tick.calculated = false;
         }
@@ -223,7 +230,8 @@ namespace
         ImGui::SameLine();
         ImGui::SetNextItemWidth(64.0f);
         if (ImGui::InputInt("전일 warm-up봉", &g_tick.warmupBars, 0, 0)) {
-            g_tick.warmupBars = (std::max)(40, (std::min)(600, g_tick.warmupBars));
+            g_tick.warmupBars =
+                (std::max)(40, (std::min)(600, g_tick.warmupBars));
             g_tick.calculated = false;
         }
 
@@ -233,7 +241,9 @@ namespace
             g_tick.config.maxFreshBars =
                 (std::max)(0, (std::min)(30, g_tick.config.maxFreshBars));
             if (g_tick.calculated) {
-                g_tick.series = CalculateStrengthSeries(g_tick.members, g_tick.config);
+                g_tick.series = CalculateStrengthSeries(
+                    g_tick.members,
+                    g_tick.config);
                 RebuildSnapshot();
             }
         }
@@ -249,26 +259,26 @@ namespace
         ImGui::Checkbox("Legacy", &g_tick.showLegacy);
 
         if (g_tick.calculated) {
-            int second = g_tick.asOfSecond;
+            int minute = g_tick.asOfMinute;
             ImGui::SetNextItemWidth(620.0f);
             if (ImGui::SliderInt(
-                    "인과 시각",
-                    &second,
-                    9 * 3600 + 3 * 60,
-                    10 * 3600,
+                    "인과 분마감",
+                    &minute,
+                    9 * 60 + 3,
+                    10 * 60,
                     ""))
             {
-                g_tick.asOfSecond = second;
+                g_tick.asOfMinute = minute;
                 RebuildSnapshot();
             }
             ImGui::SameLine();
-            char clock[16]{};
-            FormatClock(g_tick.asOfSecond, clock, sizeof(clock));
+            char clock[20]{};
+            FormatMinute(g_tick.asOfMinute, clock, sizeof(clock));
             ImGui::Text("%s", clock);
         }
 
         ImGui::TextDisabled(
-            "상태: %s | 전일봉은 지표 warm-up 전용 | 파동상태는 당일 09:00 reset | 우선순위 발행 09:03~10:00",
+            "상태: %s | 전일봉=지표 warm-up 전용 | 순위=분 마감 기준 | Tn 봉 순서는 보존",
             g_state.status.c_str());
         ImGui::EndChild();
     }
@@ -277,7 +287,7 @@ namespace
     {
         if (!g_tick.calculated || g_tick.snapshot.rows.empty()) {
             ImGui::TextWrapped(
-                "1516 종목 확정 후 실제 틱강도 분석을 실행하십시오. 당일봉만으로 JMA/MACD/OBV를 초기화하지 않습니다.");
+                "1516 종목 확정 후 실제 틱강도 분석을 실행하십시오. 당일 09:00부터 지표를 새로 초기화하지 않습니다.");
             return;
         }
 
@@ -286,7 +296,7 @@ namespace
             g_tick.snapshot.rows.end(),
             [](const StrengthRow& row) { return row.buyEligible; }));
         ImGui::Text(
-            "현재 매수유효 %d / %zu | T%d | 전일 %s warm-up | 평가 09:03~10:00",
+            "매수유효 %d / %zu | T%d | 전일 %s warm-up | 09:03~10:00",
             eligible,
             g_tick.snapshot.rows.size(),
             g_tick.tickSize,
@@ -330,17 +340,25 @@ namespace
             ImGui::TableSetColumnIndex(3);
             ImGui::Text("%+.1f", row.point.fastJmaSlopePercent);
             ImGui::TableSetColumnIndex(4);
-            if (row.point.barsSinceCross >= 0) ImGui::Text("%+.1f", row.point.crossJmaSlopePercent);
-            else ImGui::TextDisabled("-");
+            if (row.point.barsSinceCross >= 0)
+                ImGui::Text("%+.1f", row.point.crossJmaSlopePercent);
+            else
+                ImGui::TextDisabled("-");
             ImGui::TableSetColumnIndex(5);
-            if (row.point.barsSinceCross >= 0) ImGui::Text("%d", row.point.barsSinceCross);
-            else ImGui::TextDisabled("-");
+            if (row.point.barsSinceCross >= 0)
+                ImGui::Text("%d", row.point.barsSinceCross);
+            else
+                ImGui::TextDisabled("-");
             ImGui::TableSetColumnIndex(6);
-            if (row.point.tickAvailable) ImGui::Text("%.0f", row.point.tickRatePerMinute);
-            else ImGui::TextDisabled("-");
+            if (row.point.tickAvailable)
+                ImGui::Text("%.0f", row.point.tickRatePerMinute);
+            else
+                ImGui::TextDisabled("-");
             ImGui::TableSetColumnIndex(7);
-            if (row.point.tickAvailable) ImGui::Text("%.2fx", row.point.tickAcceleration);
-            else ImGui::TextDisabled("-");
+            if (row.point.tickAvailable)
+                ImGui::Text("%.2fx", row.point.tickAcceleration);
+            else
+                ImGui::TextDisabled("-");
             ImGui::TableSetColumnIndex(8);
             ImGui::Text("%+.2f", row.point.waveJmaGainPercent);
             ImGui::TableSetColumnIndex(9);
@@ -397,41 +415,44 @@ namespace
         const std::string date = DigitsOnly(g_state.tradingDate);
         const int startSecond = 9 * 3600;
         const int endSecond = 10 * 3600;
-        const int currentSecond = g_tick.asOfSecond;
+        const int currentSecond = g_tick.asOfMinute * 60 + 59;
 
         ImGui::InvisibleButton(
             ("##tick_strip_" + row.code).c_str(),
-            ImVec2((std::max)(620.0f, ImGui::GetContentRegionAvail().x), 156.0f));
+            ImVec2((std::max)(620.0f, ImGui::GetContentRegionAvail().x), 160.0f));
         const ImVec2 minimum = ImGui::GetItemRectMin();
         const ImVec2 maximum = ImGui::GetItemRectMax();
         ImDrawList* draw = ImGui::GetWindowDrawList();
         draw->AddRectFilled(minimum, maximum, IM_COL32(12, 14, 18, 255));
         draw->AddRect(minimum, maximum, IM_COL32(60, 66, 78, 220));
 
-        const float labelWidth = 205.0f;
+        const float labelWidth = 210.0f;
         const float left = minimum.x + labelWidth;
         const float right = maximum.x - 8.0f;
         const float priceTop = minimum.y + 22.0f;
-        const float priceBottom = minimum.y + 98.0f;
+        const float priceBottom = minimum.y + 99.0f;
         const float strengthTop = priceBottom + 3.0f;
         const float strengthBottom = maximum.y - 6.0f;
         const float strengthZero = strengthTop +
-            (strengthBottom - strengthTop) * 0.47f;
+            (strengthBottom - strengthTop) * 0.50f;
         const float width = (std::max)(1.0f, right - left);
 
-        const auto xTime = [&](int second) {
-            const double unit = static_cast<double>(second - startSecond) /
+        const auto xTime = [&](double second) {
+            const double unit = (second - static_cast<double>(startSecond)) /
                 static_cast<double>(endSecond - startSecond);
-            return left + static_cast<float>((std::max)(0.0, (std::min)(1.0, unit))) * width;
+            return left + static_cast<float>(
+                (std::max)(0.0, (std::min)(1.0, unit))) * width;
         };
 
         std::vector<std::size_t> visible;
+        std::map<int, int> barsPerMinute;
         for (std::size_t index = 0U; index < member.bars.size(); ++index) {
             const Bar& bar = member.bars[index];
             if (PackedDate(bar.closeTimestampMs) != date) continue;
             const int second = PackedTimeSeconds(bar.closeTimestampMs);
             if (second < startSecond || second > currentSecond) continue;
             visible.push_back(index);
+            ++barsPerMinute[second / 60];
         }
         if (visible.empty()) return;
 
@@ -454,47 +475,64 @@ namespace
         draw->AddLine(
             ImVec2(xTime(9 * 3600 + 3 * 60), priceTop),
             ImVec2(xTime(9 * 3600 + 3 * 60), strengthBottom),
-            IM_COL32(255, 205, 90, 150));
+            IM_COL32(255, 205, 90, 160),
+            1.2f);
 
+        std::map<int, int> ordinalInMinute;
         std::vector<ImVec2> fast;
         std::vector<ImVec2> slow;
         std::vector<ImVec2> tickLine;
         for (std::size_t index : visible) {
             const Bar& bar = member.bars[index];
             const StrengthPoint& point = strength.points[index];
-            const int second = PackedTimeSeconds(bar.closeTimestampMs);
-            const float x = xTime(second);
-            const float candleHalf = 1.5f;
+            const int rawSecond = PackedTimeSeconds(bar.closeTimestampMs);
+            const int minuteKey = rawSecond / 60;
+            const int count = (std::max)(1, barsPerMinute[minuteKey]);
+            const int ordinal = ordinalInMinute[minuteKey]++;
+            const double displaySecond =
+                static_cast<double>(minuteKey * 60) +
+                (static_cast<double>(ordinal + 1) /
+                 static_cast<double>(count + 1)) * 60.0;
+            const float x = xTime(displaySecond);
+            const float candleHalf = (std::max)(0.8f, (std::min)(2.4f, width / 900.0f));
             const ImU32 color = CandleColor(bar);
-            draw->AddLine(ImVec2(x, yPrice(bar.high)), ImVec2(x, yPrice(bar.low)), color);
+
+            draw->AddLine(
+                ImVec2(x, yPrice(bar.high)),
+                ImVec2(x, yPrice(bar.low)),
+                color,
+                1.0f);
             draw->AddRectFilled(
                 ImVec2(x - candleHalf, yPrice((std::max)(bar.open, bar.close))),
                 ImVec2(x + candleHalf, yPrice((std::min)(bar.open, bar.close))),
                 color);
+
             fast.emplace_back(x, yPrice(point.fastJma));
             slow.emplace_back(x, yPrice(point.slowJma));
 
             const double normalizedSlope = (std::max)(
                 -1.0,
                 (std::min)(1.0, point.fastJmaSlopePercent / slopeScale));
-            const float slopeY = strengthZero - static_cast<float>(normalizedSlope) *
-                (strengthBottom - strengthTop) * 0.42f;
+            const float slopeY = strengthZero -
+                static_cast<float>(normalizedSlope) *
+                (strengthBottom - strengthTop) * 0.43f;
             draw->AddRectFilled(
-                ImVec2(x - 1.2f, (std::min)(slopeY, strengthZero)),
-                ImVec2(x + 1.2f, (std::max)(slopeY, strengthZero)),
+                ImVec2(x - 1.0f, (std::min)(slopeY, strengthZero)),
+                ImVec2(x + 1.0f, (std::max)(slopeY, strengthZero)),
                 normalizedSlope >= 0.0
                     ? IM_COL32(45, 205, 120, 190)
                     : IM_COL32(220, 75, 85, 190));
 
             if (point.tickAvailable) {
-                const double tickUnit = (std::max)(0.0, (std::min)(
-                    1.0,
-                    point.tickRatePerMinute / tickScale));
+                const double tickUnit = (std::max)(
+                    0.0,
+                    (std::min)(1.0, point.tickRatePerMinute / tickScale));
                 const float tickY = strengthBottom -
                     static_cast<float>(tickUnit) *
                     (strengthBottom - strengthTop) * 0.92f;
                 tickLine.emplace_back(x, tickY);
             }
+
             if (point.crossUp) {
                 draw->AddLine(
                     ImVec2(x, priceTop),
@@ -502,7 +540,7 @@ namespace
                     IM_COL32(70, 235, 135, 190),
                     1.3f);
             }
-            if (point.crossDown) {
+            else if (point.crossDown) {
                 draw->AddLine(
                     ImVec2(x, priceTop),
                     ImVec2(x, strengthBottom),
@@ -512,8 +550,18 @@ namespace
         }
 
         if (fast.size() > 1U) {
-            draw->AddPolyline(fast.data(), static_cast<int>(fast.size()), IM_COL32(225, 70, 205, 235), 0, 1.5f);
-            draw->AddPolyline(slow.data(), static_cast<int>(slow.size()), IM_COL32(180, 185, 195, 220), 0, 1.4f);
+            draw->AddPolyline(
+                fast.data(),
+                static_cast<int>(fast.size()),
+                IM_COL32(225, 70, 205, 235),
+                0,
+                1.5f);
+            draw->AddPolyline(
+                slow.data(),
+                static_cast<int>(slow.size()),
+                IM_COL32(180, 185, 195, 220),
+                0,
+                1.4f);
         }
         if (tickLine.size() > 1U) {
             draw->AddPolyline(
@@ -521,9 +569,12 @@ namespace
                 static_cast<int>(tickLine.size()),
                 IM_COL32(65, 205, 235, 235),
                 0,
-                1.4f);
+                1.5f);
         }
-        draw->AddLine(ImVec2(left, strengthZero), ImVec2(right, strengthZero), IM_COL32(110, 115, 125, 90));
+        draw->AddLine(
+            ImVec2(left, strengthZero),
+            ImVec2(right, strengthZero),
+            IM_COL32(110, 115, 125, 90));
 
         char line1[256]{};
         std::snprintf(
@@ -536,7 +587,9 @@ namespace
             row.buyPriority);
         draw->AddText(
             ImVec2(minimum.x + 6.0f, minimum.y + 7.0f),
-            row.buyEligible ? IM_COL32(75, 235, 145, 255) : IM_COL32(205, 205, 215, 240),
+            row.buyEligible
+                ? IM_COL32(75, 235, 145, 255)
+                : IM_COL32(205, 205, 215, 240),
             line1);
 
         char line2[256]{};
@@ -548,7 +601,10 @@ namespace
             row.point.crossJmaSlopePercent,
             row.point.barsSinceCross,
             row.point.sessionReturnPercent);
-        draw->AddText(ImVec2(minimum.x + 6.0f, minimum.y + 29.0f), IM_COL32(190, 195, 205, 230), line2);
+        draw->AddText(
+            ImVec2(minimum.x + 6.0f, minimum.y + 29.0f),
+            IM_COL32(190, 195, 205, 230),
+            line2);
 
         char line3[256]{};
         if (row.point.tickAvailable) {
@@ -562,10 +618,21 @@ namespace
                 row.point.obvImpulse);
         }
         else {
-            std::snprintf(line3, sizeof(line3), "Tick 첫봉/간격없음 | MACD/ATR %+0.3f | OBV %+0.3f", row.point.macdHistogramAtr, row.point.obvImpulse);
+            std::snprintf(
+                line3,
+                sizeof(line3),
+                "Tick - | MACD/ATR %+0.3f | OBV %+0.3f",
+                row.point.macdHistogramAtr,
+                row.point.obvImpulse);
         }
-        draw->AddText(ImVec2(minimum.x + 6.0f, minimum.y + 50.0f), IM_COL32(150, 165, 180, 230), line3);
-        draw->AddText(ImVec2(left + 4.0f, strengthTop), IM_COL32(120, 145, 165, 210), "JMA slope histogram + raw Tick/min line (same scales across stocks)");
+        draw->AddText(
+            ImVec2(minimum.x + 6.0f, minimum.y + 50.0f),
+            IM_COL32(150, 165, 180, 230),
+            line3);
+        draw->AddText(
+            ImVec2(left + 4.0f, strengthTop),
+            IM_COL32(120, 145, 165, 210),
+            "JMA slope histogram + raw Tick/min (공통 scale)");
     }
 
     void DrawCharts()
@@ -577,7 +644,7 @@ namespace
         const double slopeScale = GlobalSlopeScale();
         const double tickScale = GlobalTickRateScale();
         ImGui::TextWrapped(
-            "X축=실제 시각. 틱봉이 촘촘하면 실제 참여가 활발한 것입니다. 전일봉은 화면에 숨기되 JMA/MACD/OBV 계산에는 사용합니다. 노란선=09:03 평가 시작, 청록선=실제 Tick/min.");
+            "X축=09:00~10:00 실제 분 단위. 같은 분의 여러 Tn봉은 CYBOS 반환순서를 보존해 분 내부에 균등 배치합니다. 밀도와 순서는 실제지만 분내 초 위치는 시각화용입니다. 노란선=09:03 평가 시작, 청록선=실제 분당 틱수.");
         ImGui::TextDisabled(
             "모든 종목 공통 scale: JMA slope +/- %.1f%%/bar | Tick %.0f/min",
             slopeScale,
@@ -601,11 +668,17 @@ namespace
             return;
         }
         const float width = ImGui::GetContentRegionAvail().x;
-        ImGui::BeginChild("틱강도 우선순위", ImVec2(width * 0.38f, 0.0f), true);
+        ImGui::BeginChild(
+            "틱강도 우선순위",
+            ImVec2(width * 0.38f, 0.0f),
+            true);
         DrawGrid();
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::BeginChild("실제시간 멀티 틱차트", ImVec2(0.0f, 0.0f), true);
+        ImGui::BeginChild(
+            "실제밀도 멀티 틱차트",
+            ImVec2(0.0f, 0.0f),
+            true);
         DrawCharts();
         ImGui::EndChild();
     }

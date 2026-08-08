@@ -26,6 +26,8 @@ namespace trading::stock_pool::intuitive
         EpochMillis evaluationStart = 0;
         EpochMillis evaluationEnd = 0;
         int tickRateBaselineBars = 20;
+        int turnoverBaselineBars = 20;
+        int adBreakoutLookback = 20;
     };
 
     struct StrengthPoint final
@@ -55,6 +57,20 @@ namespace trading::stock_pool::intuitive
         double tickRatePerMinute = std::numeric_limits<double>::quiet_NaN();
         double tickAcceleration = std::numeric_limits<double>::quiet_NaN();
         double tickContinuity = std::numeric_limits<double>::quiet_NaN();
+
+        // Live-evidence layer. These fields are descriptive evidence and are
+        // intentionally not hard-coded into buy eligibility yet. They are
+        // captured causally at each completed bar so winner/loser Gate events
+        // can later establish whether a threshold is actually useful.
+        bool volumeAvailable = false;
+        double volume = 0.0;
+        bool turnoverAvailable = false;
+        double turnover = 0.0;
+        double cumulativeTurnover = 0.0;
+        double turnoverAcceleration = std::numeric_limits<double>::quiet_NaN();
+        double adLine = 0.0;
+        double adImpulse = 0.0;
+        bool adPriorHighBreakout = false;
     };
 
     struct MemberStrengthSeries final

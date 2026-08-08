@@ -1,0 +1,121 @@
+#pragma once
+
+#include <cstddef>
+#include <limits>
+#include <string>
+#include <vector>
+
+#include "stock_pool_engine.h"
+
+namespace trading::stock_pool::intuitive
+{
+    struct StrengthConfig final
+    {
+        int fastJmaPeriod = 7;
+        int slowJmaPeriod = 20;
+        int jmaPhase = 50;
+        int jmaPower = 2;
+        int macdFastPeriod = 12;
+        int macdSlowPeriod = 26;
+        int macdSignalPeriod = 9;
+        int atrPeriod = 14;
+        int obvSignalPeriod = 9;
+        int obvNormalizationBars = 20;
+        int maxFreshBars = 3;
+        EpochMillis sessionStart = 0;
+        EpochMillis evaluationStart = 0;
+        EpochMillis evaluationEnd = 0;
+        int tickRateBaselineBars = 20;
+        int turnoverBaselineBars = 20;
+        int adBreakoutLookback = 20;
+    };
+
+    struct StrengthPoint final
+    {
+        EpochMillis asOf = 0;
+        double close = 0.0;
+        double sessionReturnPercent = 0.0;
+        double fastJma = 0.0;
+        double slowJma = 0.0;
+        double fastJmaSlopePercent = 0.0;
+        double slowJmaSlopePercent = 0.0;
+        double macdHistogramAtr = 0.0;
+        double obvImpulse = 0.0;
+        bool warmupOnly = false;
+        bool inSession = false;
+        bool inEvaluationWindow = false;
+        bool bullishRegime = false;
+        bool crossUp = false;
+        bool crossDown = false;
+        int barsSinceCross = -1;
+        double crossJmaSlopePercent = 0.0;
+        double waveJmaGainPercent = 0.0;
+        double priceExtensionPercent = 0.0;
+        bool fresh = false;
+        bool tickAvailable = false;
+        double tickRatePerSecond = std::numeric_limits<double>::quiet_NaN();
+        double tickRatePerMinute = std::numeric_limits<double>::quiet_NaN();
+        double tickAcceleration = std::numeric_limits<double>::quiet_NaN();
+        double tickContinuity = std::numeric_limits<double>::quiet_NaN();
+
+        // Live-evidence layer. These fields are descriptive evidence and are
+        // intentionally not hard-coded into buy eligibility yet. They are
+        // captured causally at each completed bar so winner/loser Gate events
+        // can later establish whether a threshold is actually useful.
+        bool volumeAvailable = false;
+        double volume = 0.0;
+        bool turnoverAvailable = false;
+        double turnover = 0.0;
+        double cumulativeTurnover = 0.0;
+        double turnoverAcceleration = std::numeric_limits<double>::quiet_NaN();
+        double adLine = 0.0;
+        double adImpulse = 0.0;
+        bool adPriorHighBreakout = false;
+    };
+
+    struct MemberStrengthSeries final
+    {
+        std::size_t memberIndex = 0U;
+        std::string code;
+        std::string name;
+        std::string market;
+        std::vector<StrengthPoint> points;
+    };
+
+    struct StrengthRow final
+    {
+        std::size_t memberIndex = 0U;
+        std::string code;
+        std::string name;
+        std::string market;
+        int buyPriority = 0;
+        bool buyEligible = false;
+        StrengthPoint point;
+    };
+
+    struct StrengthSnapshot final
+    {
+        std::size_t asOfIndex = 0U;
+        EpochMillis asOf = 0;
+        std::vector<StrengthRow> rows;
+    };
+
+    std::vector<MemberStrengthSeries> CalculateStrengthSeries(
+        const std::vector<MemberSeries>& members,
+        const StrengthConfig& config);
+
+    // Retained for fixtures and legacy index-aligned tests.
+    StrengthSnapshot BuildStrengthSnapshot(
+        const std::vector<MemberStrengthSeries>& series,
+        std::size_t asOfIndex,
+        const StrengthConfig& config);
+
+    // Tick candles are asynchronous across symbols. At a clock time, each
+    // symbol contributes its latest completed candle at or before asOfTime.
+    StrengthSnapshot BuildStrengthSnapshotAtTime(
+        const std::vector<MemberStrengthSeries>& series,
+        EpochMillis asOfTime,
+        const StrengthConfig& config);
+
+    const char* BuyStateName(const StrengthRow& row) noexcept;
+}

@@ -50,7 +50,19 @@ FaultPolicy::FaultPolicy(
     LogCallback logger,
     int wakeValue)
     : observeMode_(observeMode),
-      wakeFrames_(wakeFrames),
+      legacyWakeFrames_(wakeFrames),
+      logger_(std::move(logger)),
+      wakeValue_(wakeValue)
+{
+}
+
+FaultPolicy::FaultPolicy(
+    std::atomic<bool>* observeMode,
+    std::atomic<int>* wakeFrames,
+    LogCallback logger,
+    int wakeValue)
+    : observeMode_(observeMode),
+      atomicWakeFrames_(wakeFrames),
       logger_(std::move(logger)),
       wakeValue_(wakeValue)
 {
@@ -64,31 +76,35 @@ void FaultPolicy::Raise(
         static_cast<std::size_t>(fault);
 
     const FaultRule& rule = kRules[index];
-    FaultStat& stat = stats_[index];
+    FaultStat snapshot;
 
-    const double now = NowSeconds();
-
-    if (
-        rule.windowSeconds > 0 &&
-        now - stat.windowStart > rule.windowSeconds)
     {
-        stat.windowStart = now;
-        stat.recent = 0;
+        std::lock_guard<std::mutex> lock(statsMutex_);
+        FaultStat& stat = stats_[index];
+        const double now = NowSeconds();
+
+        if (
+            rule.windowSeconds > 0 &&
+            now - stat.windowStart > rule.windowSeconds)
+        {
+            stat.windowStart = now;
+            stat.recent = 0;
+        }
+
+        ++stat.total;
+        ++stat.recent;
+
+        stat.last =
+            rule.threshold > 0 &&
+            stat.recent >= rule.threshold
+                ? rule.escalated
+                : rule.first;
+
+        snapshot = stat;
     }
 
-    ++stat.total;
-    ++stat.recent;
-
-    const Action action =
-        rule.threshold > 0 &&
-        stat.recent >= rule.threshold
-            ? rule.escalated
-            : rule.first;
-
-    stat.last = action;
-
     if (
-        action == Action::Observe &&
+        snapshot.last == Action::Observe &&
         observeMode_ != nullptr)
     {
         observeMode_->store(true);
@@ -103,15 +119,13 @@ void FaultPolicy::Raise(
             "%s (%s) x%d -> %s",
             FaultName(fault),
             context != nullptr ? context : "",
-            stat.recent,
-            ActionName(action));
+            snapshot.recent,
+            ActionName(snapshot.last));
 
         logger_("FAULT", message);
     }
 
-    if (wakeFrames_ != nullptr) {
-        *wakeFrames_ = wakeValue_;
-    }
+    Wake();
 }
 
 const FaultRule& FaultPolicy::GetRule(
@@ -121,11 +135,11 @@ const FaultRule& FaultPolicy::GetRule(
         static_cast<std::size_t>(fault)];
 }
 
-const FaultStat& FaultPolicy::GetStat(
+FaultStat FaultPolicy::GetStat(
     Fault fault) const noexcept
 {
-    return stats_[
-        static_cast<std::size_t>(fault)];
+    std::lock_guard<std::mutex> lock(statsMutex_);
+    return stats_[static_cast<std::size_t>(fault)];
 }
 
 const char* FaultPolicy::FaultName(
@@ -151,4 +165,26 @@ double FaultPolicy::NowSeconds() noexcept
 
     return std::chrono::duration<double>(
         Clock::now() - start).count();
+}
+
+void FaultPolicy::Wake() noexcept
+{
+    if (atomicWakeFrames_ != nullptr) {
+        int current = atomicWakeFrames_->load(std::memory_order_relaxed);
+
+        while (
+            current < wakeValue_ &&
+            !atomicWakeFrames_->compare_exchange_weak(
+                current,
+                wakeValue_,
+                std::memory_order_relaxed,
+                std::memory_order_relaxed))
+        {
+        }
+        return;
+    }
+
+    if (legacyWakeFrames_ != nullptr) {
+        *legacyWakeFrames_ = wakeValue_;
+    }
 }

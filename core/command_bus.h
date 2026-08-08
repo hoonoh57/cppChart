@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <deque>
 #include <mutex>
 #include <string>
@@ -36,6 +37,10 @@ public:
         int* wakeFrames = nullptr,
         int wakeValue = 60) noexcept;
 
+    explicit CommandBus(
+        std::atomic<int>* wakeFrames,
+        int wakeValue = 60) noexcept;
+
     CommandBus(const CommandBus&) = delete;
     CommandBus& operator=(const CommandBus&) = delete;
 
@@ -47,9 +52,12 @@ public:
     bool Pop(Command& out);
 
 private:
+    void Wake() noexcept;
+
     std::mutex mutex_;
     std::deque<Command> queue_;
 
-    int* wakeFrames_ = nullptr;
+    int* legacyWakeFrames_ = nullptr;
+    std::atomic<int>* atomicWakeFrames_ = nullptr;
     int wakeValue_ = 60;
 };

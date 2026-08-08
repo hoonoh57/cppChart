@@ -178,6 +178,18 @@ namespace trading::stock_pool::intuitive
             return typical > kEpsilon ? turnover / typical : 0.0;
         }
 
+        double BarTurnover(
+            const Bar& bar,
+            double previousCumulativeTurnover)
+        {
+            if (std::isfinite(bar.turnover) && bar.turnover > 0.0) {
+                return bar.turnover;
+            }
+            return (std::max)(
+                0.0,
+                bar.cumulativeTurnover - previousCumulativeTurnover);
+        }
+
         bool InRange(
             EpochMillis value,
             EpochMillis start,
@@ -221,8 +233,12 @@ namespace trading::stock_pool::intuitive
             double atrSum = 0.0;
             std::deque<double> volumeWindow;
             double rollingVolume = 0.0;
+            std::deque<double> turnoverWindow;
+            std::deque<double> adWindow;
             std::deque<double> tickRateWindow;
             double obv = 0.0;
+            double adLine = 0.0;
+            double previousAdLine = 0.0;
             double previousClose = 0.0;
             double previousTurnover = 0.0;
             double previousFast = 0.0;
@@ -286,14 +302,43 @@ namespace trading::stock_pool::intuitive
                     ? histogram / atr
                     : 0.0;
 
-                const double volume = VolumeProxy(bar, previousTurnover);
+                const double analysisVolume =
+                    std::isfinite(bar.volume) && bar.volume > 0.0
+                        ? bar.volume
+                        : VolumeProxy(bar, previousTurnover);
+                point.volumeAvailable =
+                    std::isfinite(bar.volume) && bar.volume > 0.0;
+                point.volume = point.volumeAvailable ? bar.volume : 0.0;
+
+                const double turnover = BarTurnover(bar, previousTurnover);
+                point.turnoverAvailable = turnover > 0.0;
+                point.turnover = turnover;
+                point.cumulativeTurnover =
+                    std::isfinite(bar.cumulativeTurnover)
+                        ? (std::max)(0.0, bar.cumulativeTurnover)
+                        : 0.0;
+                if (turnover > 0.0) {
+                    std::vector<double> baseline(
+                        turnoverWindow.begin(), turnoverWindow.end());
+                    const double median = Median(std::move(baseline));
+                    point.turnoverAcceleration = median > kEpsilon
+                        ? turnover / median
+                        : 1.0;
+                    turnoverWindow.push_back(turnover);
+                    while (turnoverWindow.size() > static_cast<std::size_t>(
+                               (std::max)(1, config.turnoverBaselineBars)))
+                    {
+                        turnoverWindow.pop_front();
+                    }
+                }
+
                 if (index > 0U) {
-                    if (bar.close > previousClose) obv += volume;
-                    else if (bar.close < previousClose) obv -= volume;
+                    if (bar.close > previousClose) obv += analysisVolume;
+                    else if (bar.close < previousClose) obv -= analysisVolume;
                 }
                 const double obvSignalValue = obvSignal.Step(obv);
-                volumeWindow.push_back(volume);
-                rollingVolume += volume;
+                volumeWindow.push_back(analysisVolume);
+                rollingVolume += analysisVolume;
                 while (volumeWindow.size() > static_cast<std::size_t>(
                            (std::max)(1, config.obvNormalizationBars)))
                 {
@@ -303,6 +348,34 @@ namespace trading::stock_pool::intuitive
                 point.obvImpulse = rollingVolume > kEpsilon
                     ? (obv - obvSignalValue) / rollingVolume
                     : 0.0;
+
+                const double highLowRange = bar.high - bar.low;
+                const double moneyFlowMultiplier = highLowRange > kEpsilon
+                    ? ((bar.close - bar.low) - (bar.high - bar.close)) /
+                        highLowRange
+                    : 0.0;
+                adLine += moneyFlowMultiplier * analysisVolume;
+                point.adLine = adLine;
+                point.adImpulse = rollingVolume > kEpsilon
+                    ? (adLine - previousAdLine) / rollingVolume
+                    : 0.0;
+                if (!adWindow.empty()) {
+                    const double priorHigh = *std::max_element(
+                        adWindow.begin(), adWindow.end());
+                    const std::size_t minimumHistory = static_cast<std::size_t>(
+                        (std::min)(5, (std::max)(1, config.adBreakoutLookback)));
+                    point.adPriorHighBreakout =
+                        adWindow.size() >= minimumHistory &&
+                        adLine > priorHigh &&
+                        previousAdLine <= priorHigh;
+                }
+                adWindow.push_back(adLine);
+                while (adWindow.size() > static_cast<std::size_t>(
+                           (std::max)(1, config.adBreakoutLookback)))
+                {
+                    adWindow.pop_front();
+                }
+                previousAdLine = adLine;
 
                 if (bar.tickCount > 0) {
                     const EpochMillis key = MinuteKey(bar.closeTimestampMs);

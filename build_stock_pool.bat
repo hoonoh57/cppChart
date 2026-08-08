@@ -18,6 +18,7 @@ if exist stock_pool_strength_cross_tests.exe del /F /Q stock_pool_strength_cross
 if exist intuitive_strength_engine_tests.exe del /F /Q intuitive_strength_engine_tests.exe
 if exist intuitive_strength_warmup_tests.exe del /F /Q intuitive_strength_warmup_tests.exe
 if exist intuitive_strength_trade_evaluator_tests.exe del /F /Q intuitive_strength_trade_evaluator_tests.exe
+if exist preopen_entry_model_tests.exe del /F /Q preopen_entry_model_tests.exe
 if exist stock_pool_workbench.build.txt del /F /Q stock_pool_workbench.build.txt
 if exist obj_stock_pool rmdir /S /Q obj_stock_pool
 mkdir obj_stock_pool
@@ -62,7 +63,7 @@ if errorlevel 1 (
 )
 del /F /Q stock_pool_strength_cross_tests.exe 2>NUL
 
-echo *** VERIFYING WARM-START WYSIWYG JMA STRENGTH ENGINE ***
+echo *** VERIFYING WARM-START WYSIWYG JMA STRENGTH ENGINE / MARKET EVIDENCE ***
 cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc /MD ^
    /I"." ^
    tests\intuitive_strength_engine_tests.cpp ^
@@ -81,7 +82,7 @@ if errorlevel 1 (
 )
 del /F /Q intuitive_strength_engine_tests.exe 2>NUL
 
-echo *** VERIFYING PRIOR-SESSION INDICATOR WARM-UP AND 09:03 GATE ***
+echo *** VERIFYING PRIOR-SESSION INDICATOR WARM-UP AND 09:03 BASELINE GATE ***
 cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc /MD ^
    /I"." ^
    tests\intuitive_strength_warmup_tests.cpp ^
@@ -117,6 +118,24 @@ if errorlevel 1 (
     exit /b 1
 )
 del /F /Q intuitive_strength_trade_evaluator_tests.exe 2>NUL
+
+echo *** VERIFYING PRE-OPEN STRUCTURE FILTER AND GAP JMA RE-ARM MODEL ***
+cl /nologo /std:c++17 /utf-8 /O2 /W4 /EHsc /MD ^
+   /I"." ^
+   tests\preopen_entry_model_tests.cpp ^
+   core\preopen_entry_model.cpp ^
+   /Foobj_stock_pool\ /Fe:preopen_entry_model_tests.exe
+if errorlevel 1 (
+    echo *** BUILD FAILED: pre-open entry model tests did not compile ***
+    exit /b 1
+)
+preopen_entry_model_tests.exe
+if errorlevel 1 (
+    del /F /Q preopen_entry_model_tests.exe 2>NUL
+    echo *** BUILD FAILED: pre-open structure / gap re-arm regression ***
+    exit /b 1
+)
+del /F /Q preopen_entry_model_tests.exe 2>NUL
 
 rem Large WinHTTP/JSON adapters are deliberately compiled without optimizer.
 rem This isolates the known MSVC C1001 class from calculation/rendering TUs.
@@ -159,6 +178,7 @@ cl /nologo /std:c++17 /utf-8 /O2 /W3 /EHsc /MD /DUNICODE /D_UNICODE /D_WIN32_WIN
    core\intuitive_strength_engine.cpp ^
    core\intuitive_strength_snapshot.cpp ^
    core\intuitive_strength_trade_evaluator.cpp ^
+   core\preopen_entry_model.cpp ^
    core\json_lite.cpp ^
    app\stock_pool_evaluator.cpp ^
    app\stock_pool_fixture.cpp ^
@@ -192,14 +212,19 @@ for /f "delims=" %%I in ('git rev-parse HEAD 2^>NUL') do set "BUILD_HEAD=%%I"
 >>stock_pool_workbench.build.txt echo tick_sizes=60,120,180,360,720
 >>stock_pool_workbench.build.txt echo historical_tick_timestamp=HHmm-minute-resolution
 >>stock_pool_workbench.build.txt echo within_minute_render=cybos-order-preserved-even-spacing
+>>stock_pool_workbench.build.txt echo bar_market_activity=exact-volume,per-bar-turnover,session-cumulative-turnover
 >>stock_pool_workbench.build.txt echo indicator_warmup=latest-prior-session-tail
 >>stock_pool_workbench.build.txt echo indicator_reset_at_0900=false
 >>stock_pool_workbench.build.txt echo wave_state_reset_at_0900=true
->>stock_pool_workbench.build.txt echo evaluation_window=09:03:00-10:00:00
+>>stock_pool_workbench.build.txt echo evaluation_window=09:03:00-10:00:00-baseline-retained
 >>stock_pool_workbench.build.txt echo snapshot_alignment=minute-close-latest-completed-Tn-candle
 >>stock_pool_workbench.build.txt echo chart_x_axis=real-minute-plus-order-preserving-within-minute-layout
 >>stock_pool_workbench.build.txt echo tick_participation=completed-Tn-bars-per-minute-times-n
 >>stock_pool_workbench.build.txt echo trend_strength=jma7-50-2_vs_jma20-50-2
+>>stock_pool_workbench.build.txt echo market_evidence=tick-rate,turnover-accel,real-volume-obv,macd-atr,ad-prior-high-breakout
+>>stock_pool_workbench.build.txt echo preopen_structure=medium-downtrend,structural-stop,overhead-resistance,reward-risk
+>>stock_pool_workbench.build.txt echo gap_entry=gap-lock,pullback-required,jma-recross-rearm
+>>stock_pool_workbench.build.txt echo preopen_integration=core-contract-ready-ui-data-loading-next
 >>stock_pool_workbench.build.txt echo detail_drilldown=double-click-time-axis-crosshair-jma-gate
 >>stock_pool_workbench.build.txt echo trade_evaluation=cross-wave-vs-next-Tn-open-causal-execution
 >>stock_pool_workbench.build.txt echo trade_metrics=session,cross-wave,gross,net,mfe,mae
@@ -213,8 +238,11 @@ echo *** BUILD OK -^> stock_pool_workbench.exe [warm-start opening tick WYSIWYG]
 echo Existing shell.exe was not modified.
 echo User-selected trading date is authoritative for target-session candles.
 echo Prior-session bars warm indicators but never create today's buy state.
-echo Buy priority is emitted only from 09:03 through 10:00.
+echo The 09:03 evaluation window remains a comparison baseline until pre-open data loading is connected.
 echo CYBOS native tick request never exceeds T120; larger sizes use completed real base candles.
+echo Real tick-bar volume is preserved separately from per-bar and session cumulative turnover.
+echo OBV now prefers exact volume; turnover acceleration and A/D prior-high evidence are captured but are not hard buy gates.
+echo Pre-open structure and gap JMA re-arm are pure core contracts ready for replay/backtest/live integration.
 echo Tick detail drill-down uses the same bars and intuitive-strength series as the overview.
 echo Trade evaluation separates session return, cross-wave capture, causal gross/net PnL, MFE and MAE.
 echo Causal BUY/SELL fills occur at the next completed Tn bar open after the confirmed signal; open positions are MTM only.

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <vector>
@@ -42,7 +43,9 @@ namespace
             bar.close = close;
             bar.high = (std::max)(previous, close) + 0.2;
             bar.low = (std::min)(previous, close) - 0.2;
-            cumulativeTurnover += close * 1000.0;
+            bar.volume = 1000.0 + static_cast<double>(index) * 25.0;
+            bar.turnover = close * bar.volume;
+            cumulativeTurnover += bar.turnover;
             bar.cumulativeTurnover = cumulativeTurnover;
             member.bars.push_back(bar);
             previous = close;
@@ -59,6 +62,8 @@ int main()
     config.jmaPhase = 50;
     config.jmaPower = 2;
     config.maxFreshBars = 2;
+    config.turnoverBaselineBars = 10;
+    config.adBreakoutLookback = 10;
 
     std::vector<MemberSeries> members{BuildSeries()};
     auto calculated = CalculateStrengthSeries(members, config);
@@ -68,13 +73,17 @@ int main()
 
     int crossIndex = -1;
     int downIndex = -1;
+    bool sawAdBreakout = false;
+    bool sawTurnoverAcceleration = false;
     for (std::size_t index = 0; index < calculated[0].points.size(); ++index) {
         const auto& point = calculated[0].points[index];
         if (crossIndex < 0 && point.crossUp) crossIndex = static_cast<int>(index);
-        if (crossIndex >= 0 && point.crossDown) {
+        if (crossIndex >= 0 && point.crossDown && downIndex < 0) {
             downIndex = static_cast<int>(index);
-            break;
         }
+        sawAdBreakout = sawAdBreakout || point.adPriorHighBreakout;
+        sawTurnoverAcceleration = sawTurnoverAcceleration ||
+            (point.turnoverAvailable && std::isfinite(point.turnoverAcceleration));
     }
 
     Require(crossIndex >= 0, "strict JMA7/JMA20 upward cross must occur");
@@ -99,6 +108,18 @@ int main()
     Require(down.barsSinceCross == -1,
             "downward cross must reset wave age");
     Require(!down.fresh, "downward cross must not remain fresh");
+
+    const auto& latest = calculated[0].points.back();
+    Require(latest.volumeAvailable,
+            "real per-bar volume must remain available to evidence calculations");
+    Require(latest.volume == members[0].bars.back().volume,
+            "strength point must preserve exact source volume");
+    Require(latest.turnoverAvailable && latest.turnover > 0.0,
+            "per-bar turnover must remain available");
+    Require(sawTurnoverAcceleration,
+            "turnover acceleration must be produced from prior completed bars");
+    Require(sawAdBreakout,
+            "A-D prior-high breakout evidence must be observable in rising flow");
 
     auto snapshot = BuildStrengthSnapshot(
         calculated,

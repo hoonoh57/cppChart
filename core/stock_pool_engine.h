@@ -42,6 +42,14 @@ namespace trading::stock_pool
         int tickCount = 0;
         double tickDurationSeconds = 0.0;
         double tickRatePerSecond = 0.0;
+
+        // Exact per-bar market activity when the source provides it. These are
+        // appended after the legacy fields so positional fixture initializers
+        // retain their historical meaning. `volume` is the source bar volume,
+        // `turnover` is this bar's traded value, and cumulativeTurnover remains
+        // the session-running traded value used by older ranking code.
+        double volume = 0.0;
+        double turnover = 0.0;
     };
 
     struct MemberSeries final

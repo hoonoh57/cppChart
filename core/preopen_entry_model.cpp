@@ -94,8 +94,12 @@ namespace trading::stock_pool::preopen
         StructureAssessment result;
         result.expectedEntryPrice = expectedEntryPrice;
 
-        const std::size_t trendLookback = (std::max)(2U, config.mediumTrendLookback);
-        const std::size_t stopLookback = (std::max)(2U, config.mediumStopLookback);
+        const std::size_t trendLookback = (std::max)(
+            static_cast<std::size_t>(2U),
+            config.mediumTrendLookback);
+        const std::size_t stopLookback = (std::max)(
+            static_cast<std::size_t>(2U),
+            config.mediumStopLookback);
         if (dailyBars.empty() || mediumBars.size() < trendLookback ||
             expectedEntryPrice <= 0.0)
         {
@@ -125,16 +129,14 @@ namespace trading::stock_pool::preopen
         }
 
         result.structuralRiskPercent =
-            SafePercent(expectedEntryPrice, result.structuralStopPrice);
-        // SafePercent(entry, stop) expresses how far entry is above stop.
-        // Convert it to stop distance relative to entry for position sizing.
-        result.structuralRiskPercent =
             (expectedEntryPrice - result.structuralStopPrice) /
             expectedEntryPrice * 100.0;
 
         result.nearestOverheadResistance = NearestResistanceAbove(
             dailyBars,
-            (std::max)(1U, config.dailyResistanceLookback),
+            (std::max)(
+                static_cast<std::size_t>(1U),
+                config.dailyResistanceLookback),
             expectedEntryPrice);
 
         if (result.nearestOverheadResistance <= 0.0) {

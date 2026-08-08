@@ -580,7 +580,11 @@ namespace trading::stock_pool::platform
             bar.high = (std::max)({high, open, close});
             bar.low = (std::min)({low, open, close});
             bar.close = close;
-            bar.cumulativeTurnover = volume;
+            bar.volume = volume;
+            const double typicalPrice =
+                (bar.open + bar.high + bar.low + bar.close) * 0.25;
+            bar.turnover = typicalPrice * bar.volume;
+            bar.cumulativeTurnover = 0.0;
             bar.tradeIntensity = 100.0;
             bar.tickCount = tickSize;
             parsedBars.push_back(ParsedBar{
@@ -641,12 +645,16 @@ namespace trading::stock_pool::platform
         }
 
         double cumulativeTurnover = 0.0;
+        long long cumulativeDate = -1LL;
         result.bars.reserve(selected.size());
         for (Bar bar : selected) {
-            const double volume = bar.cumulativeTurnover;
-            const double typicalPrice =
-                (bar.open + bar.high + bar.low + bar.close) * 0.25;
-            cumulativeTurnover += typicalPrice * volume;
+            const long long packed = bar.closeTimestampMs / 1000LL;
+            const long long barDate = packed / 1000000LL;
+            if (barDate != cumulativeDate) {
+                cumulativeDate = barDate;
+                cumulativeTurnover = 0.0;
+            }
+            cumulativeTurnover += (std::max)(0.0, bar.turnover);
             bar.cumulativeTurnover = cumulativeTurnover;
 
             // Exact seconds are not present in the historical StockChart T<n>

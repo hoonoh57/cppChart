@@ -69,6 +69,8 @@ namespace trading::stock_pool::platform
         {
             Bar result = source[begin];
             double intensityTotal = 0.0;
+            double volumeTotal = 0.0;
+            double turnoverTotal = 0.0;
             for (std::size_t index = begin; index < end; ++index) {
                 const Bar& input = source[index];
                 result.high = (std::max)(result.high, input.high);
@@ -77,12 +79,16 @@ namespace trading::stock_pool::platform
                 result.closeTimestampMs = input.closeTimestampMs;
                 result.cumulativeTurnover = input.cumulativeTurnover;
                 intensityTotal += input.tradeIntensity;
+                volumeTotal += (std::max)(0.0, input.volume);
+                turnoverTotal += (std::max)(0.0, input.turnover);
             }
             result.tradeIntensity = intensityTotal /
                 static_cast<double>(end - begin);
             result.tickCount = targetTickSize;
             result.tickDurationSeconds = 0.0;
             result.tickRatePerSecond = 0.0;
+            result.volume = volumeTotal;
+            result.turnover = turnoverTotal;
             return result;
         }
 
